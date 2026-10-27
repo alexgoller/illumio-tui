@@ -4496,7 +4496,7 @@ async fn gen_prints_rows_rules_and_the_preview_and_writes_nothing() {
     assert_eq!(d["preview"]["uncovered_by"]["unsupported_proto"], 1);
     assert_eq!(
         d["preview"]["uncovered_by"],
-        json!({"unchecked": 1, "folded_ips": 0, "unsupported_proto": 1,
+        json!({"unchecked": 1, "seen_before": 0, "folded_ips": 0, "unsupported_proto": 1,
             "broadcast_multicast": 0, "no_target": 0, "override_deny": 0}),
         "the reasons only"
     );

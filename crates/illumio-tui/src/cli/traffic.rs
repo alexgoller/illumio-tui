@@ -2092,6 +2092,37 @@ impl CompareRun {
     /// a warning (stderr and `meta.warnings`) for each truncated side; the
     /// exit code stays 0.
     fn fill(&self, meta: &mut Meta, recent: &Fetched, counts: CompareCounts) {
+        for (name, f) in [("recent", recent), ("baseline", &self.baseline)] {
+            if f.truncated {
+                warn(
+                    meta,
+                    format!(
+                        "{name} truncated, capped at {}: new/gone over-report; --backfill raises the cap",
+                        f.cap
+                    ),
+                );
+            }
+        }
+        self.fill_cost(meta, recent);
+        meta.compare = Some(self.compare_meta(recent, counts));
+    }
+
+    /// Both sides' Explorer queries: `meta.queries` and `meta.cost`.
+    pub(crate) fn fill_cost(&self, meta: &mut Meta, recent: &Fetched) {
+        let (r, b) = (side_queries(recent), side_queries(&self.baseline));
+        meta.queries = Some(r + b);
+        meta.cost = Some(
+            format!(
+                "{} Explorer queries: {r} for the recent window, {b} for the baseline (each 1 POST, status polls, 1 download)",
+                r + b
+            )
+            .into(),
+        );
+    }
+
+    /// Both exact windows, each side's truncation, `counts`: `meta.compare`
+    /// (`data.compare` of `gen`).
+    pub(crate) fn compare_meta(&self, recent: &Fetched, counts: CompareCounts) -> CompareMeta {
         let side = |f: &Fetched| CompareSide {
             start: f
                 .window
@@ -2106,33 +2137,20 @@ impl CompareRun {
             queries: side_queries(f),
             cache: f.cache,
         };
-        for (name, f) in [("recent", recent), ("baseline", &self.baseline)] {
-            if f.truncated {
-                let w = format!(
-                    "{name} truncated, capped at {}: new/gone over-report; --backfill raises the cap",
-                    f.cap
-                );
-                eprintln!("warning: {w}");
-                meta.warnings.get_or_insert_with(Vec::new).push(w);
-            }
-        }
-        let (r, b) = (side_queries(recent), side_queries(&self.baseline));
-        meta.queries = Some(r + b);
-        meta.cost = Some(
-            format!(
-                "{} Explorer queries: {r} for the recent window, {b} for the baseline (each 1 POST, status polls, 1 download)",
-                r + b
-            )
-            .into(),
-        );
-        meta.compare = Some(CompareMeta {
+        CompareMeta {
             length: self.length.clone(),
             changes: self.show.text(),
             recent: side(recent),
             baseline: side(&self.baseline),
             counts,
-        });
+        }
     }
+}
+
+/// A warning on stderr and in `meta.warnings`.
+pub(crate) fn warn(meta: &mut Meta, w: String) {
+    eprintln!("warning: {w}");
+    meta.warnings.get_or_insert_with(Vec::new).push(w);
 }
 
 /// The recent result, and with `--baseline` the baseline too. `--baseline`

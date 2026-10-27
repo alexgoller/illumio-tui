@@ -149,6 +149,7 @@
           "type": "object",
           "properties": {
             "unchecked": {"type": "integer"},
+            "seen_before": {"type": "integer", "description": "--baseline: left out, their key was in the baseline"},
             "folded_ips": {"type": "integer"},
             "unsupported_proto": {"type": "integer"},
             "broadcast_multicast": {"type": "integer"},
@@ -157,6 +158,7 @@
           },
           "required": [
             "unchecked",
+            "seen_before",
             "folded_ips",
             "unsupported_proto",
             "broadcast_multicast",
@@ -177,6 +179,31 @@
         "uncovered_by"
       ],
       "additionalProperties": false
+    },
+    "compare": {
+      "type": "object",
+      "properties": {
+        "length": {"type": "string", "description": "--baseline as given"},
+        "changes": {"type": "string", "description": "the records proposed from (--changes)"},
+        "recent": {"$ref": "#/$defs/compare_side"},
+        "baseline": {"$ref": "#/$defs/compare_side"},
+        "counts": {
+          "type": "object",
+          "properties": {
+            "new": {"type": "integer"},
+            "changed": {"type": "integer"},
+            "gone": {"type": "integer"},
+            "same": {"type": "integer"}
+          },
+          "required": ["new", "changed", "gone", "same"],
+          "additionalProperties": false,
+          "description": "the app's flow records per change (gone: keys only the baseline had)"
+        },
+        "seen_before": {"type": "integer", "description": "records left out: their key was in the baseline"}
+      },
+      "required": ["length", "changes", "recent", "baseline", "counts", "seen_before"],
+      "additionalProperties": false,
+      "description": "--baseline: both exact windows, records per change, those left out"
     }
   },
   "required": [
@@ -192,5 +219,22 @@
     "consolidations",
     "preview"
   ],
-  "additionalProperties": false
+  "additionalProperties": false,
+  "$defs": {
+    "compare_side": {
+      "type": "object",
+      "properties": {
+        "start": {"type": "string"},
+        "end": {"type": "string"},
+        "truncated": {"type": "boolean"},
+        "incomplete": {"type": "boolean"},
+        "cap": {"type": "integer"},
+        "cap_steps": {"type": "array", "items": {"type": "integer"}},
+        "queries": {"type": "integer", "description": "the Explorer queries the side took"},
+        "cache": {"enum": ["hit", "miss", "bypass", "none"]}
+      },
+      "required": ["start", "end", "truncated", "incomplete", "cap", "queries", "cache"],
+      "additionalProperties": false
+    }
+  }
 }

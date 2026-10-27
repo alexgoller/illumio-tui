@@ -975,3 +975,177 @@ async fn plain_pairs_carry_what_changed_in_change_detail() {
     );
     server.verify().await;
 }
+
+/// What `gen` reads besides the traffic: the draft rulesets.
+async fn mount_rule_sets(server: &MockServer) {
+    Mock::given(method("GET"))
+        .and(path("/api/v2/orgs/5/sec_policy/draft/rule_sets"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_string(include_str!("../../../fixtures/rule_sets.json"))
+                .insert_header("Content-Type", "application/json"),
+        )
+        .mount(server)
+        .await;
+}
+
+fn peers(out: &Value) -> Vec<String> {
+    out["data"]["rows"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|r| r["peer"].as_str().unwrap().to_string())
+        .collect()
+}
+
+/// `gen --baseline` (#81): the app's `in` query for the recent window,
+/// then for the baseline, one POST each; only the new keys feed the rows
+/// and rules, the rest count as `seen_before`; `--changes new,changed`
+/// feeds a key whose decision changed too.
+#[tokio::test(flavor = "multi_thread")]
+async fn gen_baseline_proposes_only_for_the_new_traffic() {
+    let server = compare_server().await;
+    mount_rule_sets(&server).await;
+    let home = tempfile::tempdir().unwrap();
+    let out = json_out(
+        cmd(&server, home.path())
+            .args(["gen", "shop/prod"])
+            .args(WINDOW)
+            .args(["--baseline", "7d"])
+            .assert()
+            .success(),
+    );
+    // Inbound: 5432 and icmp the same, 8443 changed: nothing is new.
+    assert_eq!(peers(&out), Vec::<String>::new(), "rows without flows go");
+    assert_eq!(out["data"]["rules"], json!([]));
+    let p = &out["data"]["preview"];
+    assert_eq!(p["uncovered_by"]["seen_before"], 3);
+    assert_eq!(p["uncovered_flows"], 3);
+    let c = &out["data"]["compare"];
+    assert_eq!(c["length"], "7d");
+    assert_eq!(c["changes"], "new");
+    assert_eq!(c["seen_before"], 3);
+    assert_eq!(c["recent"]["start"], RECENT_START);
+    assert_eq!(c["baseline"]["start"], BASE_START);
+    assert_eq!(c["baseline"]["end"], RECENT_START);
+    assert_eq!(c["baseline"]["queries"], 1);
+    assert_eq!(
+        c["counts"],
+        json!({"new": 0, "changed": 1, "gone": 1, "same": 2})
+    );
+    assert_eq!(out["meta"]["queries"], 2, "both sides counted");
+    assert!(
+        out["meta"]["cost"]
+            .as_str()
+            .unwrap()
+            .starts_with("2 Explorer queries: 1 for the recent window, 1 for the baseline"),
+        "{}",
+        out["meta"]["cost"]
+    );
+    assert!(out["meta"].get("compare").is_none(), "data.compare only");
+    server.verify().await;
+
+    let server = compare_server().await;
+    mount_rule_sets(&server).await;
+    let out = json_out(
+        cmd(&server, home.path())
+            .args(["--no-cache", "gen", "shop/prod"])
+            .args(WINDOW)
+            .args(["--baseline", "7d", "--changes", "new,changed"])
+            .assert()
+            .success(),
+    );
+    assert_eq!(peers(&out), vec!["IP list Corp · 1 IP"], "8443 changed");
+    assert_eq!(out["data"]["preview"]["uncovered_by"]["seen_before"], 2);
+    assert_eq!(out["data"]["compare"]["changes"], "new,changed");
+    server.verify().await;
+}
+
+/// `--changes` needs `--baseline`, and takes new or new,changed only:
+/// exit 2 before any request.
+#[tokio::test(flavor = "multi_thread")]
+async fn gen_changes_without_a_baseline_or_with_gone_exits_2_unsent() {
+    let quiet = MockServer::start().await;
+    let home = tempfile::tempdir().unwrap();
+    for args in [
+        &["--changes", "new"][..],
+        &["--baseline", "7d", "--changes", "new,gone"],
+        &["--baseline", "7d", "--changes", "same"],
+        &["--baseline", "soon"],
+    ] {
+        let a = cmd(&quiet, home.path())
+            .args(["gen", "shop/prod"])
+            .args(WINDOW)
+            .args(args)
+            .assert()
+            .code(2);
+        let err = stderr(&a);
+        assert!(
+            err.contains("--baseline") || err.contains("--changes"),
+            "{args:?}: {err}"
+        );
+    }
+    assert!(quiet.received_requests().await.unwrap().is_empty());
+    // `--fields` reaches the new fields through the schema.
+    let wanted = ["compare.seen_before", "preview.uncovered_by.seen_before"].map(String::from);
+    assert!(illumio_tui::cli::schema::check_fields("gen", None, &wanted).is_ok());
+}
+
+/// A truncated baseline warns (new over-reports) and still proposes;
+/// `--outbound` runs both sides of both windows.
+#[tokio::test(flavor = "multi_thread")]
+async fn gen_warns_on_a_truncated_baseline_and_outbound_runs_four_queries() {
+    let server = MockServer::start().await;
+    mount_objects(&server).await;
+    mount_rule_sets(&server).await;
+    mount_window(
+        &server,
+        "recent",
+        RECENT_START,
+        RECENT_END,
+        4,
+        3,
+        &recent(),
+        2,
+    )
+    .await;
+    mount_window(
+        &server,
+        "base",
+        BASE_START,
+        RECENT_START,
+        4,
+        4,
+        &baseline(),
+        2,
+    )
+    .await;
+    let home = tempfile::tempdir().unwrap();
+    let a = cmd(&server, home.path())
+        .args(["gen", "shop/prod", "--outbound", "--max-results", "4"])
+        .args(WINDOW)
+        .args(["--baseline", "7d"])
+        .assert()
+        .success();
+    let err = stderr(&a);
+    assert!(
+        err.contains("warning: baseline truncated, capped at 4: new over-reports"),
+        "{err}"
+    );
+    let out = json_out(a);
+    assert_eq!(out["meta"]["queries"], 4);
+    assert_eq!(out["data"]["compare"]["baseline"]["truncated"], true);
+    assert_eq!(
+        peers(&out),
+        vec!["93.184.216.34"],
+        "only the outbound 443 is new"
+    );
+    assert!(
+        out["meta"]["warnings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|w| w.as_str().unwrap().contains("new over-reports"))
+    );
+    server.verify().await;
+}

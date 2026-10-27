@@ -5,15 +5,19 @@
 use super::context::{Context, cache_label};
 use super::error::CliError;
 use super::marked::CliMarks;
-use super::output::{SquelchedMeta, TableRows, join_list};
-use super::traffic::{ByArg, DirectionArg, FilterArgs, cli_focus, fetch};
+use super::output::{CompareMeta, SquelchedMeta, TableRows, join_list};
+use super::traffic::{
+    ByArg, CompareRun, DirectionArg, FilterArgs, baseline_length, cli_focus, fetch, fetch_compare,
+    warn,
+};
 use clap::{Args, ValueEnum};
 use pce::generate::{
     Candidate, Consolidate, Coverage, GenInput, GenRow, Proposal, RuleCounts, Stop, app_ruleset,
-    candidates, keys_refusal, propose, rows,
+    candidates, feedable, keys_refusal, new_since, propose, rows,
 };
 use pce::marks::Action;
 use pce::models::PolicyScope;
+use pce::traffic::{Change, ChangeSet, ResolvedFlow, compact_duration};
 use pce::write::PortSpec;
 use serde::Serialize;
 use std::collections::BTreeMap;
@@ -54,8 +58,28 @@ pub struct GenArgs {
     #[arg(long)]
     pub outbound: bool,
     /// Relative window ending now, e.g. 1h, 24h, 7d (default from profile, 24h)
-    #[arg(long)]
+    #[arg(long, conflicts_with_all = ["from", "to", "since"])]
     pub window: Option<String>,
+    /// Start: RFC 3339, 2026-10-09T08:00 (local time) or YYYY-MM-DD (UTC)
+    #[arg(long, requires = "to", group = "start")]
+    pub from: Option<String>,
+    /// End: RFC 3339, 2026-10-09T08:00 (local time) or YYYY-MM-DD (end of that day, UTC)
+    #[arg(long, requires = "start")]
+    pub to: Option<String>,
+    /// Start, as --from, with --to defaulting to now. RFC 3339, or 2026-10-23T18:00 or
+    /// 2026-10-23 in the local time zone
+    #[arg(long, group = "start")]
+    pub since: Option<String>,
+    /// New since: also query the baseline, the same queries over this long before the
+    /// window's start ([start - DURATION, start), e.g. 7d), and propose only from the flow
+    /// records whose key the baseline lacks; the others count as preview.uncovered_by.seen_before.
+    /// Through the same cost guard (> 7d needs --yes); JSON: data.compare
+    #[arg(long, value_name = "DURATION")]
+    pub baseline: Option<String>,
+    /// With --baseline: the records to propose from, new (default) or new,changed (also a
+    /// key whose decisions changed, e.g. allowed then, blocked now)
+    #[arg(long, value_name = "LIST", requires = "baseline")]
+    pub changes: Option<String>,
     /// Row cap per traffic query, up to 200000 (default from profile; > 10000 needs --yes)
     #[arg(long)]
     pub max_results: Option<u32>,
@@ -142,6 +166,8 @@ pub struct RuleOut {
 #[derive(Debug, Serialize)]
 pub struct UncoveredBy {
     pub unchecked: u64,
+    /// `--baseline`: left out, their key was in the baseline.
+    pub seen_before: u64,
     pub folded_ips: u64,
     pub unsupported_proto: u64,
     pub broadcast_multicast: u64,
@@ -155,6 +181,7 @@ impl From<Coverage> for UncoveredBy {
     fn from(c: Coverage) -> Self {
         UncoveredBy {
             unchecked: c.unchecked,
+            seen_before: c.seen_before,
             folded_ips: c.folded_ips,
             unsupported_proto: c.unsupported_proto,
             broadcast_multicast: c.broadcast_multicast,
@@ -212,6 +239,19 @@ pub struct GenReport {
     pub rules: Vec<RuleOut>,
     pub consolidations: Vec<ConsolidationOut>,
     pub preview: Preview,
+    /// `--baseline`: both windows, the records per change, how many were
+    /// left out as seen before.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub compare: Option<GenCompare>,
+}
+
+/// `data.compare`: `meta.compare` of `traffic --baseline`, in flow
+/// records of the app, and the records left out.
+#[derive(Debug, Serialize)]
+pub struct GenCompare {
+    #[serde(flatten)]
+    pub compare: CompareMeta,
+    pub seen_before: u64,
 }
 
 impl TableRows for GenReport {
@@ -450,12 +490,32 @@ fn consolidations_out(
         .collect()
 }
 
+/// `--changes` as the records to propose from (default new), read before
+/// any request: gone and same never feed the generator.
+fn parse_changes(args: &GenArgs) -> Result<ChangeSet, CliError> {
+    let Some(c) = &args.changes else {
+        return Ok(ChangeSet::of(&[Change::New]));
+    };
+    let keep = ChangeSet::parse(c).map_err(|e| CliError::Args(format!("--changes: {e}")))?;
+    if !feedable(keep) {
+        return Err(CliError::Args(format!(
+            "--changes {c}: gen proposes from new or new,changed records only"
+        )));
+    }
+    Ok(keep)
+}
+
 pub async fn run(ctx: &Context, args: &GenArgs) -> Result<(), CliError> {
     let keys = ctx.config.scope_keys.clone();
     let global = Stop::from(args.granularity);
     let asked = parse_consolidate(&args.consolidate)?;
+    let keep = parse_changes(args)?;
     let filter = FilterArgs {
         window: args.window.clone(),
+        from: args.from.clone(),
+        to: args.to.clone(),
+        since: args.since.clone(),
+        baseline: args.baseline.clone(),
         max_results: args.max_results,
         yes: args.yes,
         app: Some(args.app.clone()),
@@ -481,8 +541,15 @@ pub async fn run(ctx: &Context, args: &GenArgs) -> Result<(), CliError> {
                 .join("/")
         )));
     }
-    let Some(fetched) = fetch(ctx, &filter, Some(&focus)).await? else {
-        return Ok(());
+    let (fetched, base) = match baseline_length(&filter)? {
+        None => match fetch(ctx, &filter, Some(&focus)).await? {
+            Some(f) => (f, None),
+            None => return Ok(()),
+        },
+        Some(length) => match fetch_compare(ctx, &filter, Some(&focus), length).await? {
+            Some((f, b)) => (f, Some(b)),
+            None => return Ok(()),
+        },
     };
     let focus = focus.focus;
     let app = focus.app_text();
@@ -514,10 +581,17 @@ pub async fn run(ctx: &Context, args: &GenArgs) -> Result<(), CliError> {
         ));
     }
     let tier = ctx.config.tier_key.clone();
-    let window = args
-        .window
-        .clone()
-        .unwrap_or_else(|| ctx.config.traffic_default_window.clone());
+    let window = match (&args.window, &args.from, &args.since) {
+        (None, None, None) => ctx.config.traffic_default_window.clone(),
+        (Some(w), _, _) => w.clone(),
+        _ => compact_duration(fetched.span),
+    };
+    // New since: only the records the baseline lacks go on (rows, rules,
+    // fan-in candidates); the rest are counted.
+    let since = base
+        .as_ref()
+        .map(|b| new_since(&fetched.flows, &b.flows, keep, &focus, args.outbound));
+    let flows: &[ResolvedFlow] = since.as_ref().map_or(&fetched.flows, |s| &s.flows);
     let target = app_ruleset(
         &fetched.flows,
         &focus,
@@ -526,11 +600,11 @@ pub async fn run(ctx: &Context, args: &GenArgs) -> Result<(), CliError> {
         &ctx.config.generator_ruleset_name,
         None,
     );
-    let gen_rows = rows(&fetched.flows, &focus, &tier, &idx, target);
+    let gen_rows = rows(flows, &focus, &tier, &idx, target);
     let cands = candidates(&gen_rows, ctx.config.generator_consolidate_min_peers);
     let modes = check_consolidate(&asked, &cands, &idx)?;
     let input = GenInput {
-        flows: &fetched.flows,
+        flows,
         focus: &focus,
         tier_key: &tier,
         drafts: &drafts.value,
@@ -540,7 +614,7 @@ pub async fn run(ctx: &Context, args: &GenArgs) -> Result<(), CliError> {
         outbound: args.outbound,
         picked: None,
         consolidate: &modes,
-        seen_before: 0,
+        seen_before: since.as_ref().map_or(0, |s| s.seen_before),
     };
     let p = propose(&gen_rows, global, &input);
     // Each row behind a rule an override deny undercuts says so.
@@ -558,7 +632,7 @@ pub async fn run(ctx: &Context, args: &GenArgs) -> Result<(), CliError> {
         eprintln!("warning: {b}: those rules cannot be written as shown");
     }
     let t = &p.targets[0];
-    let report = GenReport {
+    let mut report = GenReport {
         app: app.clone(),
         keys: keys.clone(),
         window,
@@ -607,9 +681,38 @@ pub async fn run(ctx: &Context, args: &GenArgs) -> Result<(), CliError> {
             uncovered_by: p.coverage.into(),
             blocker,
         },
+        compare: None,
     };
     let mut meta = fetched.meta(ctx);
     meta.cache = cache_label(fetched.cache == "hit" && drafts.hit, ctx.cache_mode);
+    if let (Some(baseline), Some(s)) = (base, &since) {
+        let run = CompareRun {
+            baseline,
+            show: keep,
+            length: args.baseline.clone().unwrap_or_default(),
+        };
+        let b = &run.baseline;
+        if b.truncated {
+            warn(
+                &mut meta,
+                format!(
+                    "baseline truncated, capped at {}: new over-reports; raise --max-results (--yes above 10000)",
+                    b.cap
+                ),
+            );
+        }
+        if b.incomplete {
+            warn(
+                &mut meta,
+                "baseline incomplete, a PCE region did not answer: new over-reports".into(),
+            );
+        }
+        run.fill_cost(&mut meta, &fetched);
+        report.compare = Some(GenCompare {
+            compare: run.compare_meta(&fetched, s.counts),
+            seen_before: s.seen_before,
+        });
+    }
     // Marks are not policy: the rules above saw every flow. Only the app's
     // squelched flows are counted.
     let cm = CliMarks::load(ctx, args.no_marks, false);
