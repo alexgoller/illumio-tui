@@ -1723,6 +1723,41 @@ pub async fn run(global: GlobalArgs) -> Result<(), CliError> {
     Ok(())
 }
 
+/// `:snapshot`'s task: the reads (cached), then the file; the status
+/// line's text either way.
+async fn save_snapshot(
+    pce: &Pce,
+    dir: &std::path::Path,
+    identity: &crate::snapshot::Identity,
+    label: Option<String>,
+) -> Result<String, String> {
+    use crate::snapshot;
+    let taken = snapshot::take(
+        pce,
+        CacheMode::Use,
+        snapshot::What::default(),
+        identity,
+        label,
+    )
+    .await
+    .map_err(|e| e.to_string())?;
+    let file =
+        snapshot::save(dir, &taken.snapshot).map_err(|e| format!("{}: {e}", dir.display()))?;
+    let cut = if taken.snapshot.truncated.is_empty() {
+        String::new()
+    } else {
+        format!(
+            "; partial (row cap): {}",
+            taken.snapshot.truncated.join(", ")
+        )
+    };
+    Ok(format!(
+        "snapshot saved: {} ({} KB){cut}",
+        file.path.display(),
+        file.bytes.div_ceil(1024)
+    ))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2106,39 +2141,4 @@ mod tests {
         }
         assert_eq!(pce.stats().calls, 0, "a delete plans without a request");
     }
-}
-
-/// `:snapshot`'s task: the reads (cached), then the file; the status
-/// line's text either way.
-async fn save_snapshot(
-    pce: &Pce,
-    dir: &std::path::Path,
-    identity: &crate::snapshot::Identity,
-    label: Option<String>,
-) -> Result<String, String> {
-    use crate::snapshot;
-    let taken = snapshot::take(
-        pce,
-        CacheMode::Use,
-        snapshot::What::default(),
-        identity,
-        label,
-    )
-    .await
-    .map_err(|e| e.to_string())?;
-    let file =
-        snapshot::save(dir, &taken.snapshot).map_err(|e| format!("{}: {e}", dir.display()))?;
-    let cut = if taken.snapshot.truncated.is_empty() {
-        String::new()
-    } else {
-        format!(
-            "; partial (row cap): {}",
-            taken.snapshot.truncated.join(", ")
-        )
-    };
-    Ok(format!(
-        "snapshot saved: {} ({} KB){cut}",
-        file.path.display(),
-        file.bytes.div_ceil(1024)
-    ))
 }

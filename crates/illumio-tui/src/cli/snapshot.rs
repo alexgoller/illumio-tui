@@ -419,7 +419,7 @@ async fn save(ctx: &Context, args: &SaveArgs) -> Result<(), CliError> {
 
 /// One side of a diff: a file, or a live read (`now`) of `what`.
 enum Side {
-    File(Snapshot, End),
+    File(Box<Snapshot>, End),
     Now,
 }
 
@@ -434,7 +434,7 @@ fn side(all: &[SnapshotMeta], spec: &str) -> Result<Side, CliError> {
         taken_at: s.taken_at,
         label: s.label.clone(),
     };
-    Ok(Side::File(s, end))
+    Ok(Side::File(Box::new(s), end))
 }
 
 /// What a live side reads: the sections the file side has that the
@@ -499,7 +499,7 @@ async fn diff_cmd(ctx: &Context, args: &DiffArgs) -> Result<(), CliError> {
             .await?;
             cache = cache_label(t.all_hit, ctx.cache_mode);
             let e = now_end(&t.snapshot);
-            ((sa, ea), (t.snapshot, e))
+            ((sa, ea), (Box::new(t.snapshot), e))
         }
         (Side::Now, Side::File(sb, eb)) => {
             live(&sb)?;
@@ -513,14 +513,19 @@ async fn diff_cmd(ctx: &Context, args: &DiffArgs) -> Result<(), CliError> {
             .await?;
             cache = cache_label(t.all_hit, ctx.cache_mode);
             let e = now_end(&t.snapshot);
-            ((t.snapshot, e), (sb, eb))
+            ((Box::new(t.snapshot), e), (sb, eb))
         }
         (Side::Now, Side::Now) => unreachable!("refused above"),
     };
     let mut warnings = Vec::new();
     truncation_warnings(&ea.id, &sa, &mut warnings);
     truncation_warnings(&eb.id, &sb, &mut warnings);
-    let report: SnapshotDiff = diff((&sa, ea), (&sb, eb), &args.section, &ctx.config.key_order());
+    let report: SnapshotDiff = diff(
+        (&*sa, ea),
+        (&*sb, eb),
+        &args.section,
+        &ctx.config.key_order(),
+    );
     warnings.extend(
         report
             .not_compared
