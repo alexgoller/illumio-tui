@@ -439,7 +439,7 @@ Five screens: `1` Traffic, `2` Policy, `3` Objects, `4` Workloads, `5` Events. T
 takes `:traffic`, `:policy`, `:objects`, `:workloads`, `:events`, `:iplists` (Objects on its
 IP lists tab), `:filter <expr>`, `:window <dur>`, `:profile <name>`, `:writes [on|off]`,
 `:export <path>`, `:draft`, `:active`, `:unicast`, `:focus [app]`, `:app [app]`, `:gen [app]`,
-`:readiness`, `:enforce [app]`, `:exposure` (also `9`), `:used` (where the selected object is used, as `W`), `:batch`, `:snapshot [label]` (see [Snapshots](#snapshots)), `:save <name>`, `:filters` (`:fl`), `:load <name>`,
+`:readiness`, `:enforce [app]`, `:exposure` (also `9`), `:used` (where the selected object is used, as `W`), `:hygiene` (unused objects, workloads missing labels), `:batch`, `:snapshot [label]` (see [Snapshots](#snapshots)), `:save <name>`, `:filters` (`:fl`), `:load <name>`,
 `:default <name>|off`, `:help` and `:q` (each described below; saved filters under [Saved filters](#saved-filters)). `:export <path>` writes the table on
 screen as CSV (the rows shown, with the search and filters applied and in sort order; every
 column, whatever the terminal width, each cell whole; `~/` is the home directory), the same
@@ -868,6 +868,26 @@ the full tab row (69 columns) the tabs read `Traf`, `Pol`, `Obj`, `Wl`, `Ev`.
   `/` searches the list. Not searched (the overlay says so): virtual services, enforcement
   boundaries and container workload profiles. Pairing profiles are searched for a label only:
   they hold no label groups, IP lists or services.
+  `:hygiene` (from any screen) is the reverse, before a cleanup: the labels, label groups, IP
+  lists and services nothing names, and the workloads missing label keys. The header counts
+  each (`Unused: labels 3 · label groups 1 · IP lists 2 · services 0`, `Missing labels: role 4
+  · app 12 · env 12 · loc 30 (of 120 workloads)`) and always says what is not searched:
+  virtual services, enforcement boundaries, container workload profiles, RBAC scopes and
+  firewall settings may still use an object, so an unused row is a candidate, never a verdict.
+  "Used" is what `W` finds, built once over the same data: ruleset scopes, rule providers,
+  consumers and services (allow, deny, override deny), the label groups holding it, and for a
+  label the pairing profiles giving it and the workloads carrying it. The PCE's built-ins (the
+  `Any (0.0.0.0/0 and ::/0)` IP list, `All Services`, anything the PCE ships as
+  `ilo_defaults`) and deleted labels are never listed. The label keys are the profile's label
+  model (`[profiles.<name>.labels]` scope keys and tier key); the default model checks
+  Illumio's four, `role`, `app`, `env` and `loc`; managed and unmanaged workloads alike. It
+  reads the object lists from the name index (or the Objects tabs once loaded) and loads the
+  draft rulesets, the pairing profiles and the workload list once if missing (cached, counted
+  in its title); unused rows wait until all are in, a failed read is named and `:hygiene`
+  again asks. `Enter` selects the object on its Objects tab, where `x` deletes it with the
+  usual confirm (a tab still loading selects it when it arrives), or opens the workload's
+  detail on Workloads; `W` runs where-used for the object as a check, `Esc` there comes back
+  to the report; `/` searches.
 - **Workloads**: VEN health columns and a summary line, `h` unhealthy only, `H` sort by
   severity, `t` / `T` jump to Traffic with the workload as source / destination. The
   enforcement column is the effective one: a workload without a VEN is `unmanaged`, as in
@@ -976,6 +996,8 @@ the API call and byte counters at all times.
     illumio-tui labels --unused --json
     illumio-tui where-used label env=Production --table
     illumio-tui where-used iplist Corp --csv
+    illumio-tui hygiene --table
+    illumio-tui hygiene --kind ip_list --csv --fields name,href
     illumio-tui workloads --label app=web --online true
     illumio-tui workloads --unlabeled --json
     illumio-tui workloads --label app=shop,crm --label env=prod --group
@@ -1383,6 +1405,32 @@ failed: …)`; the exit code stays 0. For example, before deleting a label or an
     illumio-tui where-used label role=web --csv --fields kind,name,locked
     illumio-tui where-used iplist Corp --csv > corp-uses.csv
     illumio-tui where-used label-group "All prod envs"
+
+`hygiene [--kind label,label_group,ip_list,service,workload]` is the reverse of where-used,
+in one pass (the TUI's `:hygiene`): one row per label, label group, IP list and service that
+nothing in the draft policy (ruleset scopes, rule providers, consumers and services, deny
+rules as the ruleset list carries them), the label groups, the pairing profiles (labels) or
+the workloads (labels) names, each kind by name, then one per workload missing one or more
+label keys, in list order. Columns: `kind`, `name` (`key=value` for a label, a workload's
+hostname else its name), `href`, `reason` (`unused`, or `missing labels: app,env`) and
+`missing` (a workload's keys, a list; `null` for the other kinds, `;`-joined in CSV). An
+unused row is a candidate: `meta.not_searched` names what may still use it (virtual
+services, enforcement boundaries, container workload profiles, RBAC scopes, firewall
+settings; and pairing profiles or workloads not read). `meta.hygiene` has the kinds
+checked, the unused rows per kind, the keys and the workloads missing each, the workloads
+read and the rulesets whose deny rules were not searched. Built-ins (`Any (0.0.0.0/0 and
+::/0)`, `All Services`, `ilo_defaults`) and deleted labels are never listed. The keys are
+the profile's label model; the default model checks `role`, `app`, `env` and `loc`.
+Requests, all cached and made only for the kinds asked: labels (`label`), label groups
+(`label`, `label_group`), IP lists, services, the draft rulesets (every object kind), the
+pairing profiles (`label`; a failed read is warned, named in `meta.not_searched`, and the
+rest prints) and the workload list (`label`, `workload`; a truncated list is warned).
+`--kind` takes `label-group` and `ip-list` too. Exit 0 whatever it finds.
+
+    illumio-tui hygiene --table
+    illumio-tui hygiene --kind workload --csv > missing-labels.csv
+    illumio-tui hygiene --kind ip_list --csv --fields name,href > unused-ip-lists.csv
+    illumio-tui hygiene --json --fields kind,name,reason
 
 `--impact` on `policy rules <ruleset>` adds each rule's `impact` (JSON) or a `P/C` column
 (table): `providers` and `consumers` (workloads matched, unions over the ruleset's scopes),
