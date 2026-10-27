@@ -237,7 +237,7 @@ fn policy_sections_reuse_the_policy_diff() {
         .push(parse(r#"{"from_ip": "10.9.0.0/16"}"#));
     p.services.remove(0);
     p.draft_rule_sets[0].rules[0].enabled = false;
-    p.enforcement_boundaries[0].name = "Block prod from test".into();
+    p.enforcement_boundaries.as_mut().unwrap()[0].name = "Block prod from test".into();
     p.label_groups[0].name.push_str(" (old)");
     let d = run(&a, &b, &[]);
     let one = |s: &str| {
@@ -310,4 +310,213 @@ fn snapshots_of_another_profile_or_pce_are_refused() {
             .unwrap_err()
             .contains("\"prod\"")
     );
+}
+
+#[test]
+fn only_snapshot_ids_are_snapshots_and_they_sort_by_time_then_number() {
+    assert_eq!(
+        parse_id("2026-10-01T031500Z"),
+        Some(("2026-10-01T031500Z", 0))
+    );
+    assert_eq!(
+        parse_id("2026-10-01T031500Z-12"),
+        Some(("2026-10-01T031500Z", 12))
+    );
+    for bad in [
+        "notes",
+        "backup-2026",
+        "2026-10-01T031500",
+        "2026-10-01T031500Z-",
+        "2026-10-01T031500Z-x",
+        "2026-10-01 031500Z",
+        "2026-10-01T03:15:00Z",
+    ] {
+        assert_eq!(parse_id(bad), None, "{bad}");
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let a = fixture("2026-10-01T03:15:00Z");
+    for _ in 0..11 {
+        save(dir.path(), &a).unwrap();
+    }
+    std::fs::write(dir.path().join("notes.json"), "{}").unwrap();
+    let ids: Vec<String> = list(dir.path())
+        .unwrap()
+        .into_iter()
+        .map(|m| m.id)
+        .collect();
+    assert_eq!(ids.len(), 11, "notes.json is no snapshot");
+    assert_eq!(ids[2], "2026-10-01T031500Z-2");
+    assert_eq!(ids[10], "2026-10-01T031500Z-10", "-10 after -2");
+}
+
+#[test]
+fn latest_previous_and_prune_skip_unreadable_files() {
+    let dir = tempfile::tempdir().unwrap();
+    let d = dir.path();
+    save(d, &fixture("2026-10-01T00:00:00Z")).unwrap();
+    save(d, &fixture("2026-10-02T00:00:00Z")).unwrap();
+    save(d, &fixture("2026-10-03T00:00:00Z")).unwrap();
+    std::fs::write(d.join("2026-10-04T000000Z.json"), "{broken").unwrap();
+    let mut v = serde_json::to_value(fixture("2026-10-05T00:00:00Z")).unwrap();
+    v["version"] = json!(VERSION + 1);
+    std::fs::write(d.join("2026-10-05T000000Z.json"), v.to_string()).unwrap();
+    let metas = list(d).unwrap();
+    assert_eq!(metas.len(), 5);
+    assert_eq!(find(&metas, "latest").unwrap().id, "2026-10-03T000000Z");
+    assert_eq!(find(&metas, "previous").unwrap().id, "2026-10-02T000000Z");
+    // Named by its time, an unreadable file can still be picked (rm).
+    assert_eq!(find(&metas, "2026-10-04").unwrap().id, "2026-10-04T000000Z");
+    let gone = prune(&metas, 1).unwrap();
+    let ids: Vec<&str> = gone.iter().map(|m| m.id.as_str()).collect();
+    assert_eq!(ids, ["2026-10-01T000000Z", "2026-10-02T000000Z"]);
+    let left: Vec<String> = list(d).unwrap().into_iter().map(|m| m.id).collect();
+    assert_eq!(
+        left,
+        [
+            "2026-10-03T000000Z",
+            "2026-10-04T000000Z",
+            "2026-10-05T000000Z"
+        ]
+    );
+}
+
+#[test]
+fn save_never_overwrites_and_leaves_no_temporary_file() {
+    let dir = tempfile::tempdir().unwrap();
+    let d = dir.path();
+    // Another writer took the name first.
+    std::fs::write(d.join("2026-10-01T000000Z.json"), "theirs").unwrap();
+    // A crashed save's leftover, two hours old.
+    let stale = d.join(".2026-09-01T000000Z.1-0.tmp");
+    std::fs::write(&stale, "x").unwrap();
+    let old = std::time::SystemTime::now() - std::time::Duration::from_secs(7200);
+    std::fs::File::options()
+        .write(true)
+        .open(&stale)
+        .unwrap()
+        .set_modified(old)
+        .unwrap();
+    let s = save(d, &fixture("2026-10-01T00:00:00Z")).unwrap();
+    assert_eq!(s.id, "2026-10-01T000000Z-1");
+    assert_eq!(
+        std::fs::read_to_string(d.join("2026-10-01T000000Z.json")).unwrap(),
+        "theirs"
+    );
+    let names: Vec<String> = std::fs::read_dir(d)
+        .unwrap()
+        .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+        .collect();
+    assert!(names.iter().all(|n| !n.ends_with(".tmp")), "{names:?}");
+}
+
+#[test]
+fn unread_boundaries_are_not_compared_not_all_removed() {
+    let a = fixture("2026-10-01T00:00:00Z");
+    let mut b = fixture("2026-10-02T00:00:00Z");
+    b.sections.policy.as_mut().unwrap().enforcement_boundaries = None;
+    let d = run(&a, &b, &[]);
+    assert!(d.changes.iter().all(|c| c.section != "boundaries"));
+    assert_eq!(d.not_compared.len(), 1);
+    assert_eq!(d.not_compared[0].section, "boundaries");
+    assert_eq!(d.not_compared[0].reason, "boundaries not read in B");
+    // And the file round-trips without the field.
+    let text = serde_json::to_string(&b).unwrap();
+    assert!(!text.contains("enforcement_boundaries"));
+    let back: Snapshot = serde_json::from_str(&text).unwrap();
+    assert!(
+        back.sections
+            .policy
+            .unwrap()
+            .enforcement_boundaries
+            .is_none()
+    );
+}
+
+#[test]
+fn active_rulesets_boundary_actors_and_deleted_deny_rules_are_reported() {
+    let mut a = fixture("2026-10-01T00:00:00Z");
+    let pa = a.sections.policy.as_mut().unwrap();
+    pa.active_rule_sets = pa.draft_rule_sets.clone();
+    let mut b = a.clone();
+    b.taken_at = "2026-10-02T00:00:00Z".parse().unwrap();
+    let pb = b.sections.policy.as_mut().unwrap();
+    pb.active_rule_sets[0].enabled = false;
+    // Every deny rule deleted: the list no longer inlines any.
+    for rs in &mut pb.draft_rule_sets {
+        rs.deny_rules.clear();
+    }
+    pb.enforcement_boundaries.as_mut().unwrap()[0].consumers =
+        vec![parse(r#"{"label": {"href": "/orgs/5/labels/3"}}"#)];
+    let d = run(&a, &b, &[DiffSection::Rulesets, DiffSection::Boundaries]);
+    let active: Vec<_> = d
+        .changes
+        .iter()
+        .filter(|c| c.scope == Some("active"))
+        .collect();
+    assert_eq!(active.len(), 1);
+    assert_eq!(active[0].fields, ["enabled"]);
+    let draft = d
+        .changes
+        .iter()
+        .find(|c| c.scope == Some("draft"))
+        .expect("the deleted deny rules");
+    assert_eq!(draft.fields, ["rules"]);
+    assert!(
+        draft.details.iter().all(|l| l.starts_with('-')) && draft.details.len() == 2,
+        "{:?}",
+        draft.details
+    );
+    let bnd = d
+        .changes
+        .iter()
+        .find(|c| c.section == "boundaries")
+        .unwrap();
+    assert_eq!(bnd.fields, ["consumers"]);
+    assert_eq!(bnd.details, ["+consumer app=shop", "-consumer loc=eu"]);
+}
+
+#[test]
+fn a_large_workload_diff_is_linear() {
+    let base = fixture("2026-10-01T00:00:00Z")
+        .sections
+        .workloads
+        .unwrap()
+        .remove(0);
+    let many = |n: usize, mode: &str| -> Vec<Workload> {
+        (0..n)
+            .map(|i| {
+                let mut w = base.clone();
+                w.href = format!("/orgs/5/workloads/w-{i}");
+                w.enforcement_mode = Some(mode.into());
+                w
+            })
+            .collect()
+    };
+    let mut a = fixture("2026-10-01T00:00:00Z");
+    let mut b = fixture("2026-10-02T00:00:00Z");
+    a.sections.workloads = Some(many(50_000, "full"));
+    let mut wb = many(50_000, "full");
+    wb[49_999].enforcement_mode = Some("visibility_only".into());
+    b.sections.workloads = Some(wb);
+    let t = std::time::Instant::now();
+    let d = run(&a, &b, &[DiffSection::Workloads]);
+    assert_eq!(d.changes.len(), 1);
+    // Quadratic would be 2.5e9 comparisons: minutes, not this.
+    assert!(
+        t.elapsed() < std::time::Duration::from_secs(20),
+        "{:?}",
+        t.elapsed()
+    );
+}
+
+#[test]
+fn the_identity_holds_host_port_and_org() {
+    let cfg = pce::ClientConfig::new("pce.example", 7, pce::Credentials::new("k", "s"));
+    let mut cfg2 = cfg.clone();
+    cfg2.port = 8443;
+    let a = Identity::of("p", &pce::PceClient::new(cfg).unwrap());
+    let b = Identity::of("p", &pce::PceClient::new(cfg2).unwrap());
+    assert_eq!(a.pce, "pce.example:443");
+    assert_eq!(b.pce, "pce.example:8443");
+    assert_eq!(a.org, 7);
 }

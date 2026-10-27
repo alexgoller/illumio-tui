@@ -3856,6 +3856,12 @@ async fn snapshot_reads_each_list_once_and_reports_the_file() {
         m.status.text
     );
     let s = illumio_tui::snapshot::load(&metas[0].path).unwrap();
-    assert_eq!((s.profile.as_str(), s.pce.as_str(), s.org), ("t", "h", 5));
+    // The PCE the runtime talks to: host and port.
+    let url = url::Url::parse(&server.uri()).unwrap();
+    let pce = format!("{}:{}", url.host_str().unwrap(), url.port().unwrap());
+    assert_eq!(
+        (s.profile.as_str(), s.pce.as_str(), s.org),
+        ("t", pce.as_str(), 5)
+    );
     assert_eq!(s.sections.workloads.unwrap().len(), 4);
 }

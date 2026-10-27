@@ -14,6 +14,7 @@ use crate::tui::edit::{actor_tokens, service_tokens};
 use pce::models::{EnforcementBoundary, IpList, Label, LabelGroup, RuleSet, Service, Workload};
 use pce::{KeyOrder, NameIndex};
 use serde::Serialize;
+use std::collections::{HashMap, HashSet};
 
 /// The sections `diff` compares, as `--section` names them.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, clap::ValueEnum)]
@@ -129,12 +130,16 @@ pub fn check_same(a: &Snapshot, a_id: &str, b: &Snapshot, b_id: &str) -> Result<
 
 /// Every object of each list by href, the newer first.
 fn union<T: Clone>(newer: Option<&[T]>, older: Option<&[T]>, href: fn(&T) -> &str) -> Vec<T> {
-    let mut out: Vec<T> = newer.unwrap_or_default().to_vec();
-    for o in older.unwrap_or_default() {
-        if !out.iter().any(|n| href(n) == href(o)) {
-            out.push(o.clone());
-        }
-    }
+    let newer = newer.unwrap_or_default();
+    let seen: HashSet<&str> = newer.iter().map(href).collect();
+    let mut out: Vec<T> = newer.to_vec();
+    out.extend(
+        older
+            .unwrap_or_default()
+            .iter()
+            .filter(|o| !seen.contains(href(o)))
+            .cloned(),
+    );
     out
 }
 
@@ -215,9 +220,11 @@ struct Kind<'a, T> {
     lines: &'a dyn Fn(&T, &T) -> Vec<DiffLine>,
 }
 
-/// `older` against `newer` by href: changed and added in the newer's
-/// order, then removed in the older's.
+/// `older` against `newer` by href (each side keyed once: O(n)), changed
+/// and added in the newer's order, then removed in the older's.
 fn compare<T>(k: &Kind<T>, older: &[T], newer: &[T]) -> Vec<Change> {
+    let old_by: HashMap<&str, &T> = older.iter().map(|o| ((k.href)(o), o)).collect();
+    let new_hrefs: HashSet<&str> = newer.iter().map(|n| (k.href)(n)).collect();
     let change = |what: &'static str, x: &T, fields, details| Change {
         section: k.section,
         change: what,
@@ -229,7 +236,7 @@ fn compare<T>(k: &Kind<T>, older: &[T], newer: &[T]) -> Vec<Change> {
     };
     let mut out = Vec::new();
     for n in newer {
-        match older.iter().find(|o| (k.href)(o) == (k.href)(n)) {
+        match old_by.get((k.href)(n)) {
             Some(o) => {
                 let (fields, details) = changed_lines(&(k.lines)(o, n));
                 if !details.is_empty() {
@@ -240,7 +247,7 @@ fn compare<T>(k: &Kind<T>, older: &[T], newer: &[T]) -> Vec<Change> {
         }
     }
     for o in older {
-        if !newer.iter().any(|n| (k.href)(n) == (k.href)(o)) {
+        if !new_hrefs.contains((k.href)(o)) {
             out.push(change("removed", o, Vec::new(), Vec::new()));
         }
     }
@@ -351,14 +358,17 @@ fn rule_set_changes(
     newer: &[RuleSet],
     idx: &NameIndex,
 ) -> Vec<Change> {
-    let (io, inn) = (inlines_deny(older), inlines_deny(newer));
+    // Either list inlining deny rules means this PCE inlines them: an
+    // empty list on the other side is then zero rules (every deny rule
+    // deleted), not unfetched.
+    let inl = inlines_deny(older) || inlines_deny(newer);
     let lines = |a: &RuleSet, b: &RuleSet| {
         diff_rule_set_with(
             Some(a),
             Some(b),
             idx,
-            DenySide::of(a, io, None),
-            DenySide::of(b, inn, None),
+            DenySide::of(a, inl, None),
+            DenySide::of(b, inl, None),
         )
     };
     let name = |r: &RuleSet| r.name.clone();
@@ -455,8 +465,8 @@ fn changes_of(s: DiffSection, a: &Snapshot, b: &Snapshot, idx: &NameIndex) -> Ve
                         boundary_lines(x, y, idx)
                     },
                 },
-                &pa.enforcement_boundaries,
-                &pb.enforcement_boundaries,
+                pa.enforcement_boundaries.as_deref().unwrap_or_default(),
+                pb.enforcement_boundaries.as_deref().unwrap_or_default(),
             )
         }
         DiffSection::Labels => {
@@ -524,6 +534,26 @@ pub fn diff(
                 reason: format!("no {} section in {}", src.as_str(), missing.join(" and ")),
             });
             continue;
+        }
+        // Boundaries the PCE did not let a side read are not "all removed".
+        if s == DiffSection::Boundaries {
+            let unread: Vec<&str> = [(&from.id, a), (&to.id, b)]
+                .into_iter()
+                .filter(|(_, x)| {
+                    x.sections
+                        .policy
+                        .as_ref()
+                        .is_some_and(|p| p.enforcement_boundaries.is_none())
+                })
+                .map(|(id, _)| id.as_str())
+                .collect();
+            if !unread.is_empty() {
+                not_compared.push(NotCompared {
+                    section: s.as_str(),
+                    reason: format!("boundaries not read in {}", unread.join(" and ")),
+                });
+                continue;
+            }
         }
         let c = changes_of(s, a, b, &idx);
         let n = |what: &str| c.iter().filter(|x| x.change == what).count();

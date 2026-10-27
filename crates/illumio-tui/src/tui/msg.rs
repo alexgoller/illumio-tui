@@ -381,7 +381,8 @@ pub enum Cmd {
     /// answered with `Msg::SnapshotSaved`.
     SaveSnapshot {
         dir: std::path::PathBuf,
-        identity: crate::snapshot::Identity,
+        /// The profile; the runtime adds its PCE's host, port and org.
+        profile: String,
         label: Option<String>,
     },
     /// Plan a write (one GET for IP lists, services and workloads; none for

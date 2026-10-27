@@ -68,7 +68,10 @@ pub struct PolicySection {
     pub label_groups: Vec<LabelGroup>,
     pub ip_lists: Vec<IpList>,
     pub services: Vec<Service>,
-    pub enforcement_boundaries: Vec<EnforcementBoundary>,
+    /// `None`: not read, the PCE has no such endpoint for this user (404
+    /// or 403); `diff` then does not compare boundaries.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub enforcement_boundaries: Option<Vec<EnforcementBoundary>>,
 }
 
 /// The sections a snapshot can hold, as `--what` and the files name them.
@@ -122,7 +125,7 @@ impl Sections {
                     + p.label_groups.len()
                     + p.ip_lists.len()
                     + p.services.len()
-                    + p.enforcement_boundaries.len(),
+                    + p.enforcement_boundaries.as_ref().map_or(0, Vec::len),
                 bytes: bytes(p),
             });
         }
@@ -299,12 +302,46 @@ pub fn list(dir: &Path) -> std::io::Result<Vec<SnapshotMeta>> {
     let mut out = Vec::new();
     for e in entries {
         let path = e?.path();
-        if path.extension().and_then(|x| x.to_str()) == Some(EXT) && path.is_file() {
+        let named = path
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .is_some_and(|s| parse_id(s).is_some());
+        if named && path.extension().and_then(|x| x.to_str()) == Some(EXT) && path.is_file() {
             out.push(meta_of(&path)?);
         }
     }
-    out.sort_by(|a, b| a.id.cmp(&b.id));
+    out.sort_by_key(|m| parse_id(&m.id).map(|(t, n)| (t.to_string(), n)));
     Ok(out)
+}
+
+/// A snapshot id's time part and same-second number (`-N`, else 0);
+/// `None` for a name that is no snapshot id
+/// (`YYYY-MM-DDTHHMMSSZ[-N]`).
+pub fn parse_id(id: &str) -> Option<(&str, u32)> {
+    let (time, n) = match id.get(18..) {
+        Some("") => (id, 0),
+        Some(rest) => {
+            let digits = rest.strip_prefix('-')?;
+            if digits.is_empty() || !digits.bytes().all(|b| b.is_ascii_digit()) {
+                return None;
+            }
+            (&id[..18], digits.parse().ok()?)
+        }
+        None => return None,
+    };
+    let ok = time.bytes().enumerate().all(|(i, b)| match i {
+        4 | 7 => b == b'-',
+        10 => b == b'T',
+        17 => b == b'Z',
+        _ => b.is_ascii_digit(),
+    });
+    ok.then_some((time, n))
+}
+
+/// The snapshots that can be read, oldest first: what `latest`,
+/// `previous` and `prune` consider.
+pub fn usable(metas: &[SnapshotMeta]) -> Vec<&SnapshotMeta> {
+    metas.iter().filter(|m| m.problem.is_none()).collect()
 }
 
 /// The snapshot at `path`, or why it cannot be read: not JSON, not a
@@ -312,16 +349,17 @@ pub fn list(dir: &Path) -> std::io::Result<Vec<SnapshotMeta>> {
 pub fn load(path: &Path) -> Result<Snapshot, String> {
     let name = path.display();
     let bytes = std::fs::read(path).map_err(|e| format!("{name}: {e}"))?;
-    let v: serde_json::Value =
-        serde_json::from_slice(&bytes).map_err(|e| format!("{name}: not a snapshot file: {e}"))?;
-    match v.get("version").and_then(serde_json::Value::as_u64) {
-        Some(n) if n > u64::from(VERSION) => {
-            return Err(format!("{name}: {}", newer(n as u32)));
-        }
-        Some(_) => {}
-        None => return Err(format!("{name}: not a snapshot file: no version")),
+    // The version first (the rest skipped), so a newer file says so.
+    #[derive(Deserialize)]
+    struct Version {
+        version: u64,
     }
-    serde_json::from_value(v).map_err(|e| format!("{name}: not a snapshot file: {e}"))
+    let v = serde_json::from_slice::<Version>(&bytes)
+        .map_err(|e| format!("{name}: not a snapshot file: {e}"))?;
+    if v.version > u64::from(VERSION) {
+        return Err(format!("{name}: {}", newer(v.version as u32)));
+    }
+    serde_json::from_slice(&bytes).map_err(|e| format!("{name}: not a snapshot file: {e}"))
 }
 
 /// The id of a snapshot taken at `t`: its UTC time, without colons (a file
@@ -338,32 +376,46 @@ pub struct SavedFile {
     pub bytes: u64,
 }
 
-/// Writes `snap` into `dir` (created when missing) as `<id>.json`, through
-/// a temporary file renamed into place; a second snapshot in the same
-/// second gets `-1`, `-2` … after the time.
+/// A temporary file older than this is a crashed save's: removed.
+const STALE_TMP: std::time::Duration = std::time::Duration::from_secs(3600);
+
+/// Writes `snap` into `dir` (created when missing) as `<id>.json`: a
+/// temporary file written and synced, then hard-linked to the first free
+/// name (the link fails on a taken one, so two writers in the same second
+/// never overwrite each other: the second gets `-1`, `-2` …). Temporary
+/// files a crashed save left over an hour ago are removed.
 pub fn save(dir: &Path, snap: &Snapshot) -> std::io::Result<SavedFile> {
+    use std::io::Write;
     std::fs::create_dir_all(dir)?;
+    clean_stale(dir);
     let body = serde_json::to_vec(snap).map_err(std::io::Error::other)?;
     let base = id_for(snap.taken_at);
-    let mut n = 0u32;
-    let (id, path) = loop {
-        let id = if n == 0 {
-            base.clone()
-        } else {
-            format!("{base}-{n}")
-        };
-        let path = dir.join(format!("{id}.{EXT}"));
-        if !path.exists() {
-            break (id, path);
+    static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let seq = SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let tmp = dir.join(format!(".{base}.{}-{seq}.tmp", std::process::id()));
+    let written = (|| {
+        let mut f = std::fs::File::create(&tmp)?;
+        f.write_all(&body)?;
+        f.sync_all()
+    })();
+    let linked = written.and_then(|()| {
+        let mut n = 0u32;
+        loop {
+            let id = if n == 0 {
+                base.clone()
+            } else {
+                format!("{base}-{n}")
+            };
+            let path = dir.join(format!("{id}.{EXT}"));
+            match std::fs::hard_link(&tmp, &path) {
+                Ok(()) => return Ok((id, path)),
+                Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => n += 1,
+                Err(e) => return Err(e),
+            }
         }
-        n += 1;
-    };
-    let tmp = dir.join(format!(".{id}.{}.tmp", std::process::id()));
-    std::fs::write(&tmp, &body)?;
-    if let Err(e) = std::fs::rename(&tmp, &path) {
-        let _ = std::fs::remove_file(&tmp);
-        return Err(e);
-    }
+    });
+    let _ = std::fs::remove_file(&tmp);
+    let (id, path) = linked?;
     Ok(SavedFile {
         id,
         path,
@@ -371,19 +423,41 @@ pub fn save(dir: &Path, snap: &Snapshot) -> std::io::Result<SavedFile> {
     })
 }
 
+/// Removes `.….tmp` files in `dir` older than [`STALE_TMP`]; best effort.
+fn clean_stale(dir: &Path) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for e in entries.flatten() {
+        let name = e.file_name();
+        let name = name.to_string_lossy();
+        let old = e
+            .metadata()
+            .and_then(|m| m.modified())
+            .ok()
+            .and_then(|t| t.elapsed().ok())
+            .is_some_and(|age| age > STALE_TMP);
+        if name.starts_with('.') && name.ends_with(".tmp") && old {
+            let _ = std::fs::remove_file(e.path());
+        }
+    }
+}
+
 /// The snapshot `spec` names among `metas` (oldest first): `latest`,
-/// `previous` (the one before it), or a unique prefix of an id.
+/// `previous` (the one before it) among the readable ones, or a unique
+/// prefix of an id (any file, so `rm` can remove an unreadable one).
 pub fn find<'a>(metas: &'a [SnapshotMeta], spec: &str) -> Result<&'a SnapshotMeta, String> {
-    let n = metas.len();
+    let ok = usable(metas);
+    let n = ok.len();
     let have = |need: usize| {
         format!(
-            "{spec}: {n} snapshot{} of this profile, {need} needed",
+            "{spec}: {n} readable snapshot{} of this profile, {need} needed",
             if n == 1 { "" } else { "s" }
         )
     };
     match spec {
-        "latest" => metas.last().ok_or_else(|| have(1)),
-        "previous" => n.checked_sub(2).map(|i| &metas[i]).ok_or_else(|| have(2)),
+        "latest" => ok.last().copied().ok_or_else(|| have(1)),
+        "previous" => n.checked_sub(2).map(|i| ok[i]).ok_or_else(|| have(2)),
         _ => {
             if let Some(m) = metas.iter().find(|m| m.id == spec) {
                 return Ok(m);
@@ -413,14 +487,16 @@ pub fn remove(meta: &SnapshotMeta) -> std::io::Result<()> {
     std::fs::remove_file(&meta.path)
 }
 
-/// Deletes all but the newest `keep` of `metas` (oldest first); returns
-/// the ones deleted.
+/// Deletes all but the newest `keep` readable snapshots of `metas`
+/// (oldest first); an unreadable file (corrupt, newer format) is never
+/// deleted. Returns the ones deleted.
 pub fn prune(metas: &[SnapshotMeta], keep: usize) -> std::io::Result<Vec<SnapshotMeta>> {
-    let cut = metas.len().saturating_sub(keep);
+    let ok = usable(metas);
+    let cut = ok.len().saturating_sub(keep);
     let mut removed = Vec::new();
-    for m in &metas[..cut] {
+    for m in &ok[..cut] {
         remove(m)?;
-        removed.push(m.clone());
+        removed.push((*m).clone());
     }
     Ok(removed)
 }

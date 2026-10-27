@@ -18,7 +18,7 @@ fn snapshot_asks_the_runtime_once_for_the_profiles_directory() {
         [
             Cmd::SaveSnapshot {
                 dir,
-                identity,
+                profile,
                 label,
             },
         ] => {
@@ -27,9 +27,7 @@ fn snapshot_asks_the_runtime_once_for_the_profiles_directory() {
                 &std::path::PathBuf::from("/data/illumio-tui/snapshots")
                     .join(crate::names::dir_name(&m.profile.name))
             );
-            assert_eq!(identity.profile, m.profile.name);
-            assert_eq!(identity.pce, m.profile.host);
-            assert_eq!(identity.org, m.profile.org_id);
+            assert_eq!(profile, &m.profile.name);
             assert_eq!(label.as_deref(), Some("before Q4"));
         }
         other => panic!("{other:?}"),

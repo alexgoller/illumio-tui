@@ -175,18 +175,13 @@ fn save_snapshot(model: &mut Model, label: Option<String>) -> Vec<Cmd> {
             StatusLine::error("no data directory for snapshots: set HOME or XDG_DATA_HOME");
         return Vec::new();
     };
-    let p = &model.profile;
-    let dir = crate::snapshot::profile_dir(root, &p.name);
-    let identity = crate::snapshot::Identity {
-        profile: p.name.clone(),
-        pce: p.host.clone(),
-        org: p.org_id,
-    };
+    let profile = model.profile.name.clone();
+    let dir = crate::snapshot::profile_dir(root, &profile);
     model.snapshot_saving = true;
     model.status = StatusLine::info("snapshot: reading policy, labels and workloads…");
     vec![Cmd::SaveSnapshot {
         dir,
-        identity,
+        profile,
         label,
     }]
 }

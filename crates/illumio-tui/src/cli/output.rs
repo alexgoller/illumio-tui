@@ -677,6 +677,40 @@ pub fn meta_line(meta: &Meta) -> String {
     s
 }
 
+/// A report of several tables. JSON: `data` whole. `--table`: each table
+/// under its title line. `--csv`: the tables' full rows (the caller passes
+/// exactly one). The meta line goes to stderr with a table or CSV.
+pub fn emit_report<T: Serialize>(
+    format: OutputFormat,
+    data: &T,
+    tables: &[(String, &dyn TableRows)],
+    meta: &Meta,
+) -> Result<(), CliError> {
+    let mut out = std::io::stdout().lock();
+    match format {
+        OutputFormat::Json => write_json(&mut out, data, meta)?,
+        OutputFormat::Table => {
+            for (i, (title, table)) in tables.iter().enumerate() {
+                if i > 0 {
+                    writeln!(out)?;
+                }
+                if !title.is_empty() {
+                    writeln!(out, "{title}")?;
+                }
+                write_table(&mut out, *table)?;
+            }
+            eprintln!("{}", meta_line(meta));
+        }
+        OutputFormat::Csv => {
+            for (_, table) in tables {
+                write_table_csv(&mut out, *table)?;
+            }
+            eprintln!("{}", meta_line(meta));
+        }
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

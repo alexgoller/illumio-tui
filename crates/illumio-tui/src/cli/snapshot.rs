@@ -3,9 +3,10 @@
 //! `diff … now` read the PCE (the cached list reads every command uses;
 //! `--no-cache` for fresh ones); `list`, `rm`, `prune` and a diff of two
 //! files read nothing but the files.
-use super::context::{Context, cache_label};
+use super::GlobalArgs;
+use super::context::{Context, cache_label, config_inputs};
 use super::error::CliError;
-use super::output::{Meta, OutputFormat, TableRows, join_list};
+use super::output::{Meta, OutputFormat, TableRows, choose_format, emit_report, join_list};
 use super::readiness::{ReadinessArgs, evaluate, guard};
 use crate::snapshot::diff::{Change, Count, DiffSection, End, SnapshotDiff, check_same, diff};
 use crate::snapshot::{self, Identity, Section, SectionSize, Snapshot, SnapshotMeta, What, take};
@@ -34,7 +35,7 @@ pub enum SnapshotCmd {
     /// Snapshots of another profile or PCE are refused (exit 2). Exit 0; with
     /// --fail-on-change, exit 9 when anything differs (after the report).
     Diff(DiffArgs),
-    /// Delete one snapshot (local, no request)
+    /// Delete one snapshot, also an unreadable one named by its time (local, no request)
     Rm(RmArgs),
     /// Delete all but the newest N snapshots of the profile (local, no request)
     Prune(PruneArgs),
@@ -89,9 +90,10 @@ pub struct RmArgs {
 
 #[derive(Args, Debug, Clone)]
 pub struct PruneArgs {
-    /// How many of the newest snapshots to keep
-    #[arg(long, value_name = "N")]
-    pub keep: usize,
+    /// How many of the newest readable snapshots to keep, at least 1 (`rm` deletes the last);
+    /// unreadable files (corrupt, a newer format) are never deleted
+    #[arg(long, value_name = "N", value_parser = clap::value_parser!(u64).range(1..))]
+    pub keep: u64,
 }
 
 /// The CSV columns of each table, in order (`columns::csv_columns`).
@@ -276,24 +278,141 @@ impl TableRows for Removed {
     }
 }
 
-/// The profile's snapshot directory.
-fn dir(ctx: &Context) -> Result<PathBuf, CliError> {
-    let root = snapshot::default_root().ok_or_else(|| {
-        CliError::Other("no data directory for snapshots: set HOME or XDG_DATA_HOME".into())
-    })?;
-    Ok(snapshot::profile_dir(&root, &ctx.config.profile_name))
+/// Where a snapshot command prints, and for whom.
+struct Out {
+    format: OutputFormat,
+    profile: String,
+    started: std::time::Instant,
 }
 
-fn identity(ctx: &Context) -> Identity {
-    Identity {
-        profile: ctx.config.profile_name.clone(),
-        pce: ctx.config.host.clone(),
-        org: ctx.config.org_id,
+impl Out {
+    /// The meta of a command that sent nothing.
+    fn local_meta(&self) -> Meta {
+        Meta {
+            profile: self.profile.clone(),
+            elapsed_ms: self.started.elapsed().as_millis(),
+            cache: "none",
+            ..Meta::default()
+        }
     }
 }
 
-fn metas(ctx: &Context) -> Result<Vec<SnapshotMeta>, CliError> {
-    Ok(snapshot::list(&dir(ctx)?)?)
+/// The profile's snapshot directory.
+fn dir_for(profile: &str) -> Result<PathBuf, CliError> {
+    let root = snapshot::default_root().ok_or_else(|| {
+        CliError::Other("no data directory for snapshots: set HOME or XDG_DATA_HOME".into())
+    })?;
+    Ok(snapshot::profile_dir(&root, profile))
+}
+
+/// The profile the command is for, by name only: the config file read,
+/// no credentials resolved (no `api_secret_cmd` run), as `Context` would
+/// name it.
+fn profile_only(global: &GlobalArgs) -> Result<String, CliError> {
+    let (file, overrides, env) = config_inputs(global)?;
+    let named = overrides.profile.clone().or_else(|| {
+        env.get("ILLUMIO_PROFILE")
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+    });
+    Ok(crate::config::profile_name(&file, named).0)
+}
+
+/// Whether `cmd` reads only files: everything but `save` and a diff with
+/// a `now` side.
+pub fn is_local(cmd: &SnapshotCmd) -> bool {
+    match cmd {
+        SnapshotCmd::Save(_) => false,
+        SnapshotCmd::Diff(a) => !a.sides().contains(&"now"),
+        SnapshotCmd::List | SnapshotCmd::Rm(_) | SnapshotCmd::Prune(_) => true,
+    }
+}
+
+impl DiffArgs {
+    /// A and B with their defaults.
+    fn sides(&self) -> [&str; 2] {
+        [
+            self.from.as_deref().unwrap_or("previous"),
+            self.to.as_deref().unwrap_or("latest"),
+        ]
+    }
+}
+
+/// The commands that read only files: the profile resolved by name, no
+/// client built.
+pub fn run_local(global: &GlobalArgs, cmd: &SnapshotCmd) -> Result<(), CliError> {
+    let out = Out {
+        format: choose_format(global.json, global.table, global.csv),
+        profile: profile_only(global)?,
+        started: std::time::Instant::now(),
+    };
+    let all = snapshot::list(&dir_for(&out.profile)?)?;
+    match cmd {
+        SnapshotCmd::List => {
+            let list = Listed(all);
+            let title = format!("snapshots · {} · {}", out.profile, list.0.len());
+            emit_report(out.format, &list, &[(title, &list)], &out.local_meta())
+        }
+        SnapshotCmd::Rm(a) => {
+            let m = snapshot::find(&all, &a.timestamp).map_err(CliError::Args)?;
+            snapshot::remove(m)?;
+            removed(&out, vec![m.clone()], &all, 1)
+        }
+        SnapshotCmd::Prune(a) => {
+            let gone = snapshot::prune(&all, a.keep as usize)?;
+            let n = gone.len();
+            removed(&out, gone, &all, n)
+        }
+        SnapshotCmd::Diff(a) => {
+            let [sa, sb] = a.sides();
+            let (Side::File(fa, ea), Side::File(fb, eb)) = (side(&all, sa)?, side(&all, sb)?)
+            else {
+                unreachable!("a local diff has no now side")
+            };
+            check_same(&fa, &ea.id, &fb, &eb.id).map_err(CliError::Args)?;
+            print_diff(&out, a, (*fa, ea), (*fb, eb), out.local_meta())
+        }
+        SnapshotCmd::Save(_) => unreachable!("save reads the PCE"),
+    }
+}
+
+/// `rm`'s and `prune`'s report: what went, how many readable snapshots
+/// are left, and the unreadable files left alone.
+fn removed(
+    out: &Out,
+    gone: Vec<SnapshotMeta>,
+    all: &[SnapshotMeta],
+    n_gone: usize,
+) -> Result<(), CliError> {
+    let data = Removed {
+        removed: gone
+            .into_iter()
+            .map(|m| RemovedRow {
+                id: m.id,
+                path: m.path,
+            })
+            .collect(),
+        kept: all.len() - n_gone,
+    };
+    let unreadable = all
+        .iter()
+        .filter(|m| m.problem.is_some() && !data.removed.iter().any(|r| r.id == m.id))
+        .count();
+    let warnings = if unreadable > 0 {
+        vec![format!(
+            "{unreadable} unreadable snapshot file{} left alone (snapshot list shows why)",
+            if unreadable == 1 { "" } else { "s" }
+        )]
+    } else {
+        Vec::new()
+    };
+    let title = format!("removed {} · kept {}", data.removed.len(), data.kept);
+    emit_report(
+        out.format,
+        &data,
+        &[(title, &data)],
+        &with_warnings(out.local_meta(), warnings),
+    )
 }
 
 /// A warning per read a snapshot holds cut.
@@ -312,43 +431,15 @@ fn with_warnings(mut meta: Meta, warnings: Vec<String>) -> Meta {
     meta
 }
 
+/// `save` and a diff with a `now` side: they read the PCE.
 pub async fn run(ctx: &Context, cmd: &SnapshotCmd) -> Result<(), CliError> {
     match cmd {
         SnapshotCmd::Save(a) => save(ctx, a).await,
-        SnapshotCmd::List => {
-            let list = Listed(metas(ctx)?);
-            let title = format!("snapshots · {} · {}", ctx.config.profile_name, list.0.len());
-            ctx.emit_report(&list, &[(title, &list)], &ctx.meta("none", false, None))
-        }
-        SnapshotCmd::Diff(a) => diff_cmd(ctx, a).await,
-        SnapshotCmd::Rm(a) => {
-            let all = metas(ctx)?;
-            let m = snapshot::find(&all, &a.timestamp).map_err(CliError::Args)?;
-            snapshot::remove(m)?;
-            removed(ctx, vec![m.clone()], all.len() - 1)
-        }
-        SnapshotCmd::Prune(a) => {
-            let all = metas(ctx)?;
-            let gone = snapshot::prune(&all, a.keep)?;
-            let kept = all.len() - gone.len();
-            removed(ctx, gone, kept)
+        SnapshotCmd::Diff(a) => diff_now(ctx, a).await,
+        SnapshotCmd::List | SnapshotCmd::Rm(_) | SnapshotCmd::Prune(_) => {
+            unreachable!("run_local")
         }
     }
-}
-
-fn removed(ctx: &Context, gone: Vec<SnapshotMeta>, kept: usize) -> Result<(), CliError> {
-    let data = Removed {
-        removed: gone
-            .into_iter()
-            .map(|m| RemovedRow {
-                id: m.id,
-                path: m.path,
-            })
-            .collect(),
-        kept,
-    };
-    let title = format!("removed {} · kept {kept}", data.removed.len());
-    ctx.emit_report(&data, &[(title, &data)], &ctx.meta("none", false, None))
 }
 
 fn what_of(args: &SaveArgs) -> What {
@@ -362,13 +453,17 @@ fn what_of(args: &SaveArgs) -> What {
     }
 }
 
+fn identity(ctx: &Context) -> Identity {
+    Identity::of(&ctx.config.profile_name, ctx.pce.client())
+}
+
 async fn save(ctx: &Context, args: &SaveArgs) -> Result<(), CliError> {
     let readiness_args = ReadinessArgs {
         yes: args.yes,
         ..ReadinessArgs::default()
     };
     // Before any request: where the file goes, and the readiness query's cost.
-    let dir = dir(ctx)?;
+    let dir = dir_for(&ctx.config.profile_name)?;
     if args.with_readiness {
         guard(ctx, &readiness_args)?;
     }
@@ -382,7 +477,7 @@ async fn save(ctx: &Context, args: &SaveArgs) -> Result<(), CliError> {
     .await?;
     let mut snap = taken.snapshot;
     let mut all_hit = taken.all_hit;
-    let mut warnings = Vec::new();
+    let mut warnings = taken.warnings;
     if args.with_readiness {
         let ev = evaluate(ctx, &readiness_args).await?;
         all_hit &= ev.meta.cache == "hit";
@@ -410,6 +505,8 @@ async fn save(ctx: &Context, args: &SaveArgs) -> Result<(), CliError> {
         data.path.display(),
         data.bytes
     );
+    // With --table and --csv meta.warnings reach stderr on the meta line;
+    // with --json they are in the envelope.
     let meta = with_warnings(
         ctx.meta(cache_label(all_hit, ctx.cache_mode), false, None),
         warnings,
@@ -417,7 +514,7 @@ async fn save(ctx: &Context, args: &SaveArgs) -> Result<(), CliError> {
     ctx.emit_report(&data, &[(title, &data)], &meta)
 }
 
-/// One side of a diff: a file, or a live read (`now`) of `what`.
+/// One side of a diff: a file, or a live read (`now`).
 enum Side {
     File(Box<Snapshot>, End),
     Now,
@@ -451,80 +548,73 @@ fn live_what(other: &Snapshot, wanted: &[DiffSection]) -> What {
     }
 }
 
-async fn diff_cmd(ctx: &Context, args: &DiffArgs) -> Result<(), CliError> {
-    let a_spec = args.from.as_deref().unwrap_or("previous");
-    let b_spec = args.to.as_deref().unwrap_or("latest");
+/// A diff with one `now` side: the file loaded and matched against this
+/// profile's PCE first, then only the sections it holds read live.
+async fn diff_now(ctx: &Context, args: &DiffArgs) -> Result<(), CliError> {
+    let [a_spec, b_spec] = args.sides();
     if a_spec == "now" && b_spec == "now" {
         return Err(CliError::Args(
             "now against now: one side must be a snapshot".into(),
         ));
     }
-    let all = metas(ctx)?;
-    let (a, b) = (side(&all, a_spec)?, side(&all, b_spec)?);
-    // The live side, read only after both files loaded and matched.
-    let mut cache = "none";
-    let live = |other: &Snapshot| -> Result<(), CliError> {
-        check_same(
-            other,
-            "the snapshot",
-            &Snapshot {
-                profile: ctx.config.profile_name.clone(),
-                pce: ctx.config.host.clone(),
-                org: ctx.config.org_id,
-                ..other.clone()
-            },
-            "now",
-        )
-        .map_err(CliError::Args)
+    let all = snapshot::list(&dir_for(&ctx.config.profile_name)?)?;
+    let (file, now_first) = match (side(&all, a_spec)?, side(&all, b_spec)?) {
+        (Side::File(f, e), Side::Now) => ((f, e), false),
+        (Side::Now, Side::File(f, e)) => ((f, e), true),
+        _ => unreachable!("one side is now"),
     };
-    let now_end = |s: &Snapshot| End {
+    let me = identity(ctx);
+    let live_id = Snapshot {
+        profile: me.profile.clone(),
+        pce: me.pce.clone(),
+        org: me.org,
+        ..(*file.0).clone()
+    };
+    check_same(&file.0, &file.1.id, &live_id, "now").map_err(CliError::Args)?;
+    let t = take(
+        &ctx.pce,
+        ctx.cache_mode,
+        live_what(&file.0, &args.section),
+        &me,
+        None,
+    )
+    .await?;
+    let now_end = End {
         id: "now".into(),
-        taken_at: s.taken_at,
+        taken_at: t.snapshot.taken_at,
         label: None,
     };
-    let ((sa, ea), (sb, eb)) = match (a, b) {
-        (Side::File(sa, ea), Side::File(sb, eb)) => {
-            check_same(&sa, &ea.id, &sb, &eb.id).map_err(CliError::Args)?;
-            ((sa, ea), (sb, eb))
-        }
-        (Side::File(sa, ea), Side::Now) => {
-            live(&sa)?;
-            let t = take(
-                &ctx.pce,
-                ctx.cache_mode,
-                live_what(&sa, &args.section),
-                &identity(ctx),
-                None,
-            )
-            .await?;
-            cache = cache_label(t.all_hit, ctx.cache_mode);
-            let e = now_end(&t.snapshot);
-            ((sa, ea), (Box::new(t.snapshot), e))
-        }
-        (Side::Now, Side::File(sb, eb)) => {
-            live(&sb)?;
-            let t = take(
-                &ctx.pce,
-                ctx.cache_mode,
-                live_what(&sb, &args.section),
-                &identity(ctx),
-                None,
-            )
-            .await?;
-            cache = cache_label(t.all_hit, ctx.cache_mode);
-            let e = now_end(&t.snapshot);
-            ((Box::new(t.snapshot), e), (sb, eb))
-        }
-        (Side::Now, Side::Now) => unreachable!("refused above"),
+    let meta = with_warnings(
+        ctx.meta(cache_label(t.all_hit, ctx.cache_mode), false, None),
+        t.warnings,
+    );
+    let out = Out {
+        format: ctx.format,
+        profile: ctx.config.profile_name.clone(),
+        started: std::time::Instant::now(),
     };
+    let (f, live) = ((*file.0, file.1), (t.snapshot, now_end));
+    let (a, b) = if now_first { (live, f) } else { (f, live) };
+    print_diff(&out, args, a, b, meta)
+}
+
+/// Compares and prints; exit 9 after the report with `--fail-on-change`.
+/// Labels in the order the PCE lists them (every key, none hidden).
+fn print_diff(
+    out: &Out,
+    args: &DiffArgs,
+    (sa, ea): (Snapshot, End),
+    (sb, eb): (Snapshot, End),
+    meta: Meta,
+) -> Result<(), CliError> {
     let mut warnings = Vec::new();
     truncation_warnings(&ea.id, &sa, &mut warnings);
     truncation_warnings(&eb.id, &sb, &mut warnings);
     let report: SnapshotDiff = diff(
-        (&*sa, ea),
-        (&*sb, eb),
+        (&sa, ea),
+        (&sb, eb),
         &args.section,
-        &ctx.config.key_order(),
+        &pce::KeyOrder::default(),
     );
     warnings.extend(
         report
@@ -532,7 +622,7 @@ async fn diff_cmd(ctx: &Context, args: &DiffArgs) -> Result<(), CliError> {
             .iter()
             .map(|n| format!("{}: not compared ({})", n.section, n.reason)),
     );
-    let meta = with_warnings(ctx.meta(cache, false, None), warnings);
+    let meta = with_warnings(meta, warnings);
     let counts = Counts(&report.sections);
     let changes = Changes(&report.changes);
     let head = format!(
@@ -542,12 +632,12 @@ async fn diff_cmd(ctx: &Context, args: &DiffArgs) -> Result<(), CliError> {
         report.changes.len(),
         if report.changes.len() == 1 { "" } else { "s" }
     );
-    let tables: Vec<(String, &dyn TableRows)> = if ctx.format == OutputFormat::Csv {
+    let tables: Vec<(String, &dyn TableRows)> = if out.format == OutputFormat::Csv {
         vec![(String::new(), &changes)]
     } else {
         vec![(head, &counts), ("changes".into(), &changes)]
     };
-    ctx.emit_report(&report, &tables, &meta)?;
+    emit_report(out.format, &report, &tables, &meta)?;
     if args.fail_on_change && report.changed {
         return Err(CliError::Changed(format!(
             "{} change{} between {} and {}",

@@ -742,12 +742,13 @@ impl Runtime {
             }
             Cmd::SaveSnapshot {
                 dir,
-                identity,
+                profile,
                 label,
             } => {
                 self.model.busy += 1;
                 let (pce, tx) = self.task_ctx();
                 tokio::spawn(async move {
+                    let identity = crate::snapshot::Identity::of(&profile, pce.client());
                     let result = save_snapshot(&pce, &dir, &identity, label).await;
                     let _ = tx.send(Msg::SnapshotSaved(result));
                     let _ = tx.send(Msg::Stats(pce.stats()));
@@ -1743,7 +1744,7 @@ async fn save_snapshot(
     .map_err(|e| e.to_string())?;
     let file =
         snapshot::save(dir, &taken.snapshot).map_err(|e| format!("{}: {e}", dir.display()))?;
-    let cut = if taken.snapshot.truncated.is_empty() {
+    let mut cut = if taken.snapshot.truncated.is_empty() {
         String::new()
     } else {
         format!(
@@ -1751,6 +1752,10 @@ async fn save_snapshot(
             taken.snapshot.truncated.join(", ")
         )
     };
+    for w in &taken.warnings {
+        cut.push_str("; ");
+        cut.push_str(w);
+    }
     Ok(format!(
         "snapshot saved: {} ({} KB){cut}",
         file.path.display(),

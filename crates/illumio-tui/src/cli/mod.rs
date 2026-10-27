@@ -333,6 +333,12 @@ pub async fn run(global: GlobalArgs, command: Command) -> Result<(), CliError> {
     if let Command::Filters(f) = &command {
         return filters::run(&global, f);
     }
+    // Snapshot files only: the profile by name, no client, no credentials.
+    if let Command::Snapshot(s) = &command
+        && snapshot::is_local(s)
+    {
+        return snapshot::run_local(&global, s);
+    }
     // Saved filters, from the config file alone: `--save-filter` ends here.
     let Some(command) = filters::prepare(&global, command)? else {
         return Ok(());

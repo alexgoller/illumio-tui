@@ -115,11 +115,8 @@ fn parse<T: serde::de::DeserializeOwned>(text: &str) -> T {
 
 /// A snapshot of the fixtures as the CLI's env connection would take it.
 fn fixture(server: &MockServer, at: &str) -> Snapshot {
-    let host = url::Url::parse(&server.uri())
-        .unwrap()
-        .host_str()
-        .unwrap()
-        .to_string();
+    let url = url::Url::parse(&server.uri()).unwrap();
+    let host = format!("{}:{}", url.host_str().unwrap(), url.port().unwrap());
     let workloads: Vec<pce::models::Workload> =
         parse(include_str!("../../../fixtures/workloads.json"));
     Snapshot {
@@ -212,7 +209,15 @@ async fn save_reads_each_list_once_and_writes_one_file() {
     assert_eq!(sections, ["policy", "labels", "workloads"]);
     assert_eq!(d["sections"][2]["items"], 4);
     let s = snapshot::load(&written[0]).unwrap();
-    assert_eq!(s.sections.policy.unwrap().enforcement_boundaries.len(), 1);
+    assert_eq!(
+        s.sections
+            .policy
+            .unwrap()
+            .enforcement_boundaries
+            .unwrap()
+            .len(),
+        1
+    );
     assert!(s.sections.readiness.is_none());
     // The file holds no credentials.
     let text = std::fs::read_to_string(&written[0]).unwrap();
@@ -479,9 +484,10 @@ async fn a_corrupt_or_newer_file_is_a_clear_error() {
     two_files(&env, &server);
     let newest = env.dir().join("2026-10-20T000000Z.json");
     std::fs::write(&newest, "{\"version\": 1, \"profile\": ").unwrap();
+    // Named by its time it is picked, and refused with why.
     let e = env
         .cmd(&server)
-        .args(["snapshot", "diff", "previous", "latest"])
+        .args(["snapshot", "diff", "previous", "2026-10-20"])
         .assert()
         .code(1);
     assert!(stderr(&e).contains("not a snapshot file"), "{}", stderr(&e));
@@ -490,7 +496,7 @@ async fn a_corrupt_or_newer_file_is_a_clear_error() {
     std::fs::write(&newest, v.to_string()).unwrap();
     let e = env
         .cmd(&server)
-        .args(["snapshot", "diff", "previous", "latest"])
+        .args(["snapshot", "diff", "previous", "2026-10-20"])
         .assert()
         .code(1);
     assert!(stderr(&e).contains("newer than this illumio-tui reads"));
@@ -626,4 +632,189 @@ fn schema_and_help_name_the_snapshot_commands() {
     for sub in ["snapshot", "prune", "--fail-on-change", "--with-readiness"] {
         assert!(script.contains(sub), "{sub}");
     }
+}
+
+/// Every list but the boundaries, which answer `status`.
+/// `later`: the labels and workloads reads, after the policy (0 when the
+/// boundaries read fails the save first).
+async fn mount_boundaries_answering(server: &MockServer, status: u16, later: u64) {
+    expect(
+        server,
+        LABELS,
+        include_str!("../../../fixtures/labels.json"),
+        later,
+    )
+    .await;
+    for (path_, body) in [
+        (GROUPS, include_str!("../../../fixtures/label_groups.json")),
+        (IP_LISTS, include_str!("../../../fixtures/ip_lists.json")),
+        (SERVICES, include_str!("../../../fixtures/services.json")),
+        (DRAFT_RS, include_str!("../../../fixtures/rule_sets.json")),
+        (ACTIVE_RS, "[]"),
+    ] {
+        expect(server, path_, body, 1).await;
+    }
+    expect(
+        server,
+        WORKLOADS,
+        include_str!("../../../fixtures/workloads.json"),
+        later,
+    )
+    .await;
+    Mock::given(method("GET"))
+        .and(path(BOUNDARIES))
+        .respond_with(ResponseTemplate::new(status).set_body_string("{}"))
+        .mount(server)
+        .await;
+}
+
+#[tokio::test]
+async fn a_pce_without_boundaries_still_saves_and_says_so() {
+    for status in [404u16, 403] {
+        let server = MockServer::start().await;
+        mount_boundaries_answering(&server, status, 1).await;
+        let env = Env::new();
+        let a = env
+            .cmd(&server)
+            .args(["--json", "snapshot", "save"])
+            .assert()
+            .success();
+        let v = schema_check::envelope(&a.get_output().stdout);
+        let w = v["meta"]["warnings"].to_string();
+        assert!(
+            w.contains("enforcement boundaries not readable"),
+            "{status}: {w}"
+        );
+        let f = &files(&env.dir())[0];
+        let s = snapshot::load(f).unwrap();
+        assert!(s.sections.policy.unwrap().enforcement_boundaries.is_none());
+        // Against a snapshot with boundaries: not compared, not removed.
+        snapshot::save(&env.dir(), &fixture(&server, "2020-01-01T00:00:00Z")).unwrap();
+        let d = env
+            .cmd(&server)
+            .args(["--json", "snapshot", "diff", "--section", "boundaries"])
+            .assert()
+            .success();
+        let v = schema_check::envelope(&d.get_output().stdout);
+        assert_eq!(v["data"]["changes"], json!([]));
+        assert_eq!(v["data"]["not_compared"][0]["section"], "boundaries");
+    }
+    // Any other failure still fails the save, and nothing is written.
+    let server = MockServer::start().await;
+    mount_boundaries_answering(&server, 500, 0).await;
+    let env = Env::new();
+    env.cmd(&server).args(["snapshot", "save"]).assert().code(4);
+    assert!(files(&env.dir()).is_empty());
+}
+
+#[tokio::test]
+async fn unreadable_and_foreign_files_are_never_latest_nor_pruned() {
+    let server = MockServer::start().await;
+    mount(&server, 0, 0, 0).await;
+    let env = Env::new();
+    two_files(&env, &server);
+    let d = env.dir();
+    std::fs::write(d.join("2026-10-20T000000Z.json"), "{broken").unwrap();
+    let mut v = serde_json::to_value(fixture(&server, "2026-10-21T00:00:00Z")).unwrap();
+    v["version"] = json!(VERSION + 1);
+    std::fs::write(d.join("2026-10-21T000000Z.json"), v.to_string()).unwrap();
+    std::fs::write(d.join("notes.json"), "{}").unwrap();
+    std::fs::write(d.join("backup.json"), "{}").unwrap();
+    // The default diff still compares the two readable ones.
+    let a = env
+        .cmd(&server)
+        .args(["--json", "snapshot", "diff"])
+        .assert()
+        .success();
+    let v = schema_check::envelope(&a.get_output().stdout);
+    assert_eq!(v["data"]["to"]["id"], "2026-10-08T030000Z");
+    let l = env
+        .cmd(&server)
+        .args(["--json", "snapshot", "list"])
+        .assert()
+        .success();
+    let v = schema_check::envelope(&l.get_output().stdout);
+    assert_eq!(
+        v["data"].as_array().unwrap().len(),
+        4,
+        "notes, backup unlisted"
+    );
+    let p = env
+        .cmd(&server)
+        .args(["--json", "snapshot", "prune", "--keep", "1"])
+        .assert()
+        .success();
+    let v = schema_check::envelope(&p.get_output().stdout);
+    assert_eq!(v["data"]["removed"][0]["id"], "2026-10-01T030000Z");
+    assert_eq!(v["data"]["removed"].as_array().unwrap().len(), 1);
+    assert!(
+        v["meta"]["warnings"]
+            .to_string()
+            .contains("2 unreadable snapshot files left alone")
+    );
+    for f in [
+        "2026-10-08T030000Z.json",
+        "2026-10-20T000000Z.json",
+        "2026-10-21T000000Z.json",
+        "notes.json",
+        "backup.json",
+    ] {
+        assert!(d.join(f).exists(), "{f}");
+    }
+    let e = env
+        .cmd(&server)
+        .args(["snapshot", "prune", "--keep", "0"])
+        .assert()
+        .code(2);
+    assert!(stderr(&e).contains("--keep"), "{}", stderr(&e));
+}
+
+#[tokio::test]
+async fn file_commands_resolve_only_the_profile_name() {
+    let server = MockServer::start().await;
+    mount(&server, 0, 0, 0).await;
+    let env = Env::new();
+    // A config profile whose secret command fails and would run on a resolve.
+    let cfg = env.home.path().join("config/illumio-tui");
+    std::fs::create_dir_all(&cfg).unwrap();
+    std::fs::write(
+        cfg.join("config.toml"),
+        "default_profile = \"lab\"\n[profiles.lab]\nhost = \"pce.example\"\norg_id = 5\napi_key = \"k\"\napi_secret_cmd = \"exit 3\"\n",
+    )
+    .unwrap();
+    let dir = env.data().join("illumio-tui/snapshots/lab");
+    let mut a = fixture(&server, "2026-10-01T03:00:00Z");
+    a.profile = "lab".into();
+    let mut b = a.clone();
+    b.taken_at = "2026-10-02T03:00:00Z".parse().unwrap();
+    snapshot::save(&dir, &a).unwrap();
+    snapshot::save(&dir, &b).unwrap();
+    let run = |args: &[&str]| {
+        let mut c = Command::cargo_bin("illumio-tui").unwrap();
+        c.env_clear()
+            .env("PATH", std::env::var("PATH").unwrap_or_default())
+            .env("XDG_CONFIG_HOME", env.home.path().join("config"))
+            .env("XDG_DATA_HOME", env.data())
+            .arg("--json")
+            .args(args)
+            .assert()
+            .success()
+    };
+    let l = run(&["snapshot", "list"]);
+    let v = schema_check::envelope(&l.get_output().stdout);
+    assert_eq!(v["meta"]["profile"], "lab");
+    assert_eq!(v["data"].as_array().unwrap().len(), 2);
+    run(&["snapshot", "diff"]);
+    run(&["snapshot", "prune", "--keep", "1"]);
+    run(&["snapshot", "rm", "latest"]);
+    // A live read does resolve the profile: its secret command fails.
+    env.cmd(&server)
+        .env_remove("PCE_HOST")
+        .env_remove("API_SECRET")
+        .env_remove("API_KEY")
+        .env_remove("PCE_ORG_ID")
+        .env_remove("PCE_PORT")
+        .args(["snapshot", "save"])
+        .assert()
+        .code(2);
 }

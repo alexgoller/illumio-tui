@@ -11,7 +11,6 @@ use crate::names::record::Recorder;
 use pce::{CacheMode, Pce, PceClient};
 use serde::Serialize;
 use std::collections::HashMap;
-use std::io::Write;
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -171,29 +170,7 @@ impl Context {
         tables: &[(String, &dyn TableRows)],
         meta: &Meta,
     ) -> Result<(), CliError> {
-        let mut out = std::io::stdout().lock();
-        match self.format {
-            OutputFormat::Json => write_json(&mut out, data, meta)?,
-            OutputFormat::Table => {
-                for (i, (title, table)) in tables.iter().enumerate() {
-                    if i > 0 {
-                        writeln!(out)?;
-                    }
-                    if !title.is_empty() {
-                        writeln!(out, "{title}")?;
-                    }
-                    write_table(&mut out, *table)?;
-                }
-                eprintln!("{}", meta_line(meta));
-            }
-            OutputFormat::Csv => {
-                for (_, table) in tables {
-                    write_table_csv(&mut out, *table)?;
-                }
-                eprintln!("{}", meta_line(meta));
-            }
-        }
-        Ok(())
+        super::output::emit_report(self.format, data, tables, meta)
     }
 
     /// Envelope for a write command: `cache` is always `none`.
