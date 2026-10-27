@@ -1452,7 +1452,8 @@ answer later, at no cost to the PCE:
 `save` makes the same cached reads as every other command (`--no-cache` for fresh ones), one
 after another, counted in `meta`: `policy` is the draft and active rulesets with their rules (and
 the deny rules the ruleset list carries), the label groups, IP lists, services and enforcement
-boundaries (six GETs); `labels` one; `workloads` one unfiltered list (each workload's href,
+boundaries (six GETs; a PCE that answers 404 or 403 for the boundaries gets a snapshot without
+them, a warning, and diffs that list `boundaries` as not compared); `labels` one; `workloads` one unfiltered list (each workload's href,
 name, hostname, labels, enforcement mode, managed flag and the VEN's `agent.status`: status,
 version, heartbeat, health). `--what` picks sections (default all three); `--with-readiness`
 adds every app's [readiness](#readiness) (its one Explorer query and reads, through its cost
@@ -1462,11 +1463,13 @@ screens loaded) and shows the path in the status line.
 
 Files: `$XDG_DATA_HOME/illumio-tui/snapshots/<profile>/<UTC time>.json` (else
 `~/.local/share/illumio-tui/snapshots/...`), one JSON file each, `{version, profile, pce, org,
-taken_at, label, truncated, sections}`; plain JSON (gzip it yourself if you keep many). They hold
+taken_at, label, truncated, sections}` (`pce` is the host and port); plain JSON (gzip it yourself if you keep many). They hold
 what the reads returned (rules, object names, hostnames, labels, VEN status), never credentials;
 mind who reads the directory. A read cut by its row cap is named in `truncated` and warned
 about in every diff. A file of a newer format, or one that is not a snapshot, is refused with
-why (`list` shows it with its `problem`).
+why (`list` shows it with its `problem`). Only files named like a snapshot
+(`2026-10-27T031500Z[-N].json`) are snapshots; `latest`, `previous` and `prune` skip unreadable
+ones, and `prune` never deletes them (`rm` with the time does). `prune --keep` is at least 1.
 
 `diff` compares A (default `previous`) with B (default `latest`); each is a snapshot's time (a
 unique prefix is enough: `2026-10-01`), `latest`, `previous` or `now`, a live read of only the
@@ -1481,14 +1484,16 @@ compared (exit 2, naming both). The exit code is 0 whatever changed; `--fail-on-
 after the report when something did. `--table` prints the counts and the changes with their
 lines; `--csv` prints the changes.
 
-`list`, `rm`, `prune` and a diff of two files read only the files: no request.
+`list`, `rm`, `prune` and a diff of two files read only the files: no request, and only the
+profile's name is resolved (no credentials, no `api_secret_cmd` run).
 
 A nightly snapshot and a Monday mail of the week's changes:
 
     30 2 * * * illumio-tui snapshot save --label nightly >/dev/null 2>>/var/tmp/snapshot.log && illumio-tui snapshot prune --keep 60 >/dev/null
-    0 7 * * 1 illumio-tui snapshot diff "$(illumio-tui snapshot list --json | jq -r '.data[-8].id')" latest --fail-on-change --table > /var/tmp/week.txt 2>>/var/tmp/snapshot.log; [ $? -eq 9 ] && mail -s "PCE changes this week" alex@ryte.de < /var/tmp/week.txt
+    0 7 * * 1 illumio-tui snapshot diff "$(illumio-tui snapshot list --json | jq -r '[.data[] | select(.problem == null and .taken_at < (now - 7*86400 | todate))] | last.id // "previous"')" latest --fail-on-change --table > /var/tmp/week.txt 2>>/var/tmp/snapshot.log; [ $? -eq 9 ] && mail -s "PCE changes this week" alex@ryte.de < /var/tmp/week.txt
 
-`.data[-8]` is the snapshot seven nights back; exit 9 means something changed, so a quiet week
+The jq picks the newest readable snapshot taken over 7 days ago (whatever was saved by hand in
+between; `previous` while there is none yet); exit 9 means something changed, so a quiet week
 sends no mail. The full recipe: https://alexgoller.github.io/illumio-tui/#recipes
 
 ### Flow marks
