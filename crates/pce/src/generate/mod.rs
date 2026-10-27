@@ -10,6 +10,7 @@ pub mod dedupe;
 pub mod derive;
 pub mod rows;
 pub mod services;
+pub mod since;
 pub mod target;
 
 pub use consolidate::{Candidate, Consolidate, Consolidated, candidates};
@@ -19,6 +20,7 @@ pub use rows::{
     seen_text,
 };
 pub use services::{Expr, express, flow_spec, fold_ports};
+pub use since::{Since, feedable, new_since};
 pub use target::{
     Covering, DEFAULT_RULESET_NAME, RulesetChoice, check_ruleset_name, default_ruleset_name,
     keys_refusal, narrow, pick_ruleset, render_ruleset_name, rulesets_covering,
@@ -628,6 +630,8 @@ pub struct Coverage {
     pub no_target: u64,
     /// Behind a rule, but an override deny rule blocks them anyway.
     pub override_deny: u64,
+    /// Left out by "new since" (#81): their key was in the baseline.
+    pub seen_before: u64,
 }
 
 /// How many rules there are and what the batch does with them.
@@ -770,6 +774,7 @@ impl Proposal {
             }
         }
         c.uncovered = c.unchecked
+            + c.seen_before
             + c.folded_ips
             + c.unsupported_proto
             + c.broadcast_multicast

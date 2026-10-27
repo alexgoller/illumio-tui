@@ -105,6 +105,7 @@ fn proposal() -> Proposal {
         outbound: true,
         picked: None,
         consolidate: &std::collections::BTreeMap::new(),
+        seen_before: 0,
     };
     propose(&r, Stop::AppPorts, &input)
 }
@@ -1133,6 +1134,7 @@ async fn a_checked_list_row_names_its_list_creates_none_and_the_confirm_lists_it
         outbound: false,
         picked: None,
         consolidate: &std::collections::BTreeMap::new(),
+        seen_before: 0,
     };
     input.proposal = propose(&r, Stop::AppPorts, &gen_input);
     assert!(input.proposal.ip_lists.is_empty());
@@ -1181,6 +1183,7 @@ async fn a_consolidated_port_is_one_any_rule_and_the_confirm_says_what_it_also_a
         outbound: false,
         picked: None,
         consolidate: &consolidate,
+        seen_before: 0,
     };
     input.proposal = propose(&r, Stop::AppPorts, &gen_input);
     let b = pce.writer(&guard).plan_batch(input, &idx).await.unwrap();

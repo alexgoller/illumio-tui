@@ -44,6 +44,9 @@ pub struct GenInput<'a> {
     /// only. `Off` entries, and Any without the built-in Any IP list, are
     /// ignored.
     pub consolidate: &'a BTreeMap<PortSpec, Consolidate>,
+    /// The app's records "new since" left out of `flows` (`Since`): not
+    /// covered, counted.
+    pub seen_before: u64,
 }
 
 /// Row index by key; IP flows of folded peers find the folded row.
@@ -607,7 +610,10 @@ fn derive(rows: &[GenRow], global: Stop, input: &GenInput) -> Proposal {
         ip_lists: Vec::new(),
     };
     let mut groups: BTreeMap<(usize, Vec<String>, Vec<String>, bool), Group> = BTreeMap::new();
-    let mut cov = Coverage::default();
+    let mut cov = Coverage {
+        seen_before: input.seen_before,
+        ..Coverage::default()
+    };
     // Fan-in ports switched to one rule; Any only with the built-in list.
     let any = any_ip_list(input.idx);
     let modes: BTreeMap<&PortSpec, Consolidate> = input
@@ -728,8 +734,11 @@ fn derive(rows: &[GenRow], global: Stop, input: &GenInput) -> Proposal {
         *g.seen.entry(SeenFlow::of(f)).or_default() += 1;
         cov.covered += 1;
     }
-    cov.uncovered =
-        cov.unchecked + cov.folded_ips + cov.unsupported_proto + cov.broadcast_multicast;
+    cov.uncovered = cov.unchecked
+        + cov.seen_before
+        + cov.folded_ips
+        + cov.unsupported_proto
+        + cov.broadcast_multicast;
     let mut groups: Vec<Group> = groups.into_values().collect();
     // The app's ruleset first, then by the first row behind the rule.
     groups.sort_by_key(|g| (g.target, g.rows.first().copied()));
@@ -836,6 +845,7 @@ mod tests {
             outbound,
             picked: None,
             consolidate,
+            seen_before: 0,
         };
         let p = propose(&r, stop, &input);
         (r, p)
@@ -1511,6 +1521,7 @@ mod tests {
             outbound: false,
             picked: None,
             consolidate: &cons,
+            seen_before: 0,
         };
         let p = propose(&r, Stop::AppPorts, &input);
         assert!(p.rules.iter().all(|r| r.consolidated.is_none()));

@@ -243,6 +243,7 @@ pub(super) fn regen(model: &mut Model) {
             outbound: v.outbound,
             picked: v.picked.as_deref(),
             consolidate: &consolidate,
+            seen_before: 0,
         };
         propose(&v.rows, v.global, &input)
     };

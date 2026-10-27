@@ -540,6 +540,7 @@ pub async fn run(ctx: &Context, args: &GenArgs) -> Result<(), CliError> {
         outbound: args.outbound,
         picked: None,
         consolidate: &modes,
+        seen_before: 0,
     };
     let p = propose(&gen_rows, global, &input);
     // Each row behind a rule an override deny undercuts says so.

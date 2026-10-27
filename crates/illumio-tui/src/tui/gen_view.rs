@@ -973,6 +973,7 @@ mod tests {
             outbound: false,
             picked: None,
             consolidate: &BTreeMap::new(),
+            seen_before: 0,
         };
         let mut p = pce::generate::propose(&v.rows, v.global, &input);
         let row = p.rules[0].rows[0];
@@ -1114,6 +1115,7 @@ mod tests {
             outbound: false,
             picked: None,
             consolidate: &cons,
+            seen_before: 0,
         };
         v.proposal = Some(pce::generate::propose(&v.rows, v.global, &input));
         assert_eq!(
