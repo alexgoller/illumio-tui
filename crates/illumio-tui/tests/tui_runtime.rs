@@ -3781,3 +3781,81 @@ async fn generator_n_runs_one_focused_baseline_query() {
     );
     server.verify().await;
 }
+
+/// One GET of `p` answered with `body`, expected `times` times.
+async fn mount_get(server: &MockServer, p: &str, body: &str, times: u64) {
+    Mock::given(method("GET"))
+        .and(path(p))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_string(body.to_string())
+                .insert_header("Content-Type", "application/json"),
+        )
+        .expect(times)
+        .mount(server)
+        .await;
+}
+
+#[tokio::test]
+async fn snapshot_reads_each_list_once_and_reports_the_file() {
+    let server = MockServer::start().await;
+    // The index's four lists at startup: the snapshot reuses them.
+    mount_objects(&server).await;
+    mount_get(
+        &server,
+        "/api/v2/orgs/5/sec_policy/draft/rule_sets",
+        include_str!("../../../fixtures/rule_sets.json"),
+        1,
+    )
+    .await;
+    mount_get(
+        &server,
+        "/api/v2/orgs/5/sec_policy/active/rule_sets",
+        "[]",
+        1,
+    )
+    .await;
+    mount_get(
+        &server,
+        "/api/v2/orgs/5/sec_policy/draft/enforcement_boundaries",
+        include_str!("../../../fixtures/enforcement_boundaries.json"),
+        1,
+    )
+    .await;
+    mount_workloads(&server, 1).await;
+    let root = tempfile::tempdir().unwrap();
+    let mut m = model();
+    m.snapshots_root = Some(root.path().to_path_buf());
+    let mut keys = vec![(400, ch(':'))];
+    keys.extend(typed("snapshot nightly"));
+    keys.push((20, KeyCode::Enter));
+    // Again once the first is saved: every read a cache hit.
+    keys.push((400, ch(':')));
+    keys.extend(typed("snapshot"));
+    keys.push((20, KeyCode::Enter));
+    keys.push((400, ch('q')));
+    let m = key_session(&server, m, None, keys).await;
+    assert_eq!(
+        m.stats.calls,
+        1 + 4 + 4,
+        "health, the index, the snapshot's own four"
+    );
+    let dir = root.path().join("t");
+    let files: Vec<_> = std::fs::read_dir(&dir)
+        .unwrap()
+        .map(|e| e.unwrap().path())
+        .collect();
+    assert_eq!(files.len(), 2, "{files:?}");
+    let metas = illumio_tui::snapshot::list(&dir).unwrap();
+    assert_eq!(metas[0].label.as_deref(), Some("nightly"));
+    assert_eq!(metas[0].sections, ["policy", "labels", "workloads"]);
+    assert!(
+        m.status.text.starts_with("snapshot saved: ")
+            && m.status.text.contains(&metas[1].path.display().to_string()),
+        "{}",
+        m.status.text
+    );
+    let s = illumio_tui::snapshot::load(&metas[0].path).unwrap();
+    assert_eq!((s.profile.as_str(), s.pce.as_str(), s.org), ("t", "h", 5));
+    assert_eq!(s.sections.workloads.unwrap().len(), 4);
+}

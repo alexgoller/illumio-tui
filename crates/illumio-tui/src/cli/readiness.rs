@@ -229,7 +229,7 @@ fn filter(args: &ReadinessArgs) -> FilterArgs {
 /// The cost guard before any request (the window, the cap), as
 /// `traffic query`'s: `--app` validates its labels with the name index,
 /// which must not be loaded for a query that is then refused.
-fn guard(ctx: &Context, args: &ReadinessArgs) -> Result<(), CliError> {
+pub(crate) fn guard(ctx: &Context, args: &ReadinessArgs) -> Result<(), CliError> {
     let w = args
         .window
         .clone()

@@ -862,6 +862,13 @@ pub struct Model {
     /// without `$XDG_STATE_HOME` and `$HOME` (a move is refused). Set by the
     /// runtime; tests point it at a temp dir.
     pub records_dir: Option<std::path::PathBuf>,
+    /// Where snapshots are kept (`…/illumio-tui/snapshots`, one directory
+    /// per profile below); `None` without `$XDG_DATA_HOME` and `$HOME`
+    /// (`:snapshot` is refused). Set by the runtime; tests point it at a
+    /// temp dir.
+    pub snapshots_root: Option<std::path::PathBuf>,
+    /// A `:snapshot` is reading or writing: another waits for it.
+    pub snapshot_saving: bool,
     /// A key on `:readiness` or the enforcement overlay opened something
     /// else (the generator, a form, a confirm): once nothing is open and no
     /// write is on its way, that overlay comes back.
@@ -956,6 +963,8 @@ impl Model {
             enforce_view: None,
             enforce_seq: 0,
             records_dir: None,
+            snapshots_root: None,
+            snapshot_saving: false,
             enforce_back: None,
             enforce_return: Overlay::None,
             enforce_send: None,

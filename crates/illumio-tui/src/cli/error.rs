@@ -1,6 +1,7 @@
 //! CLI errors and their exit codes: 1 generic, 2 arguments/config, 3 auth,
 //! 4 PCE error, 5 rate limited, 6 write refused, 7 blocked since an
-//! enforcement (`enforce --watch`); 141 stdout closed by its reader (quiet).
+//! enforcement (`enforce --watch`), 9 snapshots differ (`snapshot diff
+//! --fail-on-change`); 141 stdout closed by its reader (quiet).
 use crate::config::ConfigError;
 use crate::marks::MarksError;
 use pce::PceError;
@@ -40,6 +41,10 @@ pub enum CliError {
     /// after the report.
     #[error("{0}")]
     Blocked(String),
+    /// `snapshot diff --fail-on-change` found a difference: exit 9, after
+    /// the report.
+    #[error("{0}")]
+    Changed(String),
     /// `marks.toml`: invalid (exit 2, every problem), locked by another
     /// writer (exit 3), a mark gone (exit 2), unreadable (exit 1).
     #[error("{}", .0.lines().join("; "))]
@@ -68,6 +73,7 @@ impl CliError {
             CliError::Bulk { code, .. } => *code,
             CliError::Refused(_) => 6,
             CliError::Blocked(_) => 7,
+            CliError::Changed(_) => 9,
             CliError::Write(e) => write_exit_code(e),
             CliError::Io(_) if self.is_broken_pipe() => BROKEN_PIPE_EXIT,
             CliError::Io(_) | CliError::Other(_) => 1,
@@ -91,6 +97,7 @@ impl CliError {
             CliError::Bulk { kind, .. } => (*kind).into(),
             CliError::Refused(_) => "write_refused".into(),
             CliError::Blocked(_) => "blocked_since_enforcement".into(),
+            CliError::Changed(_) => "snapshots_differ".into(),
             CliError::Marks(e) => match e {
                 MarksError::Parse(_) => "marks_invalid".into(),
                 MarksError::Locked => "marks_locked".into(),
@@ -169,6 +176,8 @@ mod tests {
             (b.exit_code(), b.kind().as_str()),
             (7, "blocked_since_enforcement")
         );
+        let c = CliError::Changed("3 changes".into());
+        assert_eq!((c.exit_code(), c.kind().as_str()), (9, "snapshots_differ"));
         assert!(wrapped.to_string().contains("audit"));
     }
 

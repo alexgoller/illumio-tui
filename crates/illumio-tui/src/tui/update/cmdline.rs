@@ -157,7 +157,36 @@ pub fn on_command(model: &mut Model, cmd: Command) -> Vec<Cmd> {
                 Vec::new()
             }
         },
+        Command::Snapshot(label) => save_snapshot(model, label),
         Command::Draft => show_policy(model, PolicyScope::Draft),
         Command::Active => show_policy(model, PolicyScope::Active),
     }
+}
+
+/// `:snapshot`: the reads `snapshot save` makes, then the file under the
+/// profile's snapshot directory; one at a time.
+fn save_snapshot(model: &mut Model, label: Option<String>) -> Vec<Cmd> {
+    if model.snapshot_saving {
+        model.status = StatusLine::info("a snapshot is being saved: wait for it");
+        return Vec::new();
+    }
+    let Some(root) = &model.snapshots_root else {
+        model.status =
+            StatusLine::error("no data directory for snapshots: set HOME or XDG_DATA_HOME");
+        return Vec::new();
+    };
+    let p = &model.profile;
+    let dir = crate::snapshot::profile_dir(root, &p.name);
+    let identity = crate::snapshot::Identity {
+        profile: p.name.clone(),
+        pce: p.host.clone(),
+        org: p.org_id,
+    };
+    model.snapshot_saving = true;
+    model.status = StatusLine::info("snapshot: reading policy, labels and workloads…");
+    vec![Cmd::SaveSnapshot {
+        dir,
+        identity,
+        label,
+    }]
 }

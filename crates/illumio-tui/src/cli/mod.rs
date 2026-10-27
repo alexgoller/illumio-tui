@@ -21,6 +21,7 @@ pub mod policy;
 pub mod profile;
 pub mod readiness;
 pub mod schema;
+pub mod snapshot;
 pub mod traffic;
 pub mod traffic_explain;
 pub mod where_used;
@@ -210,6 +211,14 @@ pub enum Command {
     /// --json --fields takes the schema's `data` properties; --csv --fields takes the CSV
     /// columns, which `schema COMMAND` names in its top-level $comment.
     Schema(schema::SchemaArgs),
+    /// Local snapshots of the policy, labels and workloads; what changed between two
+    ///
+    /// `snapshot save` reads (cached, counted) and writes one file under
+    /// $XDG_DATA_HOME/illumio-tui/snapshots/<profile>/ (else ~/.local/share/…); `snapshot diff`
+    /// compares two of them, or one with now (a live read). `list`, `rm` and `prune` read only
+    /// the files. The files hold what the reads returned, no credentials.
+    #[command(subcommand)]
+    Snapshot(snapshot::SnapshotCmd),
 }
 
 /// The command's name for `--csv`'s refusal when it prints no table (a
@@ -355,6 +364,7 @@ pub async fn run(global: GlobalArgs, command: Command) -> Result<(), CliError> {
         Command::WhereUsed(w) => where_used::run(&ctx, &w).await,
         Command::Traffic(t) => traffic::run(&ctx, &t).await,
         Command::Completions(_) => names_cache::refresh(&ctx).await,
+        Command::Snapshot(s) => snapshot::run(&ctx, &s).await,
         Command::Profile(_) | Command::Marks(_) | Command::Filters(_) | Command::Schema(_) => {
             unreachable!("handled above")
         }

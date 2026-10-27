@@ -248,6 +248,8 @@ pub enum Msg {
     /// The runtime wrote (or could not write) `:export`'s file: the status
     /// line text.
     Exported(Result<String, String>),
+    /// `:snapshot`'s file written (the status line text) or why not.
+    SnapshotSaved(Result<String, String>),
     /// A move from the enforcement overlay (`Cmd::EnforceApp`): the bulk
     /// report and its change record. Always arrives.
     EnforceDone(Box<crate::tui::enforce::EnforceOutcome>),
@@ -374,6 +376,13 @@ pub enum Cmd {
         force: bool,
         headers: Vec<&'static str>,
         rows: Vec<Vec<String>>,
+    },
+    /// `:snapshot`: the snapshot reads (cached), then the file in `dir`;
+    /// answered with `Msg::SnapshotSaved`.
+    SaveSnapshot {
+        dir: std::path::PathBuf,
+        identity: crate::snapshot::Identity,
+        label: Option<String>,
     },
     /// Plan a write (one GET for IP lists, services and workloads; none for
     /// labels) and show it in the confirm overlay. Never sends a write.

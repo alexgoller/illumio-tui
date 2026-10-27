@@ -1,0 +1,18 @@
+{
+  "type": "array",
+  "items": {
+    "type": "object",
+    "properties": {
+      "id": {"type": "string", "description": "the file name without .json: the UTC time it was taken"},
+      "path": {"type": "string"},
+      "bytes": {"type": "integer"},
+      "version": {"type": ["integer", "null"], "description": "the file format"},
+      "taken_at": {"type": ["string", "null"]},
+      "label": {"type": ["string", "null"]},
+      "sections": {"type": "array", "items": {"enum": ["policy", "labels", "workloads", "readiness"]}},
+      "problem": {"type": ["string", "null"], "description": "why the file cannot be read (not a snapshot, a newer format)"}
+    },
+    "required": ["id", "path", "bytes", "version", "taken_at", "label", "sections", "problem"],
+    "additionalProperties": false
+  }
+}

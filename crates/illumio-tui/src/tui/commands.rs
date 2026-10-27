@@ -50,6 +50,9 @@ pub enum Command {
     /// `:default <name>|off`: the screen's default saved filter, set or
     /// cleared.
     Default(String),
+    /// `:snapshot [label]`: the policy, labels and workloads saved to a
+    /// local snapshot file (`illumio-tui snapshot save`'s reads).
+    Snapshot(Option<String>),
     Quit,
     Help,
 }
@@ -122,6 +125,9 @@ pub fn parse(input: &str) -> Result<Command, String> {
         "filters" | "fl" => no_arg(Command::Filters),
         "load" => with_arg(Command::Load, "load <name>"),
         "default" => with_arg(Command::Default, "default <name> | off"),
+        "snapshot" | "snap" => Ok(Command::Snapshot(
+            (!arg.is_empty()).then(|| arg.to_string()),
+        )),
         "q" | "quit" => no_arg(Command::Quit),
         "help" | "h" | "?" => no_arg(Command::Help),
         other => Err(format!("unknown command :{other}; try :help")),
@@ -197,6 +203,11 @@ mod tests {
         assert_eq!(parse("active").unwrap(), Command::Active);
         assert_eq!(parse("q").unwrap(), Command::Quit);
         assert_eq!(parse("batch").unwrap(), Command::Batch);
+        assert_eq!(parse("snapshot").unwrap(), Command::Snapshot(None));
+        assert_eq!(
+            parse("snap before Q4").unwrap(),
+            Command::Snapshot(Some("before Q4".into()))
+        );
         assert_eq!(
             parse("save prod-blocked").unwrap(),
             Command::Save("prod-blocked".into())

@@ -1,0 +1,17 @@
+{
+  "type": "object",
+  "properties": {
+    "removed": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {"id": {"type": "string"}, "path": {"type": "string"}},
+        "required": ["id", "path"],
+        "additionalProperties": false
+      }
+    },
+    "kept": {"type": "integer", "description": "snapshots of the profile left"}
+  },
+  "required": ["removed", "kept"],
+  "additionalProperties": false
+}

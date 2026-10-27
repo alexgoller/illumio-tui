@@ -100,6 +100,7 @@ pub const HELP_GROUPS: &[HelpGroup] = &[
             key("", ":readiness  :enforce <app>  (alone: the picker)"),
             key("", ":ven  the VEN fleet of the loaded workloads"),
             key("", ":used  where the selected object is used (Objects)"),
+            key("", ":snapshot [label]  policy, labels, workloads to a file"),
             key("", ":writes [on|off]  :export[!] <path>  :batch"),
             key("", "(the table on screen as CSV; ! overwrites)"),
             key("", ":save <name>  the screen's filter, in the profile"),

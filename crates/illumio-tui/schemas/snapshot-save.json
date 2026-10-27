@@ -1,0 +1,29 @@
+{
+  "type": "object",
+  "properties": {
+    "id": {"type": "string", "description": "the snapshot's UTC time, 2026-10-27T031500Z: what snapshot diff and rm take"},
+    "path": {"type": "string"},
+    "bytes": {"type": "integer", "description": "the file's size"},
+    "profile": {"type": "string"},
+    "pce": {"type": "string", "description": "the PCE host the reads went to"},
+    "org": {"type": "integer"},
+    "taken_at": {"type": "string"},
+    "label": {"type": ["string", "null"]},
+    "sections": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "section": {"enum": ["policy", "labels", "workloads", "readiness"]},
+          "items": {"type": "integer", "description": "rulesets, label groups, IP lists, services and boundaries (policy); labels; workloads; apps (readiness)"},
+          "bytes": {"type": "integer"}
+        },
+        "required": ["section", "items", "bytes"],
+        "additionalProperties": false
+      }
+    },
+    "truncated": {"type": "array", "items": {"type": "string"}, "description": "the reads that hit their row cap: those sections are partial"}
+  },
+  "required": ["id", "path", "bytes", "profile", "pce", "org", "taken_at", "label", "sections", "truncated"],
+  "additionalProperties": false
+}

@@ -278,5 +278,16 @@ pub fn csv_columns(command: &Command) -> Vec<&'static str> {
         },
         Command::Schema(a) if a.command.is_empty() => vec!["kind", "command", "schema"],
         Command::Schema(_) => Vec::new(),
+        Command::Snapshot(s) => {
+            use super::snapshot::{
+                DIFF_HEADERS, LIST_HEADERS, RM_HEADERS, SAVE_HEADERS, SnapshotCmd as SN,
+            };
+            match s {
+                SN::Save(_) => SAVE_HEADERS.to_vec(),
+                SN::List => LIST_HEADERS.to_vec(),
+                SN::Diff(_) => DIFF_HEADERS.to_vec(),
+                SN::Rm(_) | SN::Prune(_) => RM_HEADERS.to_vec(),
+            }
+        }
     }
 }

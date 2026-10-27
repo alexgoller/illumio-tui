@@ -847,6 +847,14 @@ fn on_msg(model: &mut Model, msg: Msg) -> Vec<Cmd> {
             }
             Vec::new()
         }
+        Msg::SnapshotSaved(result) => {
+            model.snapshot_saving = false;
+            model.status = match result {
+                Ok(done) => StatusLine::info(done),
+                Err(e) => StatusLine::error(format!("snapshot: {e}")),
+            };
+            Vec::new()
+        }
         Msg::Exported(result) => {
             model.status = match result {
                 Ok(done) => StatusLine::info(done),
@@ -869,6 +877,8 @@ fn on_msg(model: &mut Model, msg: Msg) -> Vec<Cmd> {
         Msg::ProfileSwitched(result) => match result {
             Ok((info, limits)) => {
                 model.switching = false;
+                // The old PCE's snapshot task answers no more.
+                model.snapshot_saving = false;
                 model.profile = info;
                 model.limits = limits;
                 model.reset_data();
@@ -1253,6 +1263,8 @@ mod rule_form_ruleset_tests;
 mod rule_search_tests;
 #[cfg(test)]
 mod section_order_tests;
+#[cfg(test)]
+mod snapshot_tests;
 #[cfg(test)]
 mod tests;
 /// `t` on Policy: a rule or ruleset enabled ↔ disabled (issue #52).

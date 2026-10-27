@@ -131,6 +131,11 @@ pub const COMMANDS: &[(&str, &str)] = &[
     ("completions refresh", "completions-refresh"),
     ("completions refresh --clear", "completions-refresh"),
     ("schema", "schema-list"),
+    ("snapshot save", "snapshot-save"),
+    ("snapshot list", "snapshot-list"),
+    ("snapshot diff", "snapshot-diff"),
+    ("snapshot rm", "snapshot-rm"),
+    ("snapshot prune", "snapshot-rm"),
 ];
 
 /// Commands that print no envelope: a script, a file, a schema.
@@ -241,6 +246,22 @@ const FILES: &[(&str, &str)] = &[
         include_str!("../../schemas/schema-list.json"),
     ),
     ("services", include_str!("../../schemas/services.json")),
+    (
+        "snapshot-diff",
+        include_str!("../../schemas/snapshot-diff.json"),
+    ),
+    (
+        "snapshot-list",
+        include_str!("../../schemas/snapshot-list.json"),
+    ),
+    (
+        "snapshot-rm",
+        include_str!("../../schemas/snapshot-rm.json"),
+    ),
+    (
+        "snapshot-save",
+        include_str!("../../schemas/snapshot-save.json"),
+    ),
     (
         "traffic-dry-run",
         include_str!("../../schemas/traffic-dry-run.json"),
@@ -521,6 +542,7 @@ pub fn schema_of(command: &Command) -> Option<&'static str> {
     use super::pairing_profiles::PairingProfilesCmd as PP;
     use super::policy::{PolicyCmd as P, RulesAction as RA, RulesetsAction as RS};
     use super::profile::ProfileCmd as PR;
+    use super::snapshot::SnapshotCmd as SN;
     use super::traffic::TrafficCmd as T;
     use super::workloads::WorkloadsAction as W;
     if super::filters::saves_filter(command) {
@@ -610,6 +632,12 @@ pub fn schema_of(command: &Command) -> Option<&'static str> {
         },
         Command::Schema(a) if a.command.is_empty() => "schema-list",
         Command::Schema(_) => return None,
+        Command::Snapshot(s) => match s {
+            SN::Save(_) => "snapshot-save",
+            SN::List => "snapshot-list",
+            SN::Diff(_) => "snapshot-diff",
+            SN::Rm(_) | SN::Prune(_) => "snapshot-rm",
+        },
     })
 }
 

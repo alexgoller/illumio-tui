@@ -1,0 +1,66 @@
+{
+  "type": "object",
+  "properties": {
+    "from": {"$ref": "#/$defs/snapshot_end"},
+    "to": {"$ref": "#/$defs/snapshot_end"},
+    "changed": {"type": "boolean", "description": "anything differs in the sections compared"},
+    "sections": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "section": {"$ref": "#/$defs/snapshot_section"},
+          "added": {"type": "integer"},
+          "removed": {"type": "integer"},
+          "changed": {"type": "integer"}
+        },
+        "required": ["section", "added", "removed", "changed"],
+        "additionalProperties": false
+      }
+    },
+    "changes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "section": {"$ref": "#/$defs/snapshot_section"},
+          "change": {"enum": ["added", "removed", "changed"]},
+          "scope": {"enum": ["draft", "active", null], "description": "a ruleset's policy version; null elsewhere"},
+          "name": {"type": "string"},
+          "href": {"type": "string"},
+          "fields": {"type": "array", "items": {"type": "string"}, "description": "the fields that changed (labels, enforcement_mode, ven_version, rules, ranges …); empty when added or removed"},
+          "details": {"type": "array", "items": {"type": "string"}, "description": "the changed lines: - before, + after"}
+        },
+        "required": ["section", "change", "scope", "name", "href", "fields", "details"],
+        "additionalProperties": false
+      }
+    },
+    "not_compared": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "section": {"$ref": "#/$defs/snapshot_section"},
+          "reason": {"type": "string"}
+        },
+        "required": ["section", "reason"],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": ["from", "to", "changed", "sections", "changes", "not_compared"],
+  "additionalProperties": false,
+  "$defs": {
+    "snapshot_end": {
+      "type": "object",
+      "properties": {
+        "id": {"type": "string", "description": "the snapshot's id, or now for a live read"},
+        "taken_at": {"type": "string"},
+        "label": {"type": ["string", "null"]}
+      },
+      "required": ["id", "taken_at", "label"],
+      "additionalProperties": false
+    },
+    "snapshot_section": {"enum": ["rulesets", "labels", "label-groups", "iplists", "services", "boundaries", "workloads"]}
+  }
+}
