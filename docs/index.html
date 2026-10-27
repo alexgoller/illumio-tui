@@ -896,15 +896,12 @@ exchange | Production · 6 workloads · healthy 4, unmanaged 2 · selective 4
     <article class="recipe" aria-labelledby="r-unused-h">
       <h3 id="r-unused-h">Unused IP lists for a cleanup ticket</h3>
       <p>Every IP list no draft rule names, as CSV to attach to the ticket. Two cached reads (the IP lists and the draft rulesets), built-ins and lists pending deletion left out. Draft policy only: a list still in provisioned policy shows until you provision. On a PCE that keeps deny rules off the ruleset list, the rows say <code>certain</code> <code>false</code> (a deny rule may name them) and a warning says so; a ruleset list cut short lists none at all. Each row is a candidate: check it with <code>where-used iplist NAME</code> before it goes, since virtual services and firewall settings are not searched.</p>
-<!-- real output: illumio-tui hygiene --kind ip_list --csv --fields name,href,certain -->
 <pre><code><span class="p">$ </span>illumio-tui hygiene --kind ip_list --csv --fields name,href,certain &gt; unused-ip-lists.csv
-<span class="c"># illustrative output</span>
-default · 2 api calls · 41.2 KB · cache miss · 310 ms · unused: 3 IP lists · not searched: active policy (draft only), virtual services, virtual servers, enforcement boundaries, container workloads and their profiles, cloud resources, label mapping rules, RBAC scopes, firewall settings
+demo · 2 api calls · 118.2 KB · cache miss · 1298 ms · unused: 2 IP lists · not searched: active policy (draft only), virtual services, virtual servers, enforcement boundaries, container workloads and their profiles, cloud resources, label mapping rules, RBAC scopes, firewall settings
 <span class="p">$ </span>cat unused-ip-lists.csv
 name,href,certain
-Old DMZ,/orgs/1/sec_policy/draft/ip_lists/112,true
-Partner VPN 2019,/orgs/1/sec_policy/draft/ip_lists/87,true
-Test ranges,/orgs/1/sec_policy/draft/ip_lists/140,true
+link local,/orgs/5636114/sec_policy/draft/ip_lists/24206847997117021,true
+multicast,/orgs/5636114/sec_policy/draft/ip_lists/24206847997117025,true
 <span class="p">$ </span>illumio-tui hygiene --kind workload --table    <span class="c"># and the workloads missing role, app, env or loc</span></code></pre>
     </article>
 
