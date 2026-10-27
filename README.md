@@ -635,6 +635,17 @@ the full tab row (69 columns) the tabs read `Traf`, `Pol`, `Obj`, `Wl`, `Ev`.
   status names what the fresh read changed (`1 rule is in the draft since the preview: not
   written`). The rows scroll with the cursor (`↑ N more above · ↓ N more below`), `j` runs on
   into the outbound section. `Esc` returns (to the app overlay when opened from it).
+  **New since.** `N` proposes only for the traffic that is new: it asks for a baseline length
+  as Traffic `c` does (`7d`; `Ctrl-N`/`Ctrl-P` step) and runs the generator's own focused query
+  (`in`, plus `out` with `o` on) over exactly the window before the result's start, in its own
+  cache slots, through the usual cost guard, counted in the header. Each recent flow record is
+  judged as Traffic compare judges it (endpoints, port, proto, process and user, no decision):
+  only those whose key the baseline lacks feed the rows, the rules and the fan-in lines; the
+  rest are left out, so a row with no new flows disappears. The header (and a line under the
+  target) says `new since 7d before · 40 flows seen before`, `p` counts them first under `not
+  covered`, a truncated baseline warns (`new over-reports`). Rules already in the draft still
+  show as `exists`. `N` again shows every flow again without a request; `o` or another filter
+  ends it (`N` compares again), `r` keeps it. It needs complete data first.
   `D` shows, next to each flow's reported decision, the one the **draft** policy would make,
   so you can check whether your draft rules fix the blocked flows before provisioning. It is
   the PCE's own Explorer draft view: the PCE re-evaluates the result's own async query
@@ -978,6 +989,7 @@ the API call and byte counters at all times.
     illumio-tui app shop/prod --direction in --csv --section inbound > inbound.csv
     illumio-tui gen shop/prod --window 24h --json
     illumio-tui gen shop/prod --granularity role-ports --outbound --table
+    illumio-tui gen shop/prod --window 24h --baseline 7d --table
     illumio-tui readiness --table
     illumio-tui readiness --app shop/prod --app crm/prod --json
     illumio-tui traffic mesh --window 1h --no-user --json
@@ -1176,7 +1188,8 @@ only when a row came back (the exit code stays 0, so test the rows):
 
     0 6 * * * illumio-tui traffic groups --services --window 24h --baseline 7d --changes new,changed --json > /var/tmp/new.json 2>>/var/tmp/new.log && jq -e '.data | length > 0' /var/tmp/new.json >/dev/null && jq -r '.data[] | "\(.change) \(.src|join("/")) -> \(.dst|join("/")) \(.service) was \(.baseline_decision // "unseen")"' /var/tmp/new.json | mail -s "new traffic" alex@ryte.de
 
-Two Explorer queries a night (13 s on the demo PCE). The full recipe with its output:
+Two Explorer queries a night (13 s on the demo PCE). Propose the rules too: `gen shop/prod
+--baseline 7d --table` lists the rules only the new traffic needs. The full recipe with its output:
 https://alexgoller.github.io/illumio-tui/#recipes
 
 **Draft decision.** `--draft` (on `traffic query`/`groups`/`mesh` and `app`) also asks for
@@ -1220,7 +1233,8 @@ it); `--table` prints each section under a title line; `--csv` prints one and ne
 `--section` (without it, exit 2 before any request).
 
 `illumio-tui gen <app> [--granularity app-all|app-ports|role-ports|role-all] [--outbound]
-[--window W] [--max-results N] [--yes] [--consolidate <port>/<proto>=any|all ...]` proposes the allow rules the app's observed traffic
+[--window W | --since T | --from T --to T] [--max-results N] [--yes] [--consolidate <port>/<proto>=any|all ...]
+[--baseline DURATION [--changes new|new,changed]]` proposes the allow rules the app's observed traffic
 needs, as the TUI's generator would plan them, and writes nothing. `data` holds `app`,
 `keys`, `window`, `granularity`, `outbound`, `target` (the app's ruleset: `name`, `href`,
 `action` `existing`, `create`, `ambiguous` or `none`), `rows`, `ip_lists`, `rules`,
@@ -1261,6 +1275,19 @@ flows it takes. `--consolidate 5666/tcp=any` (repeatable; `all` for All Workload
 switches one of them to its one rule, as `c` does in the TUI; a malformed value or a port
 given twice exits 2 before any request, a port that is not listed (or `any` without the
 built-in Any IP list) exits 2, and `off` on a port that is not listed only warns.
+
+`gen <app> --baseline 7d` (#81) proposes only the rules the **new** traffic needs: the same
+focused queries again over `[start - 7d, start)` (in their own `focus-baseline` cache slots,
+through the same cost guard; `--since`/`--from` set the recent window, local time as in
+`traffic`), each recent flow record judged as `traffic --baseline` judges it, and only the
+records whose key the baseline lacks feed `rows`, `rules` and `consolidations`;
+`--changes new,changed` also feeds a key whose decisions changed (allowed then, blocked now).
+The others count under `preview.uncovered_by.seen_before`; a row with no flows left is not
+listed, rules already in the draft are still `exists`. `data.compare` is `{length, changes,
+recent, baseline, counts, seen_before}`, as `meta.compare` of `traffic` (`counts` in the app's
+flow records), and `meta.queries`/`meta.cost` count both sides. A truncated baseline warns
+(`baseline truncated, capped at N: new over-reports`), a capped recent side still exits 2;
+`--changes` without `--baseline`, or with `gone` or `same`, exits 2 before any request.
 
 `traffic query --blocked` prints the `--by in --show blocked`
 sections the same way. `mesh` gives one row per source user, source process, source group,
