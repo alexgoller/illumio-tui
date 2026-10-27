@@ -1171,6 +1171,14 @@ both (a mark on the draft decision, which the baseline never carries, cannot mak
 `--show-squelched` and `--no-marks` act on both. `--draft` evaluates the recent side only.
 `traffic explain` takes no `--baseline`; a saved filter keeps no baseline.
 
+A nightly "what is new" mail from cron: the last 24 hours against the 7 days before them, mailed
+only when a row came back (the exit code stays 0, so test the rows):
+
+    0 6 * * * illumio-tui traffic groups --services --window 24h --baseline 7d --changes new,changed --json > /var/tmp/new.json 2>>/var/tmp/new.log && jq -e '.data | length > 0' /var/tmp/new.json >/dev/null && jq -r '.data[] | "\(.change) \(.src|join("/")) -> \(.dst|join("/")) \(.service) was \(.baseline_decision // "unseen")"' /var/tmp/new.json | mail -s "new traffic" alex@ryte.de
+
+Two Explorer queries a night (13 s on the demo PCE). The full recipe with its output:
+https://alexgoller.github.io/illumio-tui/#recipes
+
 **Draft decision.** `--draft` (on `traffic query`/`groups`/`mesh` and `app`) also asks for
 each flow's decision under the draft policy, the PCE's own Explorer draft view: after the
 query completes, one `PUT <query>/update_rules?label_based_rules=false&offset=0&limit=<cap>`

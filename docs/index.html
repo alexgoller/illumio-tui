@@ -719,6 +719,27 @@ in         cart/Production      123/udp   2      93
 in         catalog/Production   123/udp   1      59
 ...</code></pre>
     </article>
+    <article class="recipe" aria-labelledby="r-new-h">
+      <h3 id="r-new-h">A nightly &ldquo;what is new&rdquo; mail</h3>
+      <p>Every morning, the last 24 hours against the 7 days before them: what started talking and what changed decision. Two Explorer queries a day, 13 s; <code>jq -e</code> keeps the mail away on a quiet night.</p>
+<pre><code><span class="c"># crontab -e: 06:00 every day</span>
+0 6 * * * illumio-tui traffic groups --services --window 24h --baseline 7d --changes new,changed --json &gt; /var/tmp/new.json 2&gt;&gt;/var/tmp/new.log &amp;&amp; jq -e '.data | length &gt; 0' /var/tmp/new.json &gt;/dev/null &amp;&amp; jq -r -f ~/new.jq /var/tmp/new.json | mail -s "new traffic" alex@ryte.de
+
+<span class="p">$ </span>cat ~/new.jq
+def g: map(select(. != "-")) | join("/");
+.data[] | "\(.change)  \(.src|g) → \(.dst|g)  \(.service)  was \(.baseline_decision // "unseen")"
+<span class="p">$ </span>illumio-tui traffic groups --services --window 24h --baseline 7d --changes new,changed --json &gt; new.json
+<span class="p">$ </span>jq -c .meta.compare.counts new.json
+{"new":56,"changed":4,"gone":181,"same":556}
+<span class="p">$ </span>jq -r -f ~/new.jq new.json | sort | head -6
+changed  ordering/Development → ipl:rfc1918  445/udp  was allowed,blocked
+changed  ordering/Production → ipl:rfc1918  445/udp  was allowed
+changed  pos/Staging → ipl:rfc1918  445/udp  was allowed,blocked
+changed  vdi/Users → ordering/Production  3389/udp  was allowed,blocked
+new  cart/Production → ipl:rfc1918  445/tcp  was unseen
+new  cart/Production → ipl:rfc1918  80/tcp  was unseen</code></pre>
+      <p>The status line and any warning (a truncated side) go to <code>new.log</code>. <code>--changes new,changed,gone</code> also lists what went quiet; <code>--show blocked</code> narrows it to new blocked flows, the ones an enforced app owner hears about first. The exit code stays 0 either way, so the test is on the rows, not on <code>$?</code>.</p>
+    </article>
 
     <article class="recipe" aria-labelledby="r-why-h">
       <h3 id="r-why-h">Answer &ldquo;why&rdquo; in one line</h3>
