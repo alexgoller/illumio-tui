@@ -765,21 +765,42 @@ demo · 13 api calls · 2360.3 KB · cache miss · 8726 ms · covers 1d · 2 que
 30 2 * * * illumio-tui snapshot save --label nightly &gt;/dev/null 2&gt;&gt;/var/tmp/snapshot.log &amp;&amp; illumio-tui snapshot prune --keep 60 &gt;/dev/null
 0 7 * * 1 illumio-tui snapshot diff "$(illumio-tui snapshot list --json | jq -r '[.data[] | select(.problem == null and .taken_at &lt; (now - 7*86400 | todate))] | last.id // &quot;previous&quot;')" latest --fail-on-change --table &gt; /var/tmp/week.txt 2&gt;&gt;/var/tmp/snapshot.log; [ $? -eq 9 ] &amp;&amp; mail -s "PCE changes this week" alex@ryte.de &lt; /var/tmp/week.txt
 
-<!-- real output: illumio-tui snapshot diff previous latest --table -->
-<span class="p">$ </span>illumio-tui snapshot diff previous latest --table    <span class="c"># illustrative output</span>
-snapshot diff · 2026-10-20T023000Z → 2026-10-27T023000Z · 3 changes
+<span class="p">$ </span>illumio-tui snapshot save --label first --table
+snapshot 2026-10-27T233054Z · ~/.local/share/illumio-tui/snapshots/demo/2026-10-27T233054Z.json · 539753 bytes
+section    items  bytes
+────────────────────────
+policy     236    203877
+labels     134    21951
+workloads  216    313749
+demo · 8 api calls · 920.2 KB · cache miss · 2908 ms
+<span class="p">$ </span>illumio-tui snapshot list --table
+snapshots · demo · 2
+id                  taken_at                     label  sections                 bytes   problem
+────────────────────────────────────────────────────────────────────────────────────────────────
+2026-10-27T232643Z  2026-10-27T23:26:43.340678Z  first  policy,labels,workloads  539753
+2026-10-27T233054Z  2026-10-27T23:30:54.516853Z  first  policy,labels,workloads  539753
+demo · 0 api calls · 0.0 KB · cache none · 10 ms</code></pre>
+      <p>A week with changes reads like this (<strong>illustrative</strong>: made-up rows, not output from the demo PCE, where nothing changed between the two snapshots above):</p>
+<pre><code><span class="p">$ </span>illumio-tui snapshot diff previous latest --table
+snapshot diff · 2026-10-20T023000Z → 2026-10-27T023000Z · 4 changes
 section       added  removed  changed
+─────────────────────────────────────
 rulesets      0      0        1
 labels        1      0        0
+label-groups  0      0        0
+iplists       0      0        0
+services      0      0        0
+boundaries    0      0        0
 workloads     0      1        1
-...
+
 changes
-section    change   scope  name              fields
-rulesets   changed  draft  Shop-Prod         rules
+section    change   scope  name            fields
+─────────────────────────────────────────────────────────────────
+rulesets   changed  draft  Shop-Prod       rules
   -allow role=db ← role=web PostgreSQL
   +allow role=db ← role=web PostgreSQL (disabled)
 labels     added           env=Staging
-workloads  changed         host-2.example    labels,enforcement_mode
+workloads  changed         host-2.example  labels,enforcement_mode
   -label env=Development
   +label env=Staging
   -enforcement_mode: visibility_only

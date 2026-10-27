@@ -1494,7 +1494,28 @@ A nightly snapshot and a Monday mail of the week's changes:
 
 The jq picks the newest readable snapshot taken over 7 days ago (whatever was saved by hand in
 between; `previous` while there is none yet); exit 9 means something changed, so a quiet week
-sends no mail. The full recipe: https://alexgoller.github.io/illumio-tui/#recipes
+sends no mail. On the demo PCE a save is eight GETs and half a megabyte:
+
+    $ illumio-tui snapshot save --label first --table
+    snapshot 2026-10-27T233054Z · ~/.local/share/illumio-tui/snapshots/demo/2026-10-27T233054Z.json · 539753 bytes
+    section    items  bytes
+    ────────────────────────
+    policy     236    203877
+    labels     134    21951
+    workloads  216    313749
+    demo · 8 api calls · 920.2 KB · cache miss · 2908 ms
+
+    $ illumio-tui snapshot list --table
+    snapshots · demo · 2
+    id                  taken_at                     label  sections                 bytes   problem
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+    2026-10-27T232643Z  2026-10-27T23:26:43.340678Z  first  policy,labels,workloads  539753
+    2026-10-27T233054Z  2026-10-27T23:30:54.516853Z  first  policy,labels,workloads  539753
+    demo · 0 api calls · 0.0 KB · cache none · 10 ms
+
+`cache miss` is expected: the cache lives in memory for one run, so a CLI command reads each list
+once (the TUI's `:snapshot` reuses what its screens loaded). The full recipe, with an
+illustrative diff: https://alexgoller.github.io/illumio-tui/#recipes
 
 ### Flow marks
 
