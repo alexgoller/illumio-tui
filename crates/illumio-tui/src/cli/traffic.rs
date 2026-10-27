@@ -4,7 +4,9 @@
 use super::context::{Context, cache_label};
 use super::error::CliError;
 use super::marked::{CliMarks, FlowMark, MarkedFlow, mark_cell, squelched};
-use super::output::{CompareMeta, CompareSide, Meta, SquelchedMeta, TableRows, Window, join_list};
+use super::output::{
+    CompareMeta, CompareSide, Meta, MetaCompare, SquelchedMeta, TableRows, Window, join_list,
+};
 use clap::{Args, Subcommand, ValueEnum};
 use jiff::Timestamp;
 use jiff::civil::Date;
@@ -2132,7 +2134,7 @@ impl CompareRun {
             }
         }
         self.fill_cost(meta, recent);
-        meta.compare = Some(self.compare_meta(recent, counts));
+        meta.compare = Some(MetaCompare::Traffic(self.compare_meta(recent, counts)));
     }
 
     /// Both sides' Explorer queries: `meta.queries` and `meta.cost`.

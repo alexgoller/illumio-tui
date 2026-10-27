@@ -100,6 +100,11 @@ pub fn compare_workloads(
     out
 }
 
+/// `10-20 06:00`: when a snapshot was taken, short (UTC, as its id).
+pub fn short_when(t: jiff::Timestamp) -> String {
+    t.strftime("%m-%d %H:%M").to_string()
+}
+
 /// Refuses a snapshot of another profile, PCE or org than `me` (as
 /// `snapshot diff` refuses two), naming both.
 pub fn check_baseline(s: &Snapshot, id: &str, me: &Identity) -> Result<(), String> {
@@ -292,11 +297,9 @@ pub fn sparkline(values: &[usize]) -> Vec<char> {
     values
         .iter()
         .map(|&v| {
-            if max == 0 {
-                SPARK[0]
-            } else {
-                SPARK[(v * (SPARK.len() - 1) + max / 2) / max]
-            }
+            (v * (SPARK.len() - 1) + max / 2)
+                .checked_div(max)
+                .map_or(SPARK[0], |i| SPARK[i])
         })
         .collect()
 }

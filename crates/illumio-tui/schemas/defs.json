@@ -183,6 +183,14 @@
           "type": "array",
           "items": {"type": "string"},
           "description": "with --unlabeled: the scope keys the workload has no label of"
+        },
+        "change": {
+          "enum": ["new", "changed", "gone", "same"],
+          "description": "with --baseline-snapshot: against the snapshot; gone: the snapshot's values"
+        },
+        "was": {
+          "type": ["string", "null"],
+          "description": "with --baseline-snapshot: a changed row's transitions (app: shop→cart · mode: visibility→selective)"
         }
       },
       "required": [

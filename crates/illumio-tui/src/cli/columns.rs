@@ -59,6 +59,8 @@ const WORKLOADS: &[&str] = &[
     "health",
     "href",
     "missing",
+    "change",
+    "was",
     "enforcement_mode",
 ];
 const FIELD_VALUE: &[&str] = &["field", "value"];

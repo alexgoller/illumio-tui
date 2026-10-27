@@ -2,15 +2,17 @@
 //! hrefs via the name index before querying.
 use super::context::{Context, cache_label};
 use super::error::CliError;
-use super::output::{TableRows, join_list};
+use super::output::{MetaCompare, SnapshotCompareMeta, TableRows, join_list};
 use super::write::{
     self, WriteFlags, label_in, parse_kv, resolve_labels, resolve_workload, run_plan,
 };
+use crate::snapshot::baseline::{WlChange, compare_workloads};
 use clap::{Args, Subcommand};
 use pce::label_filter::{
     LabelFilter, LabelTerm, MAX_COMBINATIONS, QueryError, group_filter, group_key, group_title,
 };
 use pce::models::{UNMANAGED, VenHealth, Workload, WorkloadFilter};
+use pce::traffic::{Change, ChangeSet, CompareCounts};
 use pce::ven::{HealthSet, VenSummary, VenTally};
 use pce::write::{
     IfMissing, InterfaceSpec, LabelRemoval, LabelsPatch, WorkloadDraft, WorkloadPatch,
@@ -145,6 +147,19 @@ pub struct WorkloadsCmd {
         default_missing_value = ""
     )]
     pub group: Option<Vec<String>>,
+    /// Compare the listed workloads with a snapshot's (`snapshot save`): latest, previous, or
+    /// its time (a prefix is enough), among the profile's snapshots that hold workloads. Rows
+    /// gain change (new, changed, gone, same) and was (a changed one's transitions: app:
+    /// shop→cart · mode: visibility→selective · ven: active→stopped · health:
+    /// healthy→offline); a gone one has the snapshot's values. The filters apply to both
+    /// sides. Reads the file only, no extra request; another PCE's snapshot is refused (exit 2).
+    /// JSON: meta.compare names the snapshot
+    #[arg(long, value_name = "SNAPSHOT")]
+    pub baseline_snapshot: Option<String>,
+    /// With --baseline-snapshot: the rows to print, any of new,changed,gone,same (default
+    /// new,changed,gone)
+    #[arg(long, value_name = "LIST", requires = "baseline_snapshot")]
+    pub changes: Option<String>,
     #[command(flatten)]
     pub saved: super::filters::SavedFilterArgs,
 }
@@ -394,7 +409,10 @@ pub struct WorkloadDeleteArgs {
 
 pub async fn workloads_cmd(ctx: &Context, cmd: &WorkloadsCmd) -> Result<(), CliError> {
     match &cmd.action {
-        None => run(ctx, &cmd.list, cmd.group.as_deref()).await,
+        None => {
+            let base = baseline(ctx, cmd)?;
+            run(ctx, &cmd.list, cmd.group.as_deref(), base.as_ref()).await
+        }
         Some(WorkloadsAction::Add(a)) => workload_add(ctx, a).await,
         Some(WorkloadsAction::Update(a)) => workload_update(ctx, a).await,
         Some(WorkloadsAction::Delete(a)) => workload_delete(ctx, a).await,
@@ -552,6 +570,9 @@ pub struct WorkloadRow {
     /// With `--unlabeled`: the keys checked that have no label.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub missing_labels: Option<Vec<String>>,
+    /// With `--baseline-snapshot`: `change` and `was`.
+    #[serde(flatten, skip_serializing_if = "Option::is_none")]
+    pub compare: Option<RowCompare>,
     /// The table's `labels` cell, keys in the profile's [`KeyOrder`]; JSON
     /// carries the `labels` array itself.
     #[serde(skip)]
@@ -573,8 +594,28 @@ impl WorkloadRow {
             sync_state: a.and_then(|a| a.sync_state),
             enforcement: workload.enforcement().map(str::to_string),
             missing_labels: None,
+            compare: None,
             health,
             workload,
+        }
+    }
+}
+
+/// A row's change against the snapshot (`--baseline-snapshot`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct RowCompare {
+    /// `new`, `changed`, `gone` (the snapshot's values) or `same`.
+    pub change: Change,
+    /// A changed row's transitions (`app: shop→cart · mode:
+    /// visibility→selective`); `null` on any other.
+    pub was: Option<String>,
+}
+
+impl RowCompare {
+    pub fn of(c: &WlChange) -> Self {
+        Self {
+            change: c.change,
+            was: (c.change == Change::Changed).then(|| c.was_text()),
         }
     }
 }
@@ -635,6 +676,13 @@ fn compact_age(secs: Option<u64>) -> String {
 /// Workloads printed as the list: the plain list's rows, or one group's.
 pub struct Rows<'a>(pub Vec<&'a WorkloadRow>);
 
+impl Rows<'_> {
+    /// Against a snapshot: the `change` and `was` columns last.
+    fn compared(&self) -> bool {
+        self.0.iter().any(|r| r.compare.is_some())
+    }
+}
+
 impl TableRows for Vec<WorkloadRow> {
     fn headers(&self) -> Vec<&'static str> {
         Rows(self.iter().collect()).headers()
@@ -669,10 +717,14 @@ impl TableRows for Rows<'_> {
         if self.0.iter().any(|r| r.missing_labels.is_some()) {
             h.push("missing");
         }
+        if self.compared() {
+            h.extend(["change", "was"]);
+        }
         h
     }
     fn rows(&self) -> Vec<Vec<String>> {
         let missing = self.0.iter().any(|r| r.missing_labels.is_some());
+        let compared = self.compared();
         self.0
             .iter()
             .map(|r| {
@@ -692,6 +744,11 @@ impl TableRows for Rows<'_> {
                 ];
                 if missing {
                     row.push(r.missing_labels.as_deref().unwrap_or_default().join(", "));
+                }
+                if compared {
+                    let c = r.compare.as_ref();
+                    row.push(c.map(|c| c.change.as_str()).unwrap_or_default().into());
+                    row.push(c.and_then(|c| c.was.clone()).unwrap_or_default());
                 }
                 row
             })
@@ -719,7 +776,7 @@ impl TableRows for Rows<'_> {
                     .map(|s| s.to_string())
                     .unwrap_or_default();
                 if let Some(m) = &r.missing_labels
-                    && let Some(cell) = row.last_mut()
+                    && let Some(cell) = row.get_mut(11)
                 {
                     *cell = join_list(m);
                 }
@@ -758,6 +815,8 @@ pub struct Selection {
     /// The query the request carried.
     pub filter: WorkloadFilter,
     pub rows: Vec<WorkloadRow>,
+    /// Against a baseline: the rows per change (the filters applied).
+    pub counts: Option<CompareCounts>,
     pub hit: bool,
     pub truncated: bool,
     /// No workload can match: no request was sent.
@@ -770,6 +829,19 @@ pub async fn select(
     ctx: &Context,
     args: &WorkloadsArgs,
     mode: pce::CacheMode,
+) -> Result<Selection, CliError> {
+    select_against(ctx, args, mode, None).await
+}
+
+/// [`select`], and with a baseline (a snapshot's workloads and when it was
+/// taken) each row's change against it, the baseline's workloads the
+/// answer lacks added as `gone` rows (the snapshot's values, its time's
+/// health) when the same filters keep them.
+pub async fn select_against(
+    ctx: &Context,
+    args: &WorkloadsArgs,
+    mode: pce::CacheMode,
+    base: Option<(&[Workload], jiff::Timestamp)>,
 ) -> Result<Selection, CliError> {
     let (enforcement_mode, managed) = enforcement_query(args.enforcement.as_deref(), args.managed)?;
     // `online` is the PCE's flag; offline is the VEN health (a stale
@@ -851,48 +923,92 @@ pub async fn select(
     }
     let now = jiff::Timestamp::now();
     let (unhealthy, offline, health) = args.health_filter();
-    let rows: Vec<WorkloadRow> = c
-        .value
-        .into_iter()
-        .map(|w| {
-            let mut r = WorkloadRow::new(w, now, &order);
-            r.missing_labels = unlabeled
-                .as_deref()
-                .map(|keys| r.workload.missing_label_keys(keys));
-            r
-        })
+    // Compared on the whole answer, before the local filters: a workload
+    // they hide now is not gone.
+    let compared = base.map(|(ws, at)| (compare_workloads(&c.value, now, ws, at), at));
+    let make = |w: Workload, at: jiff::Timestamp| {
+        let mut r = WorkloadRow::new(w, at, &order);
+        r.missing_labels = unlabeled
+            .as_deref()
+            .map(|keys| r.workload.missing_label_keys(keys));
+        r
+    };
+    let keep = |r: &WorkloadRow| {
         // The PCE filtered already; this holds the effective mode should it not.
-        .filter(|r| {
-            args.enforcement
-                .as_deref()
-                .is_none_or(|e| r.enforcement.as_deref() == Some(e))
-        })
-        .filter(|r| {
-            !unhealthy
+        args.enforcement
+            .as_deref()
+            .is_none_or(|e| r.enforcement.as_deref() == Some(e))
+            && (!unhealthy
                 || matches!(
                     r.health,
                     VenHealth::Warning | VenHealth::Error | VenHealth::Offline
-                )
-        })
-        // Offline is the VEN health, as the app's `o`.
-        .filter(|r| !offline || r.health == VenHealth::Offline)
-        .filter(|r| health.keeps(r.health))
-        .filter(|r| {
-            args.ven_version.as_deref().is_none_or(|p| {
+                ))
+            // Offline is the VEN health, as the app's `o`.
+            && (!offline || r.health == VenHealth::Offline)
+            && health.keeps(r.health)
+            && args.ven_version.as_deref().is_none_or(|p| {
                 r.health != VenHealth::Unmanaged
                     && r.workload
                         .agent_version()
                         .is_some_and(|v| pce::ven::version_matches(p, v))
             })
-        })
-        .filter(|r| r.missing_labels.as_ref().is_none_or(|m| !m.is_empty()))
-        // The whole label filter, as the app applies it: the query carried
-        // the plain any-of terms, `!` and `-` are only checked here.
-        .filter(|r| labels.keeps(&r.workload))
+            && r.missing_labels.as_ref().is_none_or(|m| !m.is_empty())
+            // The whole label filter, as the app applies it: the query carried
+            // the plain any-of terms, `!` and `-` are only checked here.
+            && labels.keeps(&r.workload)
+    };
+    let mut rows: Vec<WorkloadRow> = c
+        .value
+        .into_iter()
+        .map(|w| make(w, now))
+        .filter(|r| keep(r))
         .collect();
+    let mut counts = None;
+    if let Some((cmp, at)) = compared {
+        for r in &mut rows {
+            r.compare = cmp.of(&r.workload.href).map(RowCompare::of);
+        }
+        // What the request asked the PCE, checked on the snapshot's side.
+        let asked = |w: &Workload| {
+            let has = |field: Option<&str>, want: &Option<String>| {
+                want.as_deref().is_none_or(|x| {
+                    field.is_some_and(|f| f.to_lowercase().contains(&x.to_lowercase()))
+                })
+            };
+            has(w.hostname.as_deref(), &args.hostname)
+                && has(w.name.as_deref(), &args.name)
+                // A snapshot keeps no interfaces: `--ip` keeps no gone row.
+                && args.ip.is_none()
+                && args.online.is_none_or(|o| w.online == Some(o))
+                && managed.is_none_or(|m| m != w.is_unmanaged())
+        };
+        rows.extend(
+            cmp.gone
+                .into_iter()
+                .filter(|w| asked(w))
+                .map(|w| make(w, at))
+                .filter(|r| keep(r))
+                .map(|mut r| {
+                    r.compare = Some(RowCompare::of(&WlChange::of(Change::Gone)));
+                    r
+                }),
+        );
+        let mut n = CompareCounts::default();
+        for c in rows.iter().filter_map(|r| r.compare.as_ref()) {
+            n.add(c.change);
+        }
+        counts = Some(n);
+        if args.ip.is_some() {
+            warnings.push(
+                "--ip: a snapshot keeps no interfaces, so no workload is listed as gone"
+                    .to_string(),
+            );
+        }
+    }
     Ok(Selection {
         filter,
         rows,
+        counts,
         hit: c.hit,
         truncated: c.truncated,
         nothing,
@@ -907,12 +1023,64 @@ pub async fn select(
     })
 }
 
+/// `--baseline-snapshot`'s snapshot and `--changes`, checked and the
+/// file read before any request.
+pub struct Baseline {
+    pub id: String,
+    pub snapshot: crate::snapshot::Snapshot,
+    pub show: ChangeSet,
+}
+
+fn baseline(ctx: &Context, cmd: &WorkloadsCmd) -> Result<Option<Baseline>, CliError> {
+    use crate::snapshot::baseline::{BaselineError, load_baseline};
+    let Some(spec) = &cmd.baseline_snapshot else {
+        return Ok(None);
+    };
+    let show = match &cmd.changes {
+        Some(c) => ChangeSet::parse(c).map_err(|e| CliError::Args(format!("--changes: {e}")))?,
+        None => ChangeSet::default(),
+    };
+    let root = crate::snapshot::default_root().ok_or_else(|| {
+        CliError::Other("no data directory for snapshots: set HOME or XDG_DATA_HOME".into())
+    })?;
+    let dir = crate::snapshot::profile_dir(&root, &ctx.config.profile_name);
+    let me = crate::snapshot::Identity::of(&ctx.config.profile_name, ctx.pce.client());
+    let (m, snapshot) = load_baseline(&dir, spec, &me).map_err(|e| match e {
+        BaselineError::Usage(e) => CliError::Args(format!("--baseline-snapshot: {e}")),
+        BaselineError::File(e) => CliError::Other(e),
+    })?;
+    Ok(Some(Baseline {
+        id: m.id,
+        snapshot,
+        show,
+    }))
+}
+
 pub async fn run(
     ctx: &Context,
     args: &WorkloadsArgs,
     group: Option<&[String]>,
+    base: Option<&Baseline>,
 ) -> Result<(), CliError> {
-    let sel = select(ctx, args, ctx.cache_mode).await?;
+    let against = base.map(|b| {
+        (
+            b.snapshot.sections.workloads.as_deref().unwrap_or_default(),
+            b.snapshot.taken_at,
+        )
+    });
+    let mut sel = select_against(ctx, args, ctx.cache_mode, against).await?;
+    if let Some(b) = base {
+        if b.snapshot.truncated.iter().any(|t| t == "workloads") {
+            sel.warnings.push(format!(
+                "snapshot {}: its workloads read hit its row cap: gone over-reports",
+                b.id
+            ));
+        }
+        if sel.truncated {
+            sel.warnings
+                .push("the workloads read hit its row cap: new and gone over-report".into());
+        }
+    }
     for w in &sel.warnings {
         eprintln!("warning: {w}");
     }
@@ -924,7 +1092,18 @@ pub async fn run(
     let mut meta = ctx.meta(cache, sel.truncated, None);
     meta.local_filter = sel.local_filter;
     meta.warnings = Some(sel.warnings).filter(|w| !w.is_empty());
-    let rows = sel.rows;
+    let mut rows = sel.rows;
+    if let Some(b) = base {
+        rows.retain(|r| r.compare.as_ref().is_none_or(|c| b.show.contains(c.change)));
+        meta.compare = Some(MetaCompare::Snapshot(SnapshotCompareMeta {
+            snapshot: b.id.clone(),
+            taken_at: b.snapshot.taken_at,
+            label: b.snapshot.label.clone(),
+            changes: b.show.text(),
+            counts: sel.counts.unwrap_or_default(),
+            truncated: b.snapshot.truncated.iter().any(|t| t == "workloads"),
+        }));
+    }
     match group {
         None => ctx.emit_meta(&rows, &meta),
         Some(named) => {

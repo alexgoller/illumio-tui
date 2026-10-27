@@ -119,9 +119,10 @@ pub struct Meta {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cost: Option<std::borrow::Cow<'static, str>>,
     /// Traffic with `--baseline`: both windows, each side's truncation
-    /// and the rows per change.
+    /// and the rows per change; `workloads --baseline-snapshot`: the
+    /// snapshot and the rows per change.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub compare: Option<CompareMeta>,
+    pub compare: Option<MetaCompare>,
     /// `policy search`: the rules found of the rules loaded.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub matched: Option<MatchedMeta>,
@@ -194,7 +195,30 @@ pub struct WhereUsedMeta {
     pub not_searched: String,
 }
 
-/// `meta.compare`.
+/// `meta.compare`: traffic's baseline window, or the workloads' snapshot.
+#[derive(Debug, Clone, Serialize)]
+#[serde(untagged)]
+pub enum MetaCompare {
+    Traffic(CompareMeta),
+    Snapshot(SnapshotCompareMeta),
+}
+
+/// `meta.compare` of `workloads --baseline-snapshot`.
+#[derive(Debug, Clone, Serialize)]
+pub struct SnapshotCompareMeta {
+    /// The snapshot's id: the UTC time it was taken.
+    pub snapshot: String,
+    pub taken_at: jiff::Timestamp,
+    pub label: Option<String>,
+    /// The rows printed (`--changes`): `new,changed,gone`.
+    pub changes: String,
+    /// Rows per change, the filters applied, before `--changes`.
+    pub counts: pce::traffic::CompareCounts,
+    /// The snapshot's workloads read hit its row cap: gone over-reports.
+    pub truncated: bool,
+}
+
+/// `meta.compare` of traffic with `--baseline`.
 #[derive(Debug, Clone, Serialize)]
 pub struct CompareMeta {
     /// The baseline's length as given (`7d`).
@@ -696,8 +720,16 @@ pub fn meta_line(meta: &Meta) -> String {
     if let Some(n) = meta.queries {
         s.push_str(&format!(" · {}", pce::traffic::queries_text(n)));
     }
-    if let Some(c) = &meta.compare {
-        s.push_str(&format!(" · vs {} before · {}", c.length, c.counts.text()));
+    match &meta.compare {
+        Some(MetaCompare::Traffic(c)) => {
+            s.push_str(&format!(" · vs {} before · {}", c.length, c.counts.text()));
+        }
+        Some(MetaCompare::Snapshot(c)) => s.push_str(&format!(
+            " · vs snapshot {} · {}",
+            crate::snapshot::baseline::short_when(c.taken_at),
+            c.counts.text()
+        )),
+        None => {}
     }
     match meta.usage {
         Some("pce") => s.push_str(" · usage from the PCE"),

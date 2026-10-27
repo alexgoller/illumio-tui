@@ -90,64 +90,93 @@
     },
     "cost": {"type": "string", "description": "traffic explain and --baseline: the requests it makes, in words"},
     "compare": {
-      "type": "object",
-      "properties": {
-        "length": {"type": "string", "description": "--baseline as given"},
-        "changes": {"type": "string", "description": "the rows printed (--changes)"},
-        "recent": {
+      "anyOf": [
+        {
           "type": "object",
           "properties": {
-            "start": {"type": "string"},
-            "end": {"type": "string"},
-            "truncated": {"type": "boolean"},
-            "incomplete": {"type": "boolean"},
-            "cap": {"type": "integer"},
-            "cap_steps": {
-              "type": "array",
-              "items": {"type": "integer"},
-              "description": "with --backfill: every cap the side tried"
+            "length": {"type": "string", "description": "--baseline as given"},
+            "changes": {"type": "string", "description": "the rows printed (--changes)"},
+            "recent": {
+              "type": "object",
+              "properties": {
+                "start": {"type": "string"},
+                "end": {"type": "string"},
+                "truncated": {"type": "boolean"},
+                "incomplete": {"type": "boolean"},
+                "cap": {"type": "integer"},
+                "cap_steps": {
+                  "type": "array",
+                  "items": {"type": "integer"},
+                  "description": "with --backfill: every cap the side tried"
+                },
+                "queries": {"type": "integer", "description": "the Explorer queries the side took"},
+                "cache": {"enum": ["hit", "miss", "bypass", "none"]}
+              },
+              "required": ["start", "end", "truncated", "incomplete", "cap", "queries", "cache"],
+              "additionalProperties": false
             },
-            "queries": {"type": "integer", "description": "the Explorer queries the side took"},
-            "cache": {"enum": ["hit", "miss", "bypass", "none"]}
-          },
-          "required": ["start", "end", "truncated", "incomplete", "cap", "queries", "cache"],
-          "additionalProperties": false
-        },
-        "baseline": {
-          "type": "object",
-          "properties": {
-            "start": {"type": "string"},
-            "end": {"type": "string"},
-            "truncated": {"type": "boolean"},
-            "incomplete": {"type": "boolean"},
-            "cap": {"type": "integer"},
-            "cap_steps": {
-              "type": "array",
-              "items": {"type": "integer"},
-              "description": "with --backfill: every cap the side tried"
+            "baseline": {
+              "type": "object",
+              "properties": {
+                "start": {"type": "string"},
+                "end": {"type": "string"},
+                "truncated": {"type": "boolean"},
+                "incomplete": {"type": "boolean"},
+                "cap": {"type": "integer"},
+                "cap_steps": {
+                  "type": "array",
+                  "items": {"type": "integer"},
+                  "description": "with --backfill: every cap the side tried"
+                },
+                "queries": {"type": "integer", "description": "the Explorer queries the side took"},
+                "cache": {"enum": ["hit", "miss", "bypass", "none"]}
+              },
+              "required": ["start", "end", "truncated", "incomplete", "cap", "queries", "cache"],
+              "additionalProperties": false
             },
-            "queries": {"type": "integer", "description": "the Explorer queries the side took"},
-            "cache": {"enum": ["hit", "miss", "bypass", "none"]}
+            "counts": {
+              "type": "object",
+              "properties": {
+                "new": {"type": "integer"},
+                "changed": {"type": "integer"},
+                "gone": {"type": "integer"},
+                "same": {"type": "integer"}
+              },
+              "required": ["new", "changed", "gone", "same"],
+              "additionalProperties": false,
+              "description": "rows per change, before --changes"
+            }
           },
-          "required": ["start", "end", "truncated", "incomplete", "cap", "queries", "cache"],
-          "additionalProperties": false
-        },
-        "counts": {
-          "type": "object",
-          "properties": {
-            "new": {"type": "integer"},
-            "changed": {"type": "integer"},
-            "gone": {"type": "integer"},
-            "same": {"type": "integer"}
-          },
-          "required": ["new", "changed", "gone", "same"],
+          "required": ["length", "changes", "recent", "baseline", "counts"],
           "additionalProperties": false,
-          "description": "rows per change, before --changes"
+          "description": "traffic with --baseline: both exact windows, each side's truncation, rows per change"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "snapshot": {"type": "string", "description": "the snapshot's id: its UTC time"},
+            "taken_at": {"type": "string"},
+            "label": {"type": ["string", "null"]},
+            "changes": {"type": "string", "description": "the rows printed (--changes)"},
+            "counts": {
+              "type": "object",
+              "properties": {
+                "new": {"type": "integer"},
+                "changed": {"type": "integer"},
+                "gone": {"type": "integer"},
+                "same": {"type": "integer"}
+              },
+              "required": ["new", "changed", "gone", "same"],
+              "additionalProperties": false,
+              "description": "rows per change, the filters applied, before --changes"
+            },
+            "truncated": {"type": "boolean", "description": "the snapshot's workloads were capped: gone over-reports"}
+          },
+          "required": ["snapshot", "taken_at", "label", "changes", "counts", "truncated"],
+          "additionalProperties": false,
+          "description": "workloads with --baseline-snapshot: the snapshot and rows per change"
         }
-      },
-      "required": ["length", "changes", "recent", "baseline", "counts"],
-      "additionalProperties": false,
-      "description": "traffic with --baseline: both exact windows, each side's truncation, rows per change"
+      ]
     },
     "matched": {
       "type": "object",
