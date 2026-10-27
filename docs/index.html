@@ -196,7 +196,7 @@ illumio-tui 0.5.7</code></pre>
         <li><kbd>4</kbd><strong>Workloads.</strong> VEN health columns and a summary line, <code>h</code> unhealthy only, <code>H</code> by severity, <code>t</code> / <code>T</code> jump to Traffic with the workload as source / destination. A workload without a VEN shows enforcement <code>unmanaged</code>, as in the PCE UI, whatever mode the API reports for it (often <code>visibility_only</code>). Local filters, no request: <code>E</code> enforcement, <code>m</code> managed, <code>o</code> offline, <code>u</code> unlabeled (a <code>missing</code> column names the absent scope or role keys), <code>c</code> clears them and <code>h</code> (not the search); a filter line shows what is on and the count. <strong>VEN health:</strong> the line above the table counts the fleet (<code>VEN 120 · healthy 100 · warning 5 · error 2 · offline 13 · unmanaged 40</code>, in the health colours, <code>of 500 loaded (capped)</code> on a capped list), <code>v</code> cycles a health filter (warning, error, offline), and <code>:ven</code> shows counts per health state, VEN version (newest first, how many behind), enforcement mode and health message; <code>Enter</code> on a row filters the list to it. From the loaded list, no request. <code>f</code> filters by label (<code>app=shop,crm env=prod !role=db</code>: comma any of, space all of, <code>!</code> excludes, <code>app=-</code> no app label), <code>x</code> groups the list by app and env (the <code>g</code> keys) with VEN health and enforcement per group, <code>Space</code> / <code>z</code> fold, <code>s</code> orders the groups, <code>Enter</code> on a group narrows to it. All local, no request. <code>Space</code> on a workload marks it (<code>●</code>), <code>V</code> marks a group or everything shown, <code>Esc</code> clears; with writes armed <code>L</code> sets labels and <code>M</code> the enforcement of the marked workloads, a group or the row, in bulk.</li>
         <li><kbd>5</kbd><strong>Events.</strong> Severity-coloured audit events, filtered by severity, type, actor and window. The type filter takes comma-separated terms (<code>sec_policy, rule_set</code>), <code>!term</code> hides (<code>!user.*</code>), <code>*</code> globs the whole type (<code>*.delete</code>) and a leading <code>=</code> is exact (<code>!=user.login</code> hides that type only); <code>Ctrl-N</code> completes the loaded types. <code>warning+</code> keeps that severity and worse. The actor filter takes the same terms over the Actor column (<code>user:alex@ryte.de</code>, <code>agent:web01</code>, <code>system</code>), each matching the whole actor or the name after its kind: <code>=alex@ryte.de</code>, <code>user:*</code>, <code>!system</code>, <code>!agent:*</code>; <code>Ctrl-N</code> completes the loaded actors. <code>x</code> hides the row's exact type, <code>o</code> shows only it; <code>U</code> hides the row's actor, <code>u</code> shows only it. <code>t</code> lists the types by count (<code>Enter</code> or <code>o</code> only, <code>x</code> hide) and <code>Tab</code> switches it to the actors. All of this filters the loaded events, no request (the PCE is never asked to filter by actor); the header says what is hidden (<code>hiding 3 types · actor !system · 812 of 1,240</code>) and when the PCE's page was full. <code>Enter</code> shows what changed as a diff: only the changed fields, <code>-</code> before and <code>+</code> after, lists diffed by element, hrefs read as names; <code>J</code> toggles the raw JSON; in the detail <code>j</code>/<code>k</code> (or the arrows) step through the events and <code>Ctrl-d</code>/<code>Ctrl-u</code> scroll.</li>
       </ul>
-      <p>The <code>:</code> prompt takes <code>:traffic</code>, <code>:policy</code>, <code>:objects</code>, <code>:workloads</code>, <code>:events</code>, <code>:iplists</code>, <code>:filter</code>, <code>:window</code>, <code>:profile &lt;name&gt;</code>, <code>:focus</code>, <code>:app</code>, <code>:gen</code>, <code>:unicast</code>, <code>:marks</code>, <code>:used</code>, <code>:export &lt;path&gt;</code>, <code>:writes on|off</code>, <code>:batch</code>, <code>:draft</code>, <code>:active</code>, <code>:save</code>, <code>:filters</code>, <code>:load</code>, <code>:default</code>, <code>:help</code> and <code>:q</code>. <code>?</code> shows the keys of where you are first; <code>Tab</code> steps through the other groups, <code>a</code> shows them all.</p>
+      <p>The <code>:</code> prompt takes <code>:traffic</code>, <code>:policy</code>, <code>:objects</code>, <code>:workloads</code>, <code>:events</code>, <code>:iplists</code>, <code>:filter</code>, <code>:window</code>, <code>:profile &lt;name&gt;</code>, <code>:focus</code>, <code>:app</code>, <code>:gen</code>, <code>:unicast</code>, <code>:marks</code>, <code>:used</code>, <code>:exposure</code> (or <code>9</code>), <code>:export &lt;path&gt;</code>, <code>:writes on|off</code>, <code>:batch</code>, <code>:draft</code>, <code>:active</code>, <code>:save</code>, <code>:filters</code>, <code>:load</code>, <code>:default</code>, <code>:help</code> and <code>:q</code>. <code>?</code> shows the keys of where you are first; <code>Tab</code> steps through the other groups, <code>a</code> shows them all.</p>
     </div>
     <div>
       <h3>Five views of one traffic result</h3>
@@ -208,6 +208,7 @@ illumio-tui 0.5.7</code></pre>
         <li><strong>Blocked</strong>: blocked and potentially blocked flows by destination group and service.</li>
         <li><strong>Treemap</strong>: each source a box, its destinations tiles sized by connections (<code>b</code> for bytes) and coloured by decision; <code>hjkl</code> move, <code>Enter</code> zooms and drills.</li>
       </ul>
+      <p><code>9</code> (or <code>:exposure</code>) opens <strong>Exposure</strong>: which risky services (RDP, SMB, NetBIOS, RPC, WinRM, SSH, Telnet, VNC, the database and directory ports, or your profile&rsquo;s own list) reach each destination group, from where, and under which decision. One query over those ports, through the cost guard and in its own cache slot: the traffic result on screen is kept aside and <code>Esc</code> puts it back, without a request. One row per destination group and service with its sources (<em>intra</em>, other apps, unlabelled hosts and IP lists, <em>any</em> and <em>internet</em> flagged) and flows per decision; <em>exposed</em> rows (allowed from outside the group) first, in red, then potentially blocked, blocked and intra-only ones. The title sums up the selected service (<em>rdp: 12 destinations &middot; 4 exposed (allowed from other apps) &middot; 3 potentially blocked &middot; 5 blocked</em>), <code>Enter</code> drills into its flows, <code>E</code> explains the busiest exposing flow, squelch applies. On the CLI, <code>exposure</code>.</p>
       <p>Switching views, grouping, sorting and searching send nothing to the PCE. With writes armed, <code>w</code> turns a blocked flow into a draft allow rule (its Scope, <em>intra</em> or <em>extra</em>, switches on <kbd>Space</kbd> and keeps the consumers coherent; a line under them says what they match and warns of an extra-scope rule open to every app); once it is written, the flows on screen are re-evaluated against the draft (one PUT per query, like <code>D</code>), unless a query is running or <code>D</code> would ask first (a cached result, a large window or cap).</p>
       <p><code>F</code> focuses every view on one app: <code>X</code> cycles its inbound, outbound or both directions, <code>Esc</code> clears it. On a truncated result, <code>r</code> re-queries just that app, with its labels in the query.</p>
       <p><code>D</code> shows what the <strong>draft</strong> policy would decide for each flow, next to the reported decision: <code>blocked &rarr; allowed</code> in Flows, <em>would allow</em> counts in App-to-app, a <em>fixed by draft</em> step on <code>d</code>, and <em>draft: N blocked flows fixed</em> in the app screen. It is the PCE&rsquo;s own Explorer draft view and changes no policy: one PUT on the query you already ran, polls and one download, no new query. <code>D</code> again clears it with no request; <code>Esc</code> cancels it while it runs. On the CLI, <code>--draft</code>.</p>
@@ -549,6 +550,7 @@ payment/Production,payment/Production,8080/tcp,7,70438,0,0,0,7,0,0,70438,0</code
             <tr><td>5</td><td>rate limited</td><td>429 / 503 after backoff</td></tr>
             <tr><td>6</td><td>write refused</td><td>writes not enabled; <code>enforce</code> on an app that is not ready</td></tr>
             <tr><td>7</td><td>blocked since enforcement</td><td><code>enforce --watch</code> found blocked flows</td></tr>
+            <tr><td>8</td><td>exposed</td><td><code>exposure --fail-on-exposed</code> found a risky service allowed from outside its destination&rsquo;s group</td></tr>
             <tr><td>9</td><td>snapshots differ</td><td><code>snapshot diff --fail-on-change</code> found a change</td></tr>
           </tbody>
         </table>
@@ -615,6 +617,10 @@ counts   rule_sets=9, services=2</code></pre>
 <span class="p">$ </span>illumio-tui traffic groups --by pairs --since 2026-10-23T18:00 --baseline 30d --yes
 <span class="p">$ </span>illumio-tui traffic groups --by in --show blocked --since 2026-10-24 --baseline 7d --changes new,changed
 <span class="p">$ </span>illumio-tui traffic explain --src app=web --dst app=db --port 5432 --proto tcp
+
+<span class="c"># which risky services (RDP, SMB, SSH, databases …) reach what, and under which decision</span>
+<span class="p">$ </span>illumio-tui exposure --table
+<span class="p">$ </span>illumio-tui exposure --service rdp,smb --only exposed --json
 
 <span class="c"># one app: its profile, and the allow rules its traffic needs (never written)</span>
 <span class="p">$ </span>illumio-tui app shop/prod --window 24h --json
@@ -716,6 +722,28 @@ false
 1
 <span class="p">$ </span>jq '[.data.apps[] | select(.verdict == "ready")] | length' readiness.json
 0</code></pre>
+    </article>
+
+    <article class="recipe" aria-labelledby="r-rdp-h">
+      <h3 id="r-rdp-h">RDP from anywhere, as a CI gate</h3>
+      <p>One Explorer query over the RDP ports; <code>--fail-on-exposed</code> exits 8 when any destination takes RDP allowed from outside its own app, after printing the rows and the <code>traffic explain</code> command that names the rule letting it in. A truncated result without an exposed row is exit 4, never a silent pass.</p>
+<!-- real output: illumio-tui exposure --service rdp --fail-on-exposed --table -->
+<pre><code><span class="c"># illustrative output</span>
+<span class="p">$ </span>illumio-tui exposure --service rdp --fail-on-exposed --table || mail -s "RDP exposed" alex@ryte.de
+exposure · 1d · 3 rows · 1 exposed
+  rdp: 3 destinations · 1 exposed (allowed from other apps) · 1 potentially blocked · 1 blocked
+status       service  ports     dst                 sources        flows  conns  allowed  pot.blocked  blocked
+exposed      rdp      3389/tcp  jump/Production     2 ext (any)    4      61     4        0            0
+pot.blocked  rdp      3389/tcp  hr/Staging          1 app          1      3      0        1            0
+blocked      rdp      3389/tcp  payment/Production  2 apps         2      12     0        0            2
+
+which rule allows it (one Explorer query each, run on demand):
+service  dst
+rdp      jump/Production
+  illumio-tui traffic explain --dst app=jump,env=Production --port 3389 --proto tcp
+<span class="p">$ </span>echo $?
+8</code></pre>
+      <p>Your own list goes in the profile: <code>[profiles.prod.exposure] extra = { nfs = ["2049/tcp"] }</code> adds to the defaults, <code>services = {...}</code> replaces them.</p>
     </article>
 
     <article class="recipe" aria-labelledby="r-watch-h">
@@ -1077,6 +1105,11 @@ ven_version = "23.2.*"              <span class="c"># exact, or a * glob</span>
 traffic = "prod-blocked"
 events = "noise-free"</code></pre>
       <p><code>filter_defaults</code> names each screen's default: the TUI applies it at startup and after <code>:profile</code>, before the screen loads and without an extra request; the CLI only with <code>--default-filter</code>. One that names no filter or does not parse is ignored with a warning. Removing a filter that is a default removes the default. An events filter's type terms get <code>exclude_types</code> on top, so both apply.</p>
+      <h3>Risky services</h3>
+<pre><code>[profiles.demo.exposure]              <span class="c"># what exposure and 9 look for</span>
+extra = { nfs = ["2049/tcp"], kafka = ["9092/tcp"] }
+<span class="c"># services = { rdp = ["3389/tcp", "3389/udp"], ssh = ["22/tcp"] }   # replaces the list</span></code></pre>
+      <p>The default list: rdp, smb, netbios, rpc, winrm, ssh, telnet, vnc, mssql, mysql, postgres, oracle, mongodb, redis and ldap with their usual ports. Each entry is <code>PORT/PROTO</code> or <code>FROM-TO/PROTO</code>; a malformed one is a config error that names it (exit 2 on the CLI, the status line in the TUI), before any request.</p>
       <h3>The generator</h3>
       <p><code>ruleset_name</code> names a ruleset the policy generator creates, as a template over the scope keys (<code>RF-shop-prod</code>); every <code>{key}</code> must be a scope key and every scope key must appear. <code>consolidate_min_peers</code> is how many inbound peers on one port make it a fan-in line; DNS, NTP, Kerberos, LDAP, SMB, syslog, SNMP and monitoring-agent ports need 3.</p>
     </div>

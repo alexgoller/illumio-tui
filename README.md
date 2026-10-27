@@ -437,7 +437,7 @@ Five screens: `1` Traffic, `2` Policy, `3` Objects, `4` Workloads, `5` Events. T
 takes `:traffic`, `:policy`, `:objects`, `:workloads`, `:events`, `:iplists` (Objects on its
 IP lists tab), `:filter <expr>`, `:window <dur>`, `:profile <name>`, `:writes [on|off]`,
 `:export <path>`, `:draft`, `:active`, `:unicast`, `:focus [app]`, `:app [app]`, `:gen [app]`,
-`:readiness`, `:enforce [app]`, `:used` (where the selected object is used, as `W`), `:batch`, `:snapshot [label]` (see [Snapshots](#snapshots)), `:save <name>`, `:filters` (`:fl`), `:load <name>`,
+`:readiness`, `:enforce [app]`, `:exposure` (also `9`), `:used` (where the selected object is used, as `W`), `:batch`, `:snapshot [label]` (see [Snapshots](#snapshots)), `:save <name>`, `:filters` (`:fl`), `:load <name>`,
 `:default <name>|off`, `:help` and `:q` (each described below; saved filters under [Saved filters](#saved-filters)). `:export <path>` writes the table on
 screen as CSV (the rows shown, with the search and filters applied and in sort order; every
 column, whatever the terminal width, each cell whole; `~/` is the home directory), the same
@@ -535,7 +535,26 @@ the full tab row (69 columns) the tabs read `Traf`, `Pol`, `Obj`, `Wl`, `Ev`.
   and services blocked or potentially blocked towards it. **Treemap** draws each source as
   a box and its destinations as tiles sized by connections (`b` bytes) and coloured by
   decision: `h` / `j` / `k` / `l` move, `Enter` zooms into a source and then drills into a
-  destination, `Esc` zooms out. None of this sends a request. With writes on, `w` turns a
+  destination, `Esc` zooms out. None of this sends a request.
+  **Exposure** (`9` or `:exposure`, not in `v`'s cycle) answers which risky services reach
+  what, and under which decision: RDP, SMB, NetBIOS, RPC, WinRM, SSH, Telnet, VNC and the
+  database and directory ports (the profile's `[exposure]` list, see
+  [Exposure](#exposure)). It runs one query, through the cost guard, with the filter's window,
+  cap and sides and every port of the list as its services, in its own cache slot, so the
+  traffic result is neither evicted nor replaced: it is kept aside, and `Esc` on the view puts
+  it back, filter and view too, without a request. Each row is a destination group (the `g`
+  keys) and a risky service: its ports seen, its sources (`intra`, the group's own; `N apps`,
+  other labelled groups; `N ext`, unlabelled hosts and IP lists, `(any)` for the Any list,
+  `(internet)` for a public address) and its flows per decision. Exposed rows (allowed from
+  outside the group, in the bad colour) come first, then potentially blocked, blocked and
+  intra-only ones; the title has the selected service's summary (`rdp: 12 destinations · 4
+  exposed (allowed from other apps) · 3 potentially blocked · 5 blocked`). `Enter` drills into
+  Flows (the risky service's flows into that group), `E` (or `e`) explains the row's busiest
+  exposing flow from the loaded policy (no request; `D` in the overlay asks first, as
+  everywhere), squelched flows are left out (`M` shows them); `r`, `B`, `+`/`-` and `]`/`[`
+  re-run the exposure query in its slot, and `D`, `F` and `c` work on its result as on any
+  other (the view itself has no `Δ` column). `v` moves to the other views of the exposure result; `9` comes back.
+  With writes on, `w` turns a
   blocked flow (or the first one behind a peer row or a Mesh row) into a draft allow rule.
   `F` focuses all five views on one app, the row's source (on `in` sections and Blocked, its
   destination; `F` again takes the other side; on a row without an app, or with `:focus`
@@ -995,6 +1014,8 @@ the API call and byte counters at all times.
     illumio-tui gen shop/prod --window 24h --baseline 7d --table
     illumio-tui readiness --table
     illumio-tui readiness --app shop/prod --app crm/prod --json
+    illumio-tui exposure --table
+    illumio-tui exposure --service rdp,smb --only exposed --fail-on-exposed
     illumio-tui snapshot save --label "before the Q4 change"
     illumio-tui snapshot diff --table
     illumio-tui snapshot diff latest now --section rulesets,workloads
@@ -1043,7 +1064,8 @@ with `--yes`; without it the run stops at 10000 and stderr names the next cap.
 Errors go to stderr as JSON. Exit codes: 1 generic, 2 arguments or
 config, 3 auth, 4 PCE error, 5 rate limited, 6 write refused (by the guard, or `enforce` on an
 app that is not ready), 7 flows blocked since an enforcement (`enforce --watch`,
-`blocked_since_enforcement`), 141 stdout closed by its reader (`| head`; quiet, no error).
+`blocked_since_enforcement`), 8 a risky service exposed (`exposure --fail-on-exposed`,
+`exposed`), 141 stdout closed by its reader (`| head`; quiet, no error).
 
 `--csv` (beside `--table` and `--json`, exclusive with both) prints the same table as RFC 4180
 CSV for spreadsheets: a header row, `,` separators, quotes only around cells holding `,`, `"`
@@ -1516,6 +1538,72 @@ sends no mail. On the demo PCE a save is eight GETs and half a megabyte:
 `cache miss` is expected: the cache lives in memory for one run, so a CLI command reads each list
 once (the TUI's `:snapshot` reuses what its screens loaded). The full recipe, with an
 illustrative diff: https://alexgoller.github.io/illumio-tui/#recipes
+
+### Exposure
+
+`illumio-tui exposure [--window W] [--service rdp,ssh] [--only exposed] [--keys app,env]
+[--src ...] [--dst ...] [--exclude-src ...] [--exclude-dst ...] [--exclude-service ...]
+[--max-results N] [--backfill] [--yes] [--draft] [--no-marks] [--fail-on-exposed]` answers the
+first question of a ransomware readiness review: which risky services can reach what, today,
+and under which decision. It runs one Explorer query over the window (the profile's traffic
+window, 24h by default) whose services are every port of the risky list, with no other filter
+than the sides given (`--src`, `--dst` and the excludes, as on `traffic`), through the cost
+guard (a window over 7d or a cap over 10000 needs `--yes`), in its own cache slot;
+`--backfill` raises a truncated result's cap as on `traffic`, `--draft` adds the draft
+decision (one PUT `update_rules`, no policy change). Squelched flows (`marks.toml`) are left
+out. Read-only.
+
+The default list: `rdp` 3389/tcp, 3389/udp · `smb` 445/tcp, 139/tcp · `netbios` 137/udp,
+138/udp · `rpc` 135/tcp · `winrm` 5985/tcp, 5986/tcp · `ssh` 22/tcp · `telnet` 23/tcp · `vnc`
+5900/tcp · `mssql` 1433/tcp · `mysql` 3306/tcp · `postgres` 5432/tcp · `oracle` 1521/tcp ·
+`mongodb` 27017/tcp · `redis` 6379/tcp · `ldap` 389/tcp, 636/tcp. A profile replaces it
+(`services`) or adds to it (`extra`; a name already listed is replaced), `PORT/PROTO` or
+`FROM-TO/PROTO` each:
+
+    [profiles.prod.exposure]
+    extra = { nfs = ["2049/tcp"], kafka = ["9092/tcp"] }
+    # services = { rdp = ["3389/tcp", "3389/udp"], ssh = ["22/tcp"] }   # the whole list
+
+A malformed entry is a config error naming it (`exposure.extra.nfs: "2049": give a port and a
+protocol, e.g. 3389/tcp`; exit 2 before any request, the TUI's status line); other commands
+run as before. `--service` narrows the list (and the query) to some names; an unknown one is
+exit 2 with the names it knows.
+
+One row per destination group (`--keys`, default the profile's scope keys) and risky service:
+`service`, `ports` seen, `dst`, `status`, `sources` (`intra`: flow records from the group's
+own workloads; `apps`: other labelled groups; `ip_lists`: unlabelled hosts and IP lists, with
+`any` for the Any (0.0.0.0/0) list and `internet` for a public address among them), flows
+and connections per decision, `exposed_flows`, and `draft_allowed` / `draft_blocked` with
+`--draft`. `status` is `exposed` (allowed flows from outside the group), else
+`potentially_blocked`, else `blocked`, else `intra` (allowed from its own group only); rows
+sort in that order. `data.services` sums each service of the list (those no flow reached
+too): `rdp: 12 destinations · 4 exposed (allowed from other apps) · 3 potentially blocked · 5
+blocked`, the line the table prints above its rows. `--only` keeps rows of some statuses
+(the summary still counts all). Which rule allows an exposed row is not looked up (a request
+per row): each exposed row's `explain` holds the `traffic explain` arguments that answer it
+(one query, run when you choose), and the table prints the commands under its rows:
+
+<!-- real output: illumio-tui exposure --table -->
+    exposure · 1d · 3 rows · 1 exposed
+      rdp: 1 destination · 1 exposed (allowed from other apps) · 0 potentially blocked · 0 blocked
+      ssh: 1 destination · 0 exposed (allowed from other apps) · 0 potentially blocked · 1 blocked
+      postgres: 1 destination · 0 exposed (allowed from other apps) · 0 potentially blocked · 0 blocked · 1 intra only
+    status   service   ports     dst        sources       flows  conns  allowed  pot.blocked  blocked
+    exposed  rdp       3389/tcp  shop/prod  1 ext         1      4      1        0            0
+    blocked  ssh       22/tcp    shop/prod  1 ext (any)   1      2      0        0            1
+    intra    postgres  5432/tcp  shop/prod  intra         1      310    1        0            0
+
+    which rule allows it (one Explorer query each, run on demand):
+    service  dst
+    rdp      shop/prod
+      illumio-tui traffic explain --dst app=shop,env=prod --port 3389 --proto tcp
+
+(Illustrative.) `--csv` prints the rows with full columns (`explain` as the command line).
+Exit 0 always, except `--fail-on-exposed`: exit 8 (`exposed`) after the report when a row is
+exposed, and exit 4 when none is but the result is truncated or incomplete (the answer is not
+complete), for CI and cron:
+
+    illumio-tui exposure --service rdp --fail-on-exposed --json > rdp.json || echo "RDP exposed"
 
 ### Flow marks
 
