@@ -681,6 +681,10 @@ fn render_exposure(model: &Model, f: &mut Frame, area: Rect) {
     let keys = x
         .marks_meta(TrafficView::Exposure)
         .unwrap_or_else(|| "Enter flows · E explain · Esc leaves".into());
+    // Squelch never hides an exposure quietly: said in every form.
+    let sq = (x.exposure_squelched > 0)
+        .then(|| format!("{} exposed squelched (M)", x.exposure_squelched));
+    let sq = sq.as_deref();
     let sort = crate::tui::ui::widgets::table::header_meta(table);
     let join = |parts: &[Option<&str>]| {
         parts
@@ -694,14 +698,14 @@ fn render_exposure(model: &Model, f: &mut Frame, area: Rect) {
     let (long, short) = (long.as_deref(), short.as_deref());
     let room = area.width.saturating_sub(16) as usize;
     let meta = [
-        join(&[long, Some(&keys), Some(&sort)]),
-        join(&[long, Some(&sort)]),
-        join(&[short, Some(&keys), Some(&sort)]),
-        join(&[short, Some(&sort)]),
+        join(&[sq, long, Some(&keys), Some(&sort)]),
+        join(&[sq, long, Some(&sort)]),
+        join(&[sq, short, Some(&keys), Some(&sort)]),
+        join(&[sq, short, Some(&sort)]),
     ]
     .into_iter()
     .find(|m| Span::raw(m.as_str()).width() <= room)
-    .unwrap_or_else(|| join(&[short]));
+    .unwrap_or_else(|| join(&[sq, short]));
     let title = unit_title(TrafficView::Exposure.title(), &meta, area.width);
     let block = panel(&title, &meta, t, true);
     let theme = t.clone();

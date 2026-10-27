@@ -3,7 +3,7 @@
 //! decision. One Explorer query over the list's ports brings the flows;
 //! this module names the list, checks a profile's own, and turns the flows
 //! into one row per destination group and risky service. No request here.
-use super::aggregate::{ConnsByDecision, DraftCounts, group_key};
+use super::aggregate::{ConnsByDecision, DraftCounts, group_key, group_values};
 use super::filter::parse_service;
 use super::resolved::{ResolvedEndpoint, ResolvedFlow};
 use crate::models::{PolicyDecision, ServiceMatch, proto_name, proto_number};
@@ -198,9 +198,9 @@ pub fn service_of<'a>(list: &'a [RiskyService], f: &ResolvedFlow) -> Option<&'a 
     list.iter().find(|s| s.matches(f))
 }
 
-/// Where a row stands: allowed from outside its group (`exposed`), else
-/// potentially blocked, else blocked; `intra` when only its own group's
-/// flows are allowed. The order rows sort in.
+/// Where a row stands, judged on the flows from outside its group:
+/// allowed (`exposed`), else potentially blocked, else blocked; `intra`
+/// when only its own group's flows reach it. The order rows sort in.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Status {
@@ -353,6 +353,19 @@ fn external(ep: &ResolvedEndpoint) -> bool {
     ep.labels.is_empty() || !ep.is_workload()
 }
 
+/// Whether `f` stays inside its destination's group: both ends labelled
+/// workloads whose group values are equal and set for every key. Anything
+/// else (an IP list, an unlabelled or unmanaged host, a workload missing a
+/// group key) is from outside: a report of exposure may over-report, never
+/// hide one.
+pub fn inside_group(f: &ResolvedFlow, keys: &[String]) -> bool {
+    if external(&f.src) || external(&f.dst) {
+        return false;
+    }
+    let dst = group_values(&f.dst, keys);
+    !dst.iter().any(|v| v == "-") && group_values(&f.src, keys) == dst
+}
+
 #[derive(Default)]
 struct Acc {
     ports: BTreeSet<(u16, String)>,
@@ -365,6 +378,10 @@ struct Acc {
     potentially_blocked: u64,
     blocked: u64,
     exposed_flows: u64,
+    /// Potentially blocked and blocked flow records from outside the group:
+    /// what the statuses after `exposed` are judged on.
+    outside_pb: u64,
+    outside_blocked: u64,
     conns: ConnsByDecision,
     draft: Option<DraftCounts>,
     /// (exposing, connections) of the sample so far.
@@ -391,7 +408,7 @@ pub fn exposure_rows(
         if let Some(p) = f.port {
             a.ports.insert((p, f.proto.clone()));
         }
-        let inside = src == dst;
+        let inside = inside_group(f, keys);
         if inside {
             a.sources.intra += 1;
         } else if external(&f.src) {
@@ -412,6 +429,13 @@ pub fn exposure_rows(
         }
         let exposing = !inside && f.policy_decision == PolicyDecision::Allowed;
         a.exposed_flows += u64::from(exposing);
+        if !inside {
+            match f.policy_decision {
+                PolicyDecision::PotentiallyBlocked => a.outside_pb += 1,
+                PolicyDecision::Blocked => a.outside_blocked += 1,
+                _ => {}
+            }
+        }
         DraftCounts::add(&mut a.draft, f);
         let better = a
             .sample
@@ -426,9 +450,9 @@ pub fn exposure_rows(
         .map(|((at, dst), a)| {
             let status = if a.exposed_flows > 0 {
                 Status::Exposed
-            } else if a.potentially_blocked > 0 {
+            } else if a.outside_pb > 0 {
                 Status::PotentiallyBlocked
-            } else if a.blocked > 0 {
+            } else if a.outside_blocked > 0 {
                 Status::Blocked
             } else {
                 Status::Intra
@@ -817,6 +841,120 @@ mod tests {
         assert!(!rows.is_empty());
         assert!(rows.iter().all(|r| r.status != Status::Exposed));
         assert!(rows.windows(2).all(|w| w[0].status <= w[1].status));
+    }
+
+    #[test]
+    fn an_unlabelled_destination_is_never_its_sources_group() {
+        let list = default_services();
+        let any = "Any (0.0.0.0/0 and ::/0)";
+        // A managed workload without labels, in the Any list, takes RDP
+        // from the internet (also in the Any list).
+        let bare = ResolvedEndpoint {
+            ip: Some("10.0.2.30".into()),
+            hostname: Some("new-host".into()),
+            workload_href: Some("/orgs/5/workloads/new".into()),
+            ip_lists: vec![any.into()],
+            ..ResolvedEndpoint::default()
+        };
+        let rows = exposure_rows(
+            &[flow(
+                ip("203.0.113.7", &[any]),
+                bare,
+                3389,
+                "tcp",
+                Allowed,
+                3,
+            )],
+            &list,
+            &keys(),
+        );
+        assert_eq!(rows[0].status, Status::Exposed);
+        assert_eq!(rows[0].sources.intra, 0);
+        assert!(rows[0].sources.internet && rows[0].sources.any);
+        // Corp into an unmanaged host in Corp: not intra.
+        let rows = exposure_rows(
+            &[flow(
+                ip("10.1.4.9", &["Corp"]),
+                ip("10.1.4.20", &["Corp"]),
+                445,
+                "tcp",
+                Allowed,
+                1,
+            )],
+            &list,
+            &keys(),
+        );
+        assert_eq!(rows[0].status, Status::Exposed);
+        assert_eq!(rows[0].sources.ip_lists, 1);
+    }
+
+    #[test]
+    fn workloads_missing_a_group_key_are_no_group() {
+        let list = default_services();
+        let role = |r: &str, host: &str| ResolvedEndpoint {
+            hostname: Some(host.into()),
+            workload_href: Some(format!("/orgs/5/workloads/{host}")),
+            labels: vec![ResolvedLabel {
+                href: format!("/orgs/5/labels/role-{r}"),
+                key: "role".into(),
+                value: r.into(),
+            }],
+            ..ResolvedEndpoint::default()
+        };
+        let rows = exposure_rows(
+            &[flow(
+                role("web", "a"),
+                role("db", "b"),
+                445,
+                "tcp",
+                Allowed,
+                1,
+            )],
+            &list,
+            &keys(),
+        );
+        assert_eq!(rows[0].status, Status::Exposed, "-/- is no group");
+        assert_eq!(rows[0].sources.apps, 1);
+        // shop with no env into shop with no env: outside too.
+        let shop = |host: &str| ResolvedEndpoint {
+            labels: vec![ResolvedLabel {
+                href: "/orgs/5/labels/app-shop".into(),
+                key: "app".into(),
+                value: "shop".into(),
+            }],
+            ..role("x", host)
+        };
+        let rows = exposure_rows(
+            &[flow(shop("a"), shop("b"), 22, "tcp", Allowed, 1)],
+            &list,
+            &keys(),
+        );
+        assert_eq!(rows[0].status, Status::Exposed);
+    }
+
+    #[test]
+    fn intra_flows_alone_never_set_a_blocked_status() {
+        let list = default_services();
+        let rows = exposure_rows(
+            &[
+                flow(wl("a", "p"), wl("a", "p"), 22, "tcp", PotentiallyBlocked, 1),
+                flow(wl("a", "p"), wl("a", "p"), 22, "tcp", Blocked, 1),
+            ],
+            &list,
+            &keys(),
+        );
+        assert_eq!(rows[0].status, Status::Intra);
+        assert_eq!((rows[0].potentially_blocked, rows[0].blocked), (1, 1));
+        let rows = exposure_rows(
+            &[flow(wl("x", "p"), wl("a", "p"), 137, "udp", Blocked, 1)],
+            &list,
+            &keys(),
+        );
+        assert_eq!(
+            (rows[0].service.as_str(), rows[0].status),
+            ("netbios", Status::Blocked),
+            "a udp-only service"
+        );
     }
 
     #[test]

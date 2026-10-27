@@ -206,6 +206,8 @@ async fn one_query_over_the_risky_ports_makes_the_rows_and_names_the_explain() {
         json!([
             "traffic",
             "explain",
+            "--src",
+            "ip:10.1.4.9",
             "--dst",
             "app=shop,env=prod",
             "--port",
@@ -250,7 +252,7 @@ async fn the_table_prints_the_summary_the_rows_and_the_explain_footer() {
     );
     assert!(
         text.contains(
-            "illumio-tui traffic explain --dst app=shop,env=prod --port 3389 --proto tcp"
+            "illumio-tui traffic explain --src ip:10.1.4.9 --dst app=shop,env=prod --port 3389 --proto tcp"
         ),
         "{text}"
     );
@@ -336,7 +338,7 @@ async fn csv_prints_the_rows_and_fields_pick() {
     );
     assert!(
         first.ends_with(
-            "illumio-tui traffic explain --dst app=shop,env=prod --port 3389 --proto tcp\""
+            "illumio-tui traffic explain --src ip:10.1.4.9 --dst app=shop,env=prod --port 3389 --proto tcp\""
         ),
         "{first}"
     );
@@ -389,4 +391,80 @@ async fn a_malformed_list_or_an_unknown_service_is_refused_before_any_request() 
         .assert()
         .success();
     assert!(server.received_requests().await.unwrap().is_empty());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_truncated_result_without_an_exposed_row_is_exit_4_with_fail_on_exposed() {
+    let server = MockServer::start().await;
+    mount(&server, 1).await;
+    let home = tempfile::tempdir().unwrap();
+    // flows_count 4 at a cap of 4: truncated; ssh is only blocked.
+    let a = cmd(&server, home.path())
+        .args([
+            "exposure",
+            "--json",
+            "--service",
+            "ssh",
+            "--max-results",
+            "4",
+            "--fail-on-exposed",
+        ])
+        .assert()
+        .code(4);
+    let out = schema_check::envelope(&a.get_output().stdout);
+    assert_eq!(out["meta"]["truncated"], true);
+    assert_eq!(out["data"]["rows"][0]["status"], "blocked");
+    let err: Value = serde_json::from_slice(&a.get_output().stderr).unwrap();
+    assert_eq!(err["error"]["kind"], "incomplete");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn squelch_hides_an_exposed_row_from_the_table_never_from_the_gate() {
+    let home = tempfile::tempdir().unwrap();
+    let dir = home.path().join("illumio-tui");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(
+        dir.join("marks.toml"),
+        "[[mark]]\nid = \"m-corp\"\naction = \"squelch\"\nsrc = { ip_list = \"Corp\" }\ndst = \"any\"\ncomment = \"scanner\"\n",
+    )
+    .unwrap();
+    let server = MockServer::start().await;
+    mount(&server, 1).await;
+    let a = cmd(&server, home.path())
+        .args(["exposure", "--json", "--fail-on-exposed"])
+        .assert()
+        .code(8);
+    let out = schema_check::envelope(&a.get_output().stdout);
+    let rows = out["data"]["rows"].as_array().unwrap();
+    let rdp = rows.iter().find(|r| r["service"] == "rdp").unwrap();
+    assert_eq!(rdp["status"], "exposed");
+    assert_eq!(rdp["squelched"], true);
+    assert!(
+        rows.iter()
+            .filter(|r| r["service"] != "rdp")
+            .all(|r| r.get("squelched").is_none())
+    );
+    let warnings = out["meta"]["warnings"].to_string();
+    assert!(
+        warnings.contains("1 exposed row squelched (marks.toml): rdp shop/prod"),
+        "{warnings}"
+    );
+
+    let server = MockServer::start().await;
+    mount(&server, 1).await;
+    let a = cmd(&server, home.path())
+        .args(["exposure", "--table"])
+        .assert()
+        .success();
+    let text = String::from_utf8_lossy(&a.get_output().stdout).to_string();
+    assert!(
+        text.contains(
+            "0 exposed · 1 exposed row squelched (in --json, counted by --fail-on-exposed)"
+        ),
+        "{text}"
+    );
+    assert!(
+        !text.contains("3389/tcp"),
+        "the row itself is hidden: {text}"
+    );
 }

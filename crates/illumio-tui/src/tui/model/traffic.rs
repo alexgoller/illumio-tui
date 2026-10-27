@@ -223,6 +223,9 @@ pub struct TrafficState {
     pub exposure: Option<ExposureMode>,
     /// The Exposure view's rows, rebuilt with the others while it is on.
     pub exposure_rows: TableView<ExposureRow>,
+    /// Exposed rows squelch hides from the Exposure view (`M` shows
+    /// them): its title says how many, an exposure is never hidden quietly.
+    pub exposure_squelched: usize,
 }
 
 /// Exposure mode (#82): the risky services asked for, and what the screen
@@ -269,10 +272,12 @@ pub enum Drill {
         direction: Option<Direction>,
         decisions: Decisions,
     },
-    /// An Exposure row: every flow of the risky service to the group.
+    /// An Exposure row: the flows it counted, those to the group whose
+    /// first service in `list` (the row's rule) is `service`.
     Exposure {
         dst: Vec<String>,
-        service: RiskyService,
+        service: String,
+        list: Vec<RiskyService>,
     },
     /// A section's peer row: its peer and service under `app`.
     Peer {
@@ -309,8 +314,9 @@ impl Drill {
                     && &f.service_text() == service
             }
             Drill::Mesh { key, cols } => &mesh_key(f, keys, *cols) == key,
-            Drill::Exposure { dst, service } => {
-                service.matches(f) && &group_key(&f.dst, keys) == dst
+            Drill::Exposure { dst, service, list } => {
+                pce::traffic::exposure::service_of(list, f).is_some_and(|s| &s.name == service)
+                    && &group_key(&f.dst, keys) == dst
             }
             Drill::App {
                 app,
@@ -348,7 +354,7 @@ impl Drill {
                 key.dst.join("/"),
                 key.service_text()
             ),
-            Drill::Exposure { dst, service } => format!("* → {} {}", dst.join("/"), service.name),
+            Drill::Exposure { dst, service, .. } => format!("* → {} {service}", dst.join("/")),
             Drill::App {
                 app,
                 direction,
@@ -449,6 +455,7 @@ impl TrafficState {
             recent_view: None,
             exposure: None,
             exposure_rows: TableView::new(exposure_columns()),
+            exposure_squelched: 0,
         }
     }
 
@@ -985,6 +992,24 @@ impl TrafficState {
         let rows = match &self.exposure {
             Some(x) => pce::traffic::exposure_rows(self.view_flows(), &x.services, &self.keys),
             None => Vec::new(),
+        };
+        // The exposed rows of the unsquelched flows no shown row is
+        // exposed for.
+        self.exposure_squelched = match &self.exposure {
+            Some(x) if self.unsquelched.is_some() => {
+                pce::traffic::exposure_rows(self.focus_flows(), &x.services, &self.keys)
+                    .iter()
+                    .filter(|h| {
+                        h.status == ExposureStatus::Exposed
+                            && !rows.iter().any(|r| {
+                                r.status == ExposureStatus::Exposed
+                                    && r.service == h.service
+                                    && r.dst == h.dst
+                            })
+                    })
+                    .count()
+            }
+            _ => 0,
         };
         let draft = rows.iter().any(|r| r.draft.is_some());
         let cols: Vec<Column<ExposureRow>> = exposure_columns()
@@ -1953,12 +1978,17 @@ impl TrafficState {
     pub fn drop_draft(&mut self) -> bool {
         let running = self.cancel_draft_run();
         let mut dropped = false;
-        if let Some(d) = self.unfocused.as_mut().filter(|d| d.draft.is_some()) {
-            for f in &mut d.flows {
-                f.draft_policy_decision = None;
+        // The result kept aside by the focus or by exposure mode too: its
+        // draft decisions are as stale as the one on screen.
+        let aside = self.exposure.as_mut().and_then(|x| x.before_data.as_mut());
+        for d in [self.unfocused.as_mut(), aside].into_iter().flatten() {
+            if d.draft.is_some() {
+                for f in &mut d.flows {
+                    f.draft_policy_decision = None;
+                }
+                d.draft = None;
+                dropped = true;
             }
-            d.draft = None;
-            dropped = true;
         }
         self.clear_draft() || dropped || running
     }

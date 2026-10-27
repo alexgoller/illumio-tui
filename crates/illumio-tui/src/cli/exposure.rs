@@ -89,11 +89,13 @@ pub struct ExposureArgs {
     /// status polls; it changes no policy): draft_allowed, draft_blocked per row
     #[arg(long)]
     pub draft: bool,
-    /// Ignore marks.toml: squelched flows count too
+    /// Ignore marks.toml: squelched flows are shown too (they always count for
+    /// --fail-on-exposed)
     #[arg(long)]
     pub no_marks: bool,
-    /// Exit 8 (exposed) when any row is exposed, after the report: a CI or cron gate. A
-    /// truncated or incomplete result without an exposed row is exit 4
+    /// Exit 8 (exposed) when any row is exposed, after the report: a CI or cron gate. Rows
+    /// squelch hides count too. A truncated or incomplete result without an exposed row is
+    /// exit 4
     #[arg(long)]
     pub fail_on_exposed: bool,
 }
@@ -127,6 +129,10 @@ pub struct ExposureOut {
     pub row: ExposureRow,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub explain: Option<Vec<String>>,
+    /// An exposed row squelch hides from the table (marks.toml): still in
+    /// JSON, and still counted by `--fail-on-exposed`.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub squelched: bool,
 }
 
 /// What `data` holds.
@@ -162,35 +168,36 @@ pub fn explain_args(r: &ExposureRow, keys: &[String], window: Option<&str>) -> O
         return None;
     }
     let f: &ResolvedFlow = &r.sample;
-    let dst = if f.dst.is_workload() && !f.dst.labels.is_empty() {
-        let terms: Vec<String> = keys
-            .iter()
-            .zip(group_values(&f.dst, keys))
-            .filter(|(_, v)| v != "-")
-            .map(|(k, v)| format!("{k}={v}"))
-            .collect();
-        (!terms.is_empty()).then(|| terms.join(","))
-    } else {
-        None
-    };
-    let dst = dst.or_else(|| f.dst.ip.as_ref().map(|ip| format!("ip:{ip}")))?;
+    let dst = side_term(&f.dst, keys)?;
     let proto = matches!(f.proto.as_str(), "tcp" | "udp").then_some(f.proto.clone())?;
-    let mut args: Vec<String> = [
-        "traffic",
-        "explain",
-        "--dst",
-        &dst,
-        "--port",
-        &f.port?.to_string(),
-        "--proto",
-        &proto,
-    ]
-    .map(String::from)
-    .to_vec();
+    let port = f.port?.to_string();
+    let mut args: Vec<String> = vec!["traffic".into(), "explain".into()];
+    // The exposing flow's source, so the answer is about that flow.
+    if let Some(src) = side_term(&f.src, keys) {
+        args.extend(["--src".into(), src]);
+    }
+    args.extend(["--dst", &dst, "--port", &port, "--proto", &proto].map(String::from));
     if let Some(w) = window {
         args.extend(["--window".into(), w.to_string()]);
     }
     Some(args)
+}
+
+/// One side of an explain command: a labelled workload's group labels
+/// (the keys it has), else its address.
+fn side_term(ep: &pce::traffic::ResolvedEndpoint, keys: &[String]) -> Option<String> {
+    if ep.is_workload() && !ep.labels.is_empty() {
+        let terms: Vec<String> = keys
+            .iter()
+            .zip(group_values(ep, keys))
+            .filter(|(_, v)| v != "-")
+            .map(|(k, v)| format!("{k}={v}"))
+            .collect();
+        if !terms.is_empty() {
+            return Some(terms.join(","));
+        }
+    }
+    ep.ip.as_ref().map(|ip| format!("ip:{ip}"))
 }
 
 /// The command line of `explain_args`.
@@ -230,6 +237,13 @@ struct Rows<'a> {
     draft: bool,
 }
 
+impl Rows<'_> {
+    /// The rows the table and CSV print: squelched ones left out.
+    fn shown(&self) -> impl Iterator<Item = &ExposureOut> {
+        self.rows.iter().filter(|o| !o.squelched)
+    }
+}
+
 impl TableRows for Rows<'_> {
     fn units(&self) -> Option<&'static str> {
         Some(
@@ -255,8 +269,7 @@ impl TableRows for Rows<'_> {
         h
     }
     fn rows(&self) -> Vec<Vec<String>> {
-        self.rows
-            .iter()
+        self.shown()
             .map(|o| {
                 let r = &o.row;
                 let mut cells = vec![
@@ -282,8 +295,7 @@ impl TableRows for Rows<'_> {
         CSV_COLUMNS.to_vec()
     }
     fn full_rows(&self) -> Vec<Vec<String>> {
-        self.rows
-            .iter()
+        self.shown()
             .map(|o| {
                 let r = &o.row;
                 let s = &r.sources;
@@ -334,6 +346,7 @@ impl Explains<'_> {
     fn named(&self) -> impl Iterator<Item = (&ExposureOut, &[String])> {
         self.0
             .iter()
+            .filter(|o| !o.squelched)
             .filter_map(|o| o.explain.as_deref().map(|a| (o, a)))
     }
 }
@@ -385,22 +398,53 @@ pub async fn run(ctx: &Context, args: &ExposureArgs) -> Result<(), CliError> {
             .squelched_where(|x| exposure::service_of(&list, x).is_some()),
     });
     cm.fill(&mut meta, act.as_ref(), sq);
+    // Squelch hides rows from the table, never an exposure from the gate:
+    // the exposed rows of every flow that no shown row is exposed for.
+    let hidden: Vec<ExposureRow> = match &part {
+        Some(_) => exposure::exposure_rows(&f.flows, &list, &keys)
+            .into_iter()
+            .filter(|h| {
+                h.status == Status::Exposed
+                    && !all.iter().any(|r| {
+                        r.status == Status::Exposed && r.service == h.service && r.dst == h.dst
+                    })
+            })
+            .collect(),
+        None => Vec::new(),
+    };
+    if !hidden.is_empty() {
+        meta.warnings.get_or_insert_with(Vec::new).push(format!(
+            "{} exposed row{} squelched (marks.toml): {}; --fail-on-exposed counts them",
+            hidden.len(),
+            if hidden.len() == 1 { "" } else { "s" },
+            hidden
+                .iter()
+                .map(|h| format!("{} {}", h.service, h.dst_text()))
+                .collect::<Vec<_>>()
+                .join(", ")
+        ));
+    }
     let summaries = exposure::summarize(&all, &list);
-    let exposed = all.iter().filter(|r| r.status == Status::Exposed).count();
+    let shown_exposed = all.iter().filter(|r| r.status == Status::Exposed).count();
+    let exposed = shown_exposed + hidden.len();
     let only: Vec<Status> = args.only.iter().map(|o| Status::from(*o)).collect();
+    let out = |row: ExposureRow, squelched: bool| ExposureOut {
+        explain: explain_args(&row, &keys, args.window.as_deref()),
+        row,
+        squelched,
+    };
     let report = ExposureReport {
         window: compact_duration(f.span),
         draft: f.draft.is_some(),
         services: summaries,
         rows: all
             .into_iter()
-            .filter(|r| only.is_empty() || only.contains(&r.status))
-            .map(|row| ExposureOut {
-                explain: explain_args(&row, &keys, args.window.as_deref()),
-                row,
-            })
+            .map(|r| out(r, false))
+            .chain(hidden.into_iter().map(|r| out(r, true)))
+            .filter(|o| only.is_empty() || only.contains(&o.row.status))
             .collect(),
     };
+    let squelched = exposed - shown_exposed;
     let rows = Rows {
         rows: &report.rows,
         draft: report.draft,
@@ -408,12 +452,18 @@ pub async fn run(ctx: &Context, args: &ExposureArgs) -> Result<(), CliError> {
     let explains = Explains(&report.rows);
     // The title, then a line per service some flow reached (never clipped
     // as a table cell would be).
+    let shown = report.rows.iter().filter(|o| !o.squelched).count();
     let mut title = format!(
-        "exposure · {} · {} row{} · {exposed} exposed",
+        "exposure · {} · {shown} row{} · {shown_exposed} exposed",
         report.window,
-        report.rows.len(),
-        if report.rows.len() == 1 { "" } else { "s" }
+        if shown == 1 { "" } else { "s" }
     );
+    if squelched > 0 {
+        title.push_str(&format!(
+            " · {squelched} exposed row{} squelched (in --json, counted by --fail-on-exposed)",
+            if squelched == 1 { "" } else { "s" }
+        ));
+    }
     for s in report.services.iter().filter(|s| s.destinations > 0) {
         title.push_str(&format!("\n  {}", s.text()));
     }

@@ -60,7 +60,11 @@
           "explain": {
             "type": "array",
             "items": {"type": "string"},
-            "description": "exposed rows: the illumio-tui arguments that say which rule allows it (traffic explain …; one Explorer query, not run here)"
+            "description": "exposed rows: the illumio-tui arguments that say which rule allows it (traffic explain --src … --dst …; one Explorer query, not run here)"
+          },
+          "squelched": {
+            "type": "boolean",
+            "description": "true on an exposed row whose exposing flows marks.toml squelches: left out of the table and CSV, still counted by --fail-on-exposed; absent otherwise"
           }
         },
         "required": [

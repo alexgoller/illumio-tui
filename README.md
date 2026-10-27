@@ -540,10 +540,11 @@ the full tab row (69 columns) the tabs read `Traf`, `Pol`, `Obj`, `Wl`, `Ev`.
   what, and under which decision: RDP, SMB, NetBIOS, RPC, WinRM, SSH, Telnet, VNC and the
   database and directory ports (the profile's `[exposure]` list, see
   [Exposure](#exposure)). It runs one query, through the cost guard, with the filter's window,
-  cap and sides and every port of the list as its services, in its own cache slot, so the
-  traffic result is neither evicted nor replaced: it is kept aside, and `Esc` on the view puts
-  it back, filter and view too, without a request. Each row is a destination group (the `g`
-  keys) and a risky service: its ports seen, its sources (`intra`, the group's own; `N apps`,
+  cap and sides and every port of the list as its services, in its own cache slot. The
+  traffic result on screen is kept aside, and `Esc` on the view puts it back, filter and view
+  too, without a request (a write's re-evaluation clears its draft decisions there too). Each row is a destination group (the `g`
+  keys) and a risky service: its ports seen, its sources (`intra`, the group's own: both ends
+  labelled workloads with every group key set and equal; anything else is from outside; `N apps`,
   other labelled groups; `N ext`, unlabelled hosts and IP lists, `(any)` for the Any list,
   `(internet)` for a public address) and its flows per decision. Exposed rows (allowed from
   outside the group, in the bad colour) come first, then potentially blocked, blocked and
@@ -551,9 +552,11 @@ the full tab row (69 columns) the tabs read `Traf`, `Pol`, `Obj`, `Wl`, `Ev`.
   exposed (allowed from other apps) · 3 potentially blocked · 5 blocked`). `Enter` drills into
   Flows (the risky service's flows into that group), `E` (or `e`) explains the row's busiest
   exposing flow from the loaded policy (no request; `D` in the overlay asks first, as
-  everywhere), squelched flows are left out (`M` shows them); `r`, `B`, `+`/`-` and `]`/`[`
-  re-run the exposure query in its slot, and `D`, `F` and `c` work on its result as on any
-  other (the view itself has no `Δ` column). `v` moves to the other views of the exposure result; `9` comes back.
+  everywhere), squelched flows are left out (`M` shows them; the title counts the exposed rows
+  they hide, `1 exposed squelched (M)`); `r`, `B`, `+`/`-` and `]`/`[` re-run the exposure
+  query in its slot. `D`, `F` and `c` work on its result as on any other, in their usual
+  slots (the draft, focus and baseline ones), so after `Esc` the result put back may need its
+  `D`, `F` or `c` query again (the view itself has no `Δ` column). `v` moves to the other views of the exposure result; `9` comes back.
   With writes on, `w` turns a
   blocked flow (or the first one behind a peer row or a Mesh row) into a draft allow rule.
   `F` focuses all five views on one app, the row's source (on `in` sections and Blocked, its
@@ -1550,8 +1553,10 @@ window, 24h by default) whose services are every port of the risky list, with no
 than the sides given (`--src`, `--dst` and the excludes, as on `traffic`), through the cost
 guard (a window over 7d or a cap over 10000 needs `--yes`), in its own cache slot;
 `--backfill` raises a truncated result's cap as on `traffic`, `--draft` adds the draft
-decision (one PUT `update_rules`, no policy change). Squelched flows (`marks.toml`) are left
-out. Read-only.
+decision (one PUT `update_rules`, no policy change). Squelch (`marks.toml`) hides rows from
+the table and CSV, never an exposure: an exposed row only squelched flows make is still in
+`--json` (`squelched: true`), named in `meta.warnings` and the title (`1 exposed row
+squelched`), and counted by `--fail-on-exposed`. Read-only.
 
 The default list: `rdp` 3389/tcp, 3389/udp · `smb` 445/tcp, 139/tcp · `netbios` 137/udp,
 138/udp · `rpc` 135/tcp · `winrm` 5985/tcp, 5986/tcp · `ssh` 22/tcp · `telnet` 23/tcp · `vnc`
@@ -1574,14 +1579,17 @@ One row per destination group (`--keys`, default the profile's scope keys) and r
 own workloads; `apps`: other labelled groups; `ip_lists`: unlabelled hosts and IP lists, with
 `any` for the Any (0.0.0.0/0) list and `internet` for a public address among them), flows
 and connections per decision, `exposed_flows`, and `draft_allowed` / `draft_blocked` with
-`--draft`. `status` is `exposed` (allowed flows from outside the group), else
-`potentially_blocked`, else `blocked`, else `intra` (allowed from its own group only); rows
+`--draft`. A flow is from inside the group only when both ends are labelled workloads whose
+values are set and equal for every group key; an IP list, an unlabelled or unmanaged host or a
+workload missing a key is from outside, so a report may over-report an exposure but never
+hide one. `status` is judged on the flows from outside: `exposed` (allowed), else
+`potentially_blocked`, else `blocked`, else `intra` (only the group's own flows); rows
 sort in that order. `data.services` sums each service of the list (those no flow reached
 too): `rdp: 12 destinations · 4 exposed (allowed from other apps) · 3 potentially blocked · 5
 blocked`, the line the table prints above its rows. `--only` keeps rows of some statuses
 (the summary still counts all). Which rule allows an exposed row is not looked up (a request
-per row): each exposed row's `explain` holds the `traffic explain` arguments that answer it
-(one query, run when you choose), and the table prints the commands under its rows:
+per row): each exposed row's `explain` holds the `traffic explain` arguments that answer it,
+for its busiest exposing flow (`--src` and `--dst`; one query, run when you choose), and the table prints the commands under its rows:
 
 <!-- real output: illumio-tui exposure --table -->
     exposure · 1d · 3 rows · 1 exposed
@@ -1596,14 +1604,15 @@ per row): each exposed row's `explain` holds the `traffic explain` arguments tha
     which rule allows it (one Explorer query each, run on demand):
     service  dst
     rdp      shop/prod
-      illumio-tui traffic explain --dst app=shop,env=prod --port 3389 --proto tcp
+      illumio-tui traffic explain --src ip:10.1.4.9 --dst app=shop,env=prod --port 3389 --proto tcp
 
 (Illustrative.) `--csv` prints the rows with full columns (`explain` as the command line).
 Exit 0 always, except `--fail-on-exposed`: exit 8 (`exposed`) after the report when a row is
 exposed, and exit 4 when none is but the result is truncated or incomplete (the answer is not
 complete), for CI and cron:
 
-    illumio-tui exposure --service rdp --fail-on-exposed --json > rdp.json || echo "RDP exposed"
+    illumio-tui exposure --service rdp --fail-on-exposed --json > rdp.json
+    case $? in 0) ;; 8) echo "RDP exposed" ;; *) echo "no complete answer" ;; esac
 
 ### Flow marks
 

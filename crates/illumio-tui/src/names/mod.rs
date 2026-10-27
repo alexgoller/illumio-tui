@@ -288,10 +288,13 @@ pub enum Kind {
     PolicyFilters,
     EventsFilters,
     WorkloadsFilters,
+    /// `exposure --service`: the profile's risky service names, from the
+    /// config file (no cache); comma-separated.
+    RiskyServices,
 }
 
 impl Kind {
-    pub const ALL: [Kind; 17] = [
+    pub const ALL: [Kind; 18] = [
         Kind::Labels,
         Kind::LabelFilter,
         Kind::LabelKeys,
@@ -309,6 +312,7 @@ impl Kind {
         Kind::PolicyFilters,
         Kind::EventsFilters,
         Kind::WorkloadsFilters,
+        Kind::RiskyServices,
     ];
 
     pub fn name(self) -> &'static str {
@@ -330,6 +334,7 @@ impl Kind {
             Kind::PolicyFilters => "filters-policy",
             Kind::EventsFilters => "filters-events",
             Kind::WorkloadsFilters => "filters-workloads",
+            Kind::RiskyServices => "risky-services",
         }
     }
 
@@ -391,7 +396,8 @@ impl Kind {
             Kind::TrafficFilters
             | Kind::PolicyFilters
             | Kind::EventsFilters
-            | Kind::WorkloadsFilters => Vec::new(),
+            | Kind::WorkloadsFilters
+            | Kind::RiskyServices => Vec::new(),
         };
         match self {
             Kind::Traffic => {

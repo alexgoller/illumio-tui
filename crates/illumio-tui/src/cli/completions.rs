@@ -140,6 +140,7 @@ pub const HOOKS: &[Hook] = &[
     (&["exposure"], "--exclude-dst", Kind::Traffic),
     (&["exposure"], "--exclude-service", Kind::ServiceTerms),
     (&["exposure"], "--keys", Kind::LabelKeys),
+    (&["exposure"], "--service", Kind::RiskyServices),
     (&["enforce"], "app", Kind::Apps),
     (&["pairing-profiles", "create"], "--label", Kind::Labels),
     (&["where-used", "label"], "name", Kind::Labels),
@@ -798,6 +799,7 @@ pub fn helper(args: &[OsString], out: &mut impl Write) -> std::io::Result<()> {
             Some(kind) if kind.filters().is_some() => {
                 saved_filters(&config_path, profile, kind, &prefix)
             }
+            Some(Kind::RiskyServices) => risky_services(&config_path, profile, &prefix),
             Some(kind) => match names::lookup(&config_path, profile) {
                 Some(n) => names::complete(kind, &n, &prefix),
                 None => Vec::new(),
@@ -837,6 +839,36 @@ fn saved_filters(
         .unwrap_or_default()
         .into_iter()
         .filter(|n| n.starts_with(prefix))
+        .collect()
+}
+
+/// The profile's risky service names (its `[exposure]` list, else the
+/// defaults) completing the last term of `prefix` (`rdp,s` → `rdp,ssh`),
+/// from the config file alone; none for a malformed list.
+fn risky_services(path: &std::path::Path, named: Option<String>, prefix: &str) -> Vec<String> {
+    let file = config::load_config_file(path).unwrap_or_default();
+    let named = named.or_else(|| {
+        std::env::var("ILLUMIO_PROFILE")
+            .ok()
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+    });
+    let (profile, _) = config::profile_name(&file, named);
+    let x = file
+        .profiles
+        .get(&profile)
+        .and_then(|p| p.exposure.as_ref());
+    let Some(names) = config::exposure_names(x) else {
+        return Vec::new();
+    };
+    let (head, last) = match prefix.rsplit_once(',') {
+        Some((h, l)) => (format!("{h},"), l),
+        None => (String::new(), prefix),
+    };
+    names
+        .into_iter()
+        .filter(|n| n.starts_with(last) && !head.split(',').any(|h| h == n))
+        .map(|n| format!("{head}{n}"))
         .collect()
 }
 
@@ -911,6 +943,39 @@ src = \"x=y\"
             "elsewhere\n"
         );
         assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 1);
+    }
+
+    #[test]
+    fn helper_lists_the_profiles_risky_services() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        std::fs::write(
+            &path,
+            "[profiles.lab.exposure]\nextra = { nfs = [\"2049/tcp\"] }\n",
+        )
+        .unwrap();
+        let p = path.to_str().unwrap();
+        let ask = |prefix: &str| {
+            run_helper(&[
+                "risky-services",
+                "--config",
+                p,
+                "--profile",
+                "lab",
+                "--",
+                prefix,
+            ])
+        };
+        assert_eq!(ask("s"), "smb\nssh\n");
+        assert_eq!(ask("rdp,n"), "rdp,netbios\nrdp,nfs\n");
+        assert_eq!(ask("").lines().count(), 16);
+        let missing = dir.path().join("none.toml");
+        let m = missing.to_str().unwrap();
+        assert_eq!(
+            run_helper(&["risky-services", "--config", m, "--", "rd"]),
+            "rdp\n",
+            "no file: the defaults"
+        );
     }
 
     #[test]

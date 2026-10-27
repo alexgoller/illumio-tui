@@ -10,14 +10,14 @@ expression: out
 ╭ Result ──────────────────────────────────────── exposure · 18 flows · 0s ago ╮
 │18 flows allowed 11 pot.blocked 2 blocked 5  █████████████████████████████████│
 ╰──────────────────────────────────────────────────────────────────────────────╯
-╭ Exposure · conns: lifetime ─── ssh: 2 dst · 1 exposed · 1 pot.bl · 0 blocked ╮
+╭ Exposure · conns: lifetime ─── ssh: 2 dst · 1 exposed · 0 pot.bl · 0 blocked ╮
 │  status  service  dst             sources              allowed pot.bl blocked│
 │▸ exposed ssh      erp/prod        1 ext                      1      0       0│
 │  exposed postgres shop/prod       intra, 2 apps, 1 ext       5      0       2│
-│  pot.bl  ssh      shop/dev        intra                      0      1       0│
 │  pot.bl  oracle   erp/prod        intra, 2 apps              2      1       1│
 │  blocked mysql    crm/prod        intra, 1 app               2      0       1│
 │  blocked postgres hr/dev          1 app                      0      0       1│
+│  intra   ssh      shop/dev        intra                      0      1       0│
 │  intra   postgres shop/dev        intra                      1      0       0│
 │                                                                              │
 │                                                                              │

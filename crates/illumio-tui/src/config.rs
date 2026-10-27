@@ -195,6 +195,18 @@ pub struct ExposureConfig {
     pub other: toml::Table,
 }
 
+/// The risky service names of a profile's `[exposure]` (the defaults
+/// without one), in order; `None` when the list is malformed. Shell
+/// completion's, from the config file alone.
+pub fn exposure_names(x: Option<&ExposureConfig>) -> Option<Vec<String>> {
+    pce::traffic::service_list(
+        x.and_then(|e| e.services.as_ref()),
+        x.and_then(|e| e.extra.as_ref()),
+    )
+    .ok()
+    .map(|l| l.into_iter().map(|s| s.name).collect())
+}
+
 pub const DEFAULT_SCOPE_KEYS: [&str; 2] = ["app", "env"];
 pub const DEFAULT_TIER_KEY: &str = "role";
 
@@ -725,10 +737,21 @@ pub fn resolve(
     };
 
     let event_exclude_types = event_excludes(profile.events.as_ref())?;
-    let exposure_services = pce::traffic::service_list(
-        profile.exposure.as_ref().and_then(|e| e.services.as_ref()),
-        profile.exposure.as_ref().and_then(|e| e.extra.as_ref()),
-    );
+    // An unknown key (`extras`, `service`) would drop a list silently: an
+    // error that names it, where the list is used.
+    let exposure_services = match profile
+        .exposure
+        .as_ref()
+        .and_then(|e| e.other.keys().next())
+    {
+        Some(k) => Err(format!(
+            "exposure.{k}: unknown key; [exposure] takes services or extra"
+        )),
+        None => pce::traffic::service_list(
+            profile.exposure.as_ref().and_then(|e| e.services.as_ref()),
+            profile.exposure.as_ref().and_then(|e| e.extra.as_ref()),
+        ),
+    };
 
     Ok(ResolvedConfig {
         profile_name,
@@ -1388,6 +1411,12 @@ traffic_auto_backfill = true
         );
         let shown = format!("{:?}", f.profiles["default"]);
         assert!(shown.contains("nfs"), "{shown}");
+        let f = with("[profiles.default.exposure]\nextras = { nfs = [\"2049/tcp\"] }\n");
+        let r = resolve(&f, &Overrides::default(), &env(&[])).unwrap();
+        assert_eq!(
+            r.exposure_services.unwrap_err(),
+            "exposure.extras: unknown key; [exposure] takes services or extra"
+        );
     }
 
     #[test]

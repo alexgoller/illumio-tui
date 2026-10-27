@@ -208,7 +208,7 @@ illumio-tui 0.5.7</code></pre>
         <li><strong>Blocked</strong>: blocked and potentially blocked flows by destination group and service.</li>
         <li><strong>Treemap</strong>: each source a box, its destinations tiles sized by connections (<code>b</code> for bytes) and coloured by decision; <code>hjkl</code> move, <code>Enter</code> zooms and drills.</li>
       </ul>
-      <p><code>9</code> (or <code>:exposure</code>) opens <strong>Exposure</strong>: which risky services (RDP, SMB, NetBIOS, RPC, WinRM, SSH, Telnet, VNC, the database and directory ports, or your profile&rsquo;s own list) reach each destination group, from where, and under which decision. One query over those ports, through the cost guard and in its own cache slot: the traffic result on screen is kept aside and <code>Esc</code> puts it back, without a request. One row per destination group and service with its sources (<em>intra</em>, other apps, unlabelled hosts and IP lists, <em>any</em> and <em>internet</em> flagged) and flows per decision; <em>exposed</em> rows (allowed from outside the group) first, in red, then potentially blocked, blocked and intra-only ones. The title sums up the selected service (<em>rdp: 12 destinations &middot; 4 exposed (allowed from other apps) &middot; 3 potentially blocked &middot; 5 blocked</em>), <code>Enter</code> drills into its flows, <code>E</code> explains the busiest exposing flow, squelch applies. On the CLI, <code>exposure</code>.</p>
+      <p><code>9</code> (or <code>:exposure</code>) opens <strong>Exposure</strong>: which risky services (RDP, SMB, NetBIOS, RPC, WinRM, SSH, Telnet, VNC, the database and directory ports, or your profile&rsquo;s own list) reach each destination group, from where, and under which decision. One query over those ports, through the cost guard and in its own cache slot: the traffic result on screen is kept aside and <code>Esc</code> puts it back, without a request (<code>D</code>, <code>F</code> and <code>c</code> on the exposure result use their usual slots, so the result put back may need those again). One row per destination group and service with its sources (<em>intra</em>, other apps, unlabelled hosts and IP lists, <em>any</em> and <em>internet</em> flagged) and flows per decision; <em>exposed</em> rows (allowed from outside the group) first, in red, then potentially blocked, blocked and intra-only ones. The title sums up the selected service (<em>rdp: 12 destinations &middot; 4 exposed (allowed from other apps) &middot; 3 potentially blocked &middot; 5 blocked</em>), <code>Enter</code> drills into its flows, <code>E</code> explains the busiest exposing flow, squelch applies and the title counts the exposed rows it hides. Only a flow between two labelled workloads with every group key set and equal is <em>intra</em>: an IP list, an unlabelled host or a missing key counts as outside, so an exposure is over-reported rather than hidden. On the CLI, <code>exposure</code>.</p>
       <p>Switching views, grouping, sorting and searching send nothing to the PCE. With writes armed, <code>w</code> turns a blocked flow into a draft allow rule (its Scope, <em>intra</em> or <em>extra</em>, switches on <kbd>Space</kbd> and keeps the consumers coherent; a line under them says what they match and warns of an extra-scope rule open to every app); once it is written, the flows on screen are re-evaluated against the draft (one PUT per query, like <code>D</code>), unless a query is running or <code>D</code> would ask first (a cached result, a large window or cap).</p>
       <p><code>F</code> focuses every view on one app: <code>X</code> cycles its inbound, outbound or both directions, <code>Esc</code> clears it. On a truncated result, <code>r</code> re-queries just that app, with its labels in the query.</p>
       <p><code>D</code> shows what the <strong>draft</strong> policy would decide for each flow, next to the reported decision: <code>blocked &rarr; allowed</code> in Flows, <em>would allow</em> counts in App-to-app, a <em>fixed by draft</em> step on <code>d</code>, and <em>draft: N blocked flows fixed</em> in the app screen. It is the PCE&rsquo;s own Explorer draft view and changes no policy: one PUT on the query you already ran, polls and one download, no new query. <code>D</code> again clears it with no request; <code>Esc</code> cancels it while it runs. On the CLI, <code>--draft</code>.</p>
@@ -729,7 +729,8 @@ false
       <p>One Explorer query over the RDP ports; <code>--fail-on-exposed</code> exits 8 when any destination takes RDP allowed from outside its own app, after printing the rows and the <code>traffic explain</code> command that names the rule letting it in. A truncated result without an exposed row is exit 4, never a silent pass.</p>
 <!-- real output: illumio-tui exposure --service rdp --fail-on-exposed --table -->
 <pre><code><span class="c"># illustrative output</span>
-<span class="p">$ </span>illumio-tui exposure --service rdp --fail-on-exposed --table || mail -s "RDP exposed" alex@ryte.de
+<span class="p">$ </span>illumio-tui exposure --service rdp --fail-on-exposed --table &gt; rdp.txt; rc=$?
+<span class="p">$ </span>cat rdp.txt
 exposure · 1d · 3 rows · 1 exposed
   rdp: 3 destinations · 1 exposed (allowed from other apps) · 1 potentially blocked · 1 blocked
 status       service  ports     dst                 sources        flows  conns  allowed  pot.blocked  blocked
@@ -740,9 +741,11 @@ blocked      rdp      3389/tcp  payment/Production  2 apps         2      12    
 which rule allows it (one Explorer query each, run on demand):
 service  dst
 rdp      jump/Production
-  illumio-tui traffic explain --dst app=jump,env=Production --port 3389 --proto tcp
-<span class="p">$ </span>echo $?
-8</code></pre>
+  illumio-tui traffic explain --src ip:203.0.113.7 --dst app=jump,env=Production --port 3389 --proto tcp
+<span class="p">$ </span>echo $rc
+8
+<span class="p">$ </span>[ $rc -eq 8 ] &amp;&amp; mail -s "RDP exposed" alex@ryte.de &lt; rdp.txt   <span class="c"># 4: incomplete, 2: arguments</span></code></pre>
+      <p>Squelch hides rows from the table, never from the gate: an exposed row made only of squelched flows still exits 8, and the output says <em>1 exposed row squelched</em>.</p>
       <p>Your own list goes in the profile: <code>[profiles.prod.exposure] extra = { nfs = ["2049/tcp"] }</code> adds to the defaults, <code>services = {...}</code> replaces them.</p>
     </article>
 

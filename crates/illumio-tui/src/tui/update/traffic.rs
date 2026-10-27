@@ -1305,12 +1305,10 @@ fn exposure_enter(model: &mut Model) {
     let (Some(r), Some(x)) = (t.exposure_rows.selected_item(), &t.exposure) else {
         return;
     };
-    let Some(service) = x.services.iter().find(|s| s.name == r.service).cloned() else {
-        return;
-    };
     t.drill = Some(Drill::Exposure {
         dst: r.dst.clone(),
-        service,
+        service: r.service.clone(),
+        list: x.services.clone(),
     });
     t.view = TrafficView::Flows;
     t.rebuild_views();

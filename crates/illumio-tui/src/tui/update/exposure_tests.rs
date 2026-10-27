@@ -125,11 +125,11 @@ fn enter_drills_into_the_flows_of_the_group_and_service() {
     quiet(&mut m, kc(KeyCode::Enter));
     let t = &m.traffic;
     assert_eq!(t.view, TrafficView::Flows);
-    let Some(Drill::Exposure { dst, service }) = &t.drill else {
+    let Some(Drill::Exposure { dst, service, .. }) = &t.drill else {
         panic!("{:?}", t.drill);
     };
     assert_eq!(
-        (dst.join("/"), service.name.as_str()),
+        (dst.join("/"), service.as_str()),
         ("erp/prod".into(), "ssh")
     );
     assert_eq!(t.drill.as_ref().unwrap().title(), "* → erp/prod ssh");
@@ -185,11 +185,67 @@ fn squelched_flows_leave_the_rows() {
         !got.iter().any(|(s, d, _)| s == "ssh" && d == "erp/prod"),
         "Corp's SSH is squelched: {got:?}"
     );
+    assert_eq!(m.traffic.exposure_squelched, 1, "never hidden quietly");
+    let out = crate::tui::test_support::render_to_string(&m, 160, 40);
+    assert!(out.contains("1 exposed squelched (M)"), "{out}");
     quiet(&mut m, key('M'));
     assert!(
         rows(&m)
             .iter()
             .any(|(s, d, st)| s == "ssh" && d == "erp/prod" && *st == ExposureStatus::Exposed),
         "M shows it again"
+    );
+    assert_eq!(m.traffic.exposure_squelched, 0);
+}
+
+#[test]
+fn the_drill_keeps_exactly_the_flows_its_row_counted() {
+    let mut m = model_with_rich_flows();
+    let jump = pce::traffic::RiskyService::parse("jump", &["22/tcp".into()]).unwrap();
+    let mut list = vec![jump];
+    list.extend(pce::traffic::default_services());
+    m.limits.exposure_services = Ok(list.clone());
+    open_exposure_with(&mut m, exposure_flows());
+    assert!(
+        rows(&m).iter().all(|(s, _, _)| s != "ssh"),
+        "22/tcp is jump's, the first entry"
+    );
+    let keys = m.traffic.keys.clone();
+    let drill = |service: &str| Drill::Exposure {
+        dst: vec!["erp".into(), "prod".into()],
+        service: service.into(),
+        list: list.clone(),
+    };
+    let flows = m.traffic.loaded_flows();
+    assert_eq!(
+        flows
+            .iter()
+            .filter(|f| drill("ssh").matches(f, &keys))
+            .count(),
+        0,
+        "ssh's row counted none"
+    );
+    assert_eq!(
+        flows
+            .iter()
+            .filter(|f| drill("jump").matches(f, &keys))
+            .count(),
+        1
+    );
+}
+
+#[test]
+fn a_write_clears_the_draft_of_the_result_kept_aside() {
+    let mut m = crate::tui::test_support::with_draft_loaded(model_with_rich_flows());
+    assert!(m.traffic.draft_loaded());
+    open_exposure_with(&mut m, exposure_flows());
+    m.traffic.drop_draft();
+    quiet(&mut m, kc(KeyCode::Esc));
+    assert!(!m.traffic.draft_loaded(), "no stale draft after Esc");
+    assert!(
+        m.traffic
+            .loaded_flows()
+            .iter()
+            .all(|f| f.draft_policy_decision.is_none())
     );
 }
