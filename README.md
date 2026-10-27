@@ -335,6 +335,8 @@ Output is a table at a terminal and JSON (`{"data": ..., "meta": ...}`) when pip
 | 5 | rate limited |
 | 6 | write refused (writes not enabled; `enforce` on an app that is not ready) |
 | 7 | flows blocked since an enforcement (`enforce --watch`) |
+| 8 | a risky service exposed (`exposure --fail-on-exposed`) |
+| 9 | snapshots differ (`snapshot diff --fail-on-change`) |
 
 Writes: enable them (`writes = true` or `ILLUMIO_WRITES=1`, else exit 6 even for a dry run),
 look with `--dry-run` (method, path and body; nothing sent), send with `--yes` (plus
@@ -1068,7 +1070,7 @@ Errors go to stderr as JSON. Exit codes: 1 generic, 2 arguments or
 config, 3 auth, 4 PCE error, 5 rate limited, 6 write refused (by the guard, or `enforce` on an
 app that is not ready), 7 flows blocked since an enforcement (`enforce --watch`,
 `blocked_since_enforcement`), 8 a risky service exposed (`exposure --fail-on-exposed`,
-`exposed`), 141 stdout closed by its reader (`| head`; quiet, no error).
+`exposed`), 9 snapshots differ (`snapshot diff --fail-on-change`, `snapshots_differ`), 141 stdout closed by its reader (`| head`; quiet, no error).
 
 `--csv` (beside `--table` and `--json`, exclusive with both) prints the same table as RFC 4180
 CSV for spreadsheets: a header row, `,` separators, quotes only around cells holding `,`, `"`
