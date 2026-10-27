@@ -3,6 +3,7 @@
 pub mod aggregate;
 pub mod compare;
 pub mod duration;
+pub mod exposure;
 pub mod filter;
 pub mod focus;
 pub mod merge;
@@ -25,6 +26,10 @@ pub use compare::{
     flow_key, keep_changes, keep_section_changes, squelched_keys, without_keys,
 };
 pub use duration::compact_duration;
+pub use exposure::{
+    ExposureRow, RiskyService, ServiceSummary, Sources, Status as ExposureStatus, default_services,
+    exposure_rows, service_list, service_terms, summarize,
+};
 pub use filter::{FilterExpr, ServiceExpr, parse_service, resolve_actor, resolve_service};
 pub use focus::{
     Focus, FocusDirection, FocusedTraffic, GroupKey, app_labels, apps_in, closest, focus_flows,

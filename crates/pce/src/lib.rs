@@ -110,6 +110,9 @@ pub const BASELINE_SLOT: &str = "baseline";
 /// prefix of, nor prefixed by, `focus` or `baseline`, so no slot evicts
 /// another.
 pub const FOCUS_BASELINE_SLOT: &str = "focus-baseline";
+/// The cache slot of the exposure query (#82): it never evicts the
+/// traffic result, nor is evicted by it.
+pub const EXPOSURE_SLOT: &str = "exposure";
 
 /// How long a draft traffic result is reused: draft policy changes outside
 /// this tool must show soon.
