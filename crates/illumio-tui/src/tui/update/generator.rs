@@ -348,7 +348,8 @@ fn close_gen(model: &mut Model) {
 }
 
 /// The generator's keys. Only `r` (a load or the focused query, through
-/// the cost guard) and `Enter` (the plan) can cause a request.
+/// the cost guard), `N` (the baseline, through it too) and `Enter` (the
+/// plan) can cause a request.
 pub(super) fn gen_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
     let scope_keys = model.limits.scope_keys.clone();
     let Some(v) = model.gen_view.as_mut() else {
