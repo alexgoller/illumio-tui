@@ -224,7 +224,10 @@ impl TableRows for Changes<'_> {
     }
     /// The changed lines under each changed object.
     fn notes(&self) -> Vec<Vec<String>> {
-        self.0.iter().map(|c| c.details.clone()).collect()
+        self.0
+            .iter()
+            .map(|c| c.details.iter().map(|d| format!("  {d}")).collect())
+            .collect()
     }
     fn full_headers(&self) -> Vec<&'static str> {
         DIFF_HEADERS.to_vec()
