@@ -65,6 +65,7 @@ pub const COMMANDS: &[(&str, &str)] = &[
     ("app", "app"),
     ("gen", "gen"),
     ("readiness", "readiness"),
+    ("exposure", "exposure"),
     ("enforce --to", "enforce"),
     ("enforce --rollback", "enforce-rollback"),
     ("enforce --watch", "enforce-watch"),
@@ -163,6 +164,7 @@ const FILES: &[(&str, &str)] = &[
     ),
     ("error", include_str!("../../schemas/error.json")),
     ("events", include_str!("../../schemas/events.json")),
+    ("exposure", include_str!("../../schemas/exposure.json")),
     (
         "filters-default",
         include_str!("../../schemas/filters-default.json"),
@@ -573,6 +575,7 @@ pub fn schema_of(command: &Command) -> Option<&'static str> {
         Command::App(_) => "app",
         Command::Gen(_) => "gen",
         Command::Readiness(_) => "readiness",
+        Command::Exposure(_) => "exposure",
         Command::Enforce(a) if a.watch => "enforce-watch",
         Command::Enforce(a) if a.rollback => "enforce-rollback",
         Command::Enforce(_) => "enforce",

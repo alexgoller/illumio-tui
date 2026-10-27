@@ -399,6 +399,7 @@ fn the_profiles_excludes_start_the_type_filter_and_survive_a_switch() {
     let mut m = events();
     m.limits = Limits {
         event_exclude_types: vec!["user.login".into(), "agent.*".into()],
+        exposure_services: Ok(pce::traffic::default_services()),
         ..m.limits.clone()
     };
     m.reset_data();

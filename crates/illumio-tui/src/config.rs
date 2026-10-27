@@ -18,6 +18,9 @@
 //! `[profiles.<name>.filters.<screen>.<filter>]` holds saved filters
 //! (`crate::filters`), written by `:save` and `--save-filter`;
 //! `[profiles.<name>.filter_defaults]` names a screen's default one.
+//! `[profiles.<name>.exposure]` names the risky services `exposure` and
+//! the TUI's `:exposure` look for: `services` replaces the default list,
+//! `extra` adds to it; a bad entry is an error where the list is used.
 //! The tool writes a secret only where `profile add` is given one: the
 //! profile's `api_secret`, in a config file of mode 0600.
 use serde::{Deserialize, Serialize};
@@ -78,6 +81,9 @@ pub struct Profile {
         skip_serializing_if = "crate::filters::FilterDefaults::is_empty"
     )]
     pub filter_defaults: crate::filters::FilterDefaults,
+    /// The risky services of `exposure` (`[profiles.<name>.exposure]`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub exposure: Option<ExposureConfig>,
     /// Unknown keys, round-tripped verbatim.
     #[serde(default, flatten)]
     pub extra: toml::Table,
@@ -107,6 +113,7 @@ impl std::fmt::Debug for Profile {
             .field("events", &self.events)
             .field("filters", &self.filters)
             .field("filter_defaults", &self.filter_defaults)
+            .field("exposure", &self.exposure)
             // Unknown keys could be anything; print their names only.
             .field("extra", &self.extra.keys().collect::<Vec<_>>())
             .finish()
@@ -176,6 +183,18 @@ pub struct EventsConfig {
     pub extra: toml::Table,
 }
 
+/// The risky services `exposure` looks for: `services` (name = ports,
+/// `rdp = ["3389/tcp", "3389/udp"]`) replaces the default list, `extra`
+/// adds to it (a name already listed is replaced).
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
+pub struct ExposureConfig {
+    pub services: Option<BTreeMap<String, Vec<String>>>,
+    pub extra: Option<BTreeMap<String, Vec<String>>>,
+    /// Unknown keys, round-tripped verbatim.
+    #[serde(default, flatten)]
+    pub other: toml::Table,
+}
+
 pub const DEFAULT_SCOPE_KEYS: [&str; 2] = ["app", "env"];
 pub const DEFAULT_TIER_KEY: &str = "role";
 
@@ -230,6 +249,9 @@ pub struct ResolvedConfig {
     /// `events.exclude_types`: the event types hidden by default, trimmed,
     /// a leading `!` dropped, blank entries left out.
     pub event_exclude_types: Vec<String>,
+    /// The risky services of `exposure`: the profile's list, checked, or
+    /// why it is malformed (an error only where the list is used).
+    pub exposure_services: Result<Vec<pce::traffic::RiskyService>, String>,
 }
 
 impl ResolvedConfig {
@@ -703,6 +725,10 @@ pub fn resolve(
     };
 
     let event_exclude_types = event_excludes(profile.events.as_ref())?;
+    let exposure_services = pce::traffic::service_list(
+        profile.exposure.as_ref().and_then(|e| e.services.as_ref()),
+        profile.exposure.as_ref().and_then(|e| e.extra.as_ref()),
+    );
 
     Ok(ResolvedConfig {
         profile_name,
@@ -742,6 +768,7 @@ pub fn resolve(
         generator_ruleset_name,
         generator_consolidate_min_peers,
         event_exclude_types,
+        exposure_services,
     })
 }
 
@@ -1333,6 +1360,34 @@ traffic_auto_backfill = true
             err,
             "generator.consolidate_min_peers 1: at least 2 peers make a fan-in port"
         );
+    }
+
+    #[test]
+    fn exposure_services_default_replace_extend_and_name_a_bad_entry() {
+        let r = resolve(&file(), &Overrides::default(), &env(&[])).unwrap();
+        assert_eq!(r.exposure_services.as_ref().unwrap().len(), 15);
+        let with = |tail: &str| -> ConfigFile {
+            toml::from_str(&format!(
+                "[profiles.default]\nhost = \"h\"\norg_id = 1\napi_key = \"k\"\napi_secret = \"s\"\n{tail}"
+            ))
+            .unwrap()
+        };
+        let f = with("[profiles.default.exposure]\nservices = { rdp = [\"3389/tcp\"] }\n");
+        let r = resolve(&f, &Overrides::default(), &env(&[])).unwrap();
+        let list = r.exposure_services.unwrap();
+        assert_eq!(list.len(), 1);
+        assert_eq!(list[0].port_texts(), ["3389/tcp"]);
+        let f = with("[profiles.default.exposure]\nextra = { nfs = [\"2049/tcp\"] }\n");
+        let r = resolve(&f, &Overrides::default(), &env(&[])).unwrap();
+        assert_eq!(r.exposure_services.unwrap().len(), 16);
+        let f = with("[profiles.default.exposure]\nextra = { nfs = [\"2049\"] }\n");
+        let r = resolve(&f, &Overrides::default(), &env(&[])).expect("other commands still run");
+        assert_eq!(
+            r.exposure_services.unwrap_err(),
+            "exposure.extra.nfs: \"2049\": give a port and a protocol, e.g. 3389/tcp"
+        );
+        let shown = format!("{:?}", f.profiles["default"]);
+        assert!(shown.contains("nfs"), "{shown}");
     }
 
     #[test]

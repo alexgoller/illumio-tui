@@ -754,6 +754,9 @@ pub struct Limits {
     /// `events.exclude_types`: the event types the Events screen starts
     /// hiding.
     pub event_exclude_types: Vec<String>,
+    /// `[exposure]`: the risky services `:exposure` looks for, or why the
+    /// profile's list is malformed (the status line says it).
+    pub exposure_services: Result<Vec<pce::traffic::RiskyService>, String>,
 }
 
 impl Limits {
@@ -771,6 +774,7 @@ impl Limits {
             ruleset_name: cfg.generator_ruleset_name.clone(),
             consolidate_min_peers: cfg.generator_consolidate_min_peers,
             event_exclude_types: cfg.event_exclude_types.clone(),
+            exposure_services: cfg.exposure_services.clone(),
         }
     }
 
@@ -927,6 +931,7 @@ impl Model {
                 ruleset_name: pce::generate::DEFAULT_RULESET_NAME.into(),
                 consolidate_min_peers: pce::generate::consolidate::DEFAULT_MIN_PEERS,
                 event_exclude_types: Vec::new(),
+                exposure_services: Ok(pce::traffic::default_services()),
             },
             screen: Screen::Traffic,
             overlay: Overlay::None,

@@ -173,6 +173,7 @@ pub fn csv_columns(command: &Command) -> Vec<&'static str> {
             "verdict",
             "warnings",
         ],
+        Command::Exposure(_) => super::exposure::CSV_COLUMNS.to_vec(),
         Command::Enforce(a) if a.watch => vec!["direction", "peer", "service", "flows", "conns"],
         Command::Enforce(_) => Vec::new(),
         Command::Policy(p) => match p {

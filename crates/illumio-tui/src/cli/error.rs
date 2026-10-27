@@ -1,6 +1,7 @@
 //! CLI errors and their exit codes: 1 generic, 2 arguments/config, 3 auth,
 //! 4 PCE error, 5 rate limited, 6 write refused, 7 blocked since an
-//! enforcement (`enforce --watch`), 9 snapshots differ (`snapshot diff
+//! enforcement (`enforce --watch`), 8 a risky service exposed (`exposure
+//! --fail-on-exposed`), 9 snapshots differ (`snapshot diff
 //! --fail-on-change`); 141 stdout closed by its reader (quiet).
 use crate::config::ConfigError;
 use crate::marks::MarksError;
@@ -41,6 +42,10 @@ pub enum CliError {
     /// after the report.
     #[error("{0}")]
     Blocked(String),
+    /// `exposure --fail-on-exposed` found an exposed row: exit 8, after
+    /// the report.
+    #[error("{0}")]
+    Exposed(String),
     /// `snapshot diff --fail-on-change` found a difference: exit 9, after
     /// the report.
     #[error("{0}")]
@@ -73,6 +78,7 @@ impl CliError {
             CliError::Bulk { code, .. } => *code,
             CliError::Refused(_) => 6,
             CliError::Blocked(_) => 7,
+            CliError::Exposed(_) => 8,
             CliError::Changed(_) => 9,
             CliError::Write(e) => write_exit_code(e),
             CliError::Io(_) if self.is_broken_pipe() => BROKEN_PIPE_EXIT,
@@ -97,6 +103,7 @@ impl CliError {
             CliError::Bulk { kind, .. } => (*kind).into(),
             CliError::Refused(_) => "write_refused".into(),
             CliError::Blocked(_) => "blocked_since_enforcement".into(),
+            CliError::Exposed(_) => "exposed".into(),
             CliError::Changed(_) => "snapshots_differ".into(),
             CliError::Marks(e) => match e {
                 MarksError::Parse(_) => "marks_invalid".into(),
@@ -176,6 +183,8 @@ mod tests {
             (b.exit_code(), b.kind().as_str()),
             (7, "blocked_since_enforcement")
         );
+        let e = CliError::Exposed("1 exposed".into());
+        assert_eq!((e.exit_code(), e.kind().as_str()), (8, "exposed"));
         let c = CliError::Changed("3 changes".into());
         assert_eq!((c.exit_code(), c.kind().as_str()), (9, "snapshots_differ"));
         assert!(wrapped.to_string().contains("audit"));

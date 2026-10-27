@@ -1745,6 +1745,14 @@ const BASELINE: Side = Side {
     label: "baseline ",
 };
 
+/// The exposure query's (#82): its own slot, so it never evicts the
+/// traffic result and the same exposure again is a hit.
+const EXPOSURE: Side = Side {
+    slot: pce::EXPOSURE_SLOT,
+    focus_slot: pce::EXPOSURE_SLOT,
+    label: "",
+};
+
 /// `--backfill` on a truncated result: the same window again at the next
 /// cap (`backfill_cap`: 10000, then 25000 to 200000), each answer replacing
 /// the last, until one is complete or the next cap needs `--yes`. Explorer
@@ -1830,6 +1838,13 @@ pub(crate) async fn fetch(
     run_side(ctx, args, focus, &q, index, RECENT, args.draft)
         .await
         .map(Some)
+}
+
+/// `fetch` in the exposure query's own cache slot (#82): one query, never
+/// focused, backfilled with `--backfill`, with the draft with `--draft`.
+pub(crate) async fn fetch_exposure(ctx: &Context, args: &FilterArgs) -> Result<Fetched, CliError> {
+    let BuiltQuery { query: q, index } = build_query(ctx, args, 1).await?;
+    run_side(ctx, args, None, &q, index, EXPOSURE, args.draft).await
 }
 
 /// Compare mode (`--baseline`): the recent query as `fetch` runs it, then
@@ -2195,7 +2210,7 @@ async fn fetch_sides(
 }
 
 /// `--keys`, else the profile's scope keys.
-fn keys_or_profile(ctx: &Context, keys: &[String]) -> Vec<String> {
+pub(crate) fn keys_or_profile(ctx: &Context, keys: &[String]) -> Vec<String> {
     if keys.is_empty() {
         ctx.config.scope_keys.clone()
     } else {

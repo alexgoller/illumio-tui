@@ -1,0 +1,77 @@
+{
+  "type": "object",
+  "properties": {
+    "window": {"type": "string", "description": "the window the traffic covers, 24h"},
+    "draft": {"type": "boolean", "description": "draft decisions were loaded (--draft)"},
+    "services": {
+      "type": "array",
+      "description": "one per risky service looked for, in the list's order; those no flow reached included (0 destinations)",
+      "items": {
+        "type": "object",
+        "properties": {
+          "service": {"type": "string"},
+          "destinations": {"type": "integer"},
+          "exposed": {"type": "integer"},
+          "potentially_blocked": {"type": "integer"},
+          "blocked": {"type": "integer"},
+          "intra": {"type": "integer"}
+        },
+        "required": ["service", "destinations", "exposed", "potentially_blocked", "blocked", "intra"],
+        "additionalProperties": false
+      }
+    },
+    "rows": {
+      "type": "array",
+      "description": "one per destination group and risky service: exposed first, then potentially_blocked, blocked, intra",
+      "items": {
+        "type": "object",
+        "properties": {
+          "service": {"type": "string", "description": "the risky service's name, rdp"},
+          "ports": {"type": "array", "items": {"type": "string"}, "description": "its ports seen in the flows, 3389/tcp"},
+          "dst": {"type": "array", "items": {"type": "string"}, "description": "the destination group: one value per group key"},
+          "status": {
+            "enum": ["exposed", "potentially_blocked", "blocked", "intra"],
+            "description": "exposed: allowed from outside the group; else potentially_blocked, else blocked; intra: allowed from the group's own workloads only"
+          },
+          "sources": {
+            "type": "object",
+            "properties": {
+              "intra": {"type": "integer", "description": "flow records from the destination's own group"},
+              "apps": {"type": "integer", "description": "other labelled groups"},
+              "ip_lists": {"type": "integer", "description": "unlabelled hosts and IP lists"},
+              "any": {"type": "boolean", "description": "an Any (0.0.0.0/0 and ::/0) IP list among them"},
+              "internet": {"type": "boolean", "description": "a public source address among them"}
+            },
+            "required": ["intra", "apps", "ip_lists", "any", "internet"],
+            "additionalProperties": false
+          },
+          "flows": {"type": "integer"},
+          "connections": {"type": "integer"},
+          "allowed": {"type": "integer"},
+          "potentially_blocked": {"type": "integer"},
+          "blocked": {"type": "integer"},
+          "exposed_flows": {"type": "integer", "description": "allowed flow records from outside the group"},
+          "allowed_conns": {"type": "integer"},
+          "pot_blocked_conns": {"type": "integer"},
+          "blocked_conns": {"type": "integer"},
+          "unknown_conns": {"type": "integer"},
+          "draft_allowed": {"type": "integer", "description": "with --draft: flow records the draft would allow"},
+          "draft_blocked": {"type": "integer", "description": "with --draft: flow records the draft would block"},
+          "explain": {
+            "type": "array",
+            "items": {"type": "string"},
+            "description": "exposed rows: the illumio-tui arguments that say which rule allows it (traffic explain …; one Explorer query, not run here)"
+          }
+        },
+        "required": [
+          "service", "ports", "dst", "status", "sources", "flows", "connections", "allowed",
+          "potentially_blocked", "blocked", "exposed_flows", "allowed_conns", "pot_blocked_conns",
+          "blocked_conns", "unknown_conns"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": ["window", "draft", "services", "rows"],
+  "additionalProperties": false
+}

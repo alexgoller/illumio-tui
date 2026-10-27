@@ -1196,6 +1196,7 @@ fn profile_command_resets_state_and_reconnects() {
                 ruleset_name: "RF-{site}".into(),
                 consolidate_min_peers: 5,
                 event_exclude_types: Vec::new(),
+                exposure_services: Ok(pce::traffic::default_services()),
             },
         ))),
     );
@@ -1596,6 +1597,7 @@ fn policy_reloads_after_a_profile_switch_once_the_index_is_back() {
                 ruleset_name: "RF-{app}-{env}".into(),
                 consolidate_min_peers: 5,
                 event_exclude_types: Vec::new(),
+                exposure_services: Ok(pce::traffic::default_services()),
             },
         ))),
     );

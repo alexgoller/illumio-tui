@@ -8,6 +8,7 @@ pub mod context;
 pub mod enforce;
 pub mod error;
 pub mod events;
+pub mod exposure;
 pub mod filters;
 pub mod generate;
 pub mod health;
@@ -153,6 +154,19 @@ pub enum Command {
     /// longer as the move set it was changed by someone else: skipped and reported. Writes a
     /// rollback record; no record is ever deleted.
     Enforce(enforce::EnforceArgs),
+    /// Which risky services (RDP, SMB, WinRM, SSH, databases …) reach what, and under which
+    /// decision (read-only)
+    ///
+    /// One Explorer query over the window, its services every port of the risky list (the
+    /// profile's [exposure], else rdp, smb, netbios, rpc, winrm, ssh, telnet, vnc, mssql,
+    /// mysql, postgres, oracle, mongodb, redis, ldap), in its own cache slot, through the cost
+    /// guard. One row per destination group and service: its sources (intra: the group's own,
+    /// apps: other labelled groups, ip_lists: unlabelled hosts and IP lists, any and internet
+    /// flagged) and flows per decision. Exposed rows (allowed from outside the group) first,
+    /// then potentially blocked, blocked, intra; each exposed row names the `traffic explain`
+    /// command that says which rule allows it (one query, not run here). --fail-on-exposed:
+    /// exit 8 when a row is exposed.
+    Exposure(exposure::ExposureArgs),
     /// Rulesets, rules, deny rules, pending changes, provisioning
     #[command(subcommand)]
     Policy(policy::PolicyCmd),
@@ -365,6 +379,7 @@ pub async fn run(global: GlobalArgs, command: Command) -> Result<(), CliError> {
         Command::Gen(a) => generate::run(&ctx, &a).await,
         Command::Readiness(a) => readiness::run(&ctx, &a).await,
         Command::Enforce(a) => enforce::run(&ctx, &a).await,
+        Command::Exposure(a) => exposure::run(&ctx, &a).await,
         Command::Policy(p) => policy::run(&ctx, &p).await,
         Command::PairingProfiles(p) => pairing_profiles::run(&ctx, &p).await,
         Command::WhereUsed(w) => where_used::run(&ctx, &w).await,

@@ -1910,6 +1910,7 @@ mod tests {
             ruleset_name: "RF-{app}-{env}".into(),
             consolidate_min_peers: 5,
             event_exclude_types: Vec::new(),
+            exposure_services: Ok(pce::traffic::default_services()),
         }
     }
 

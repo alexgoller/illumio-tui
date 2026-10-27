@@ -154,6 +154,7 @@ fn all_labels_groups_by_every_seen_key_until_a_profile_switch() {
                     ruleset_name: "RF-{site}".into(),
                     consolidate_min_peers: 5,
                     event_exclude_types: Vec::new(),
+                    exposure_services: Ok(pce::traffic::default_services()),
                 },
             ))),
         ),
