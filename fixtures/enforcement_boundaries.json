@@ -1,0 +1,11 @@
+[
+  {
+    "href": "/orgs/5/sec_policy/draft/enforcement_boundaries/7",
+    "name": "Block prod from dev",
+    "providers": [{"label": {"href": "/orgs/5/labels/4"}}],
+    "consumers": [{"label": {"href": "/orgs/5/labels/5"}}],
+    "ingress_services": [{"port": 22, "proto": 6}],
+    "update_type": null,
+    "created_at": "2026-09-01T10:00:00Z"
+  }
+]

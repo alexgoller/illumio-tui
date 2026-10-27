@@ -1451,3 +1451,30 @@ async fn label_workload_probe_reads_one_row_filtered_by_the_label_once() {
     assert_eq!(p.stats().calls, 2);
     server.verify().await;
 }
+
+#[tokio::test]
+async fn enforcement_boundaries_are_one_cached_draft_read() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path(
+            "/api/v2/orgs/5/sec_policy/draft/enforcement_boundaries",
+        ))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_string(include_str!(
+                    "../../../fixtures/enforcement_boundaries.json"
+                ))
+                .insert_header("Content-Type", "application/json"),
+        )
+        .expect(1)
+        .mount(&server)
+        .await;
+    let p = pce_for(&server);
+    let first = p.enforcement_boundaries(CacheMode::Use).await.unwrap();
+    assert_eq!(first.value.len(), 1);
+    assert_eq!(first.value[0].name, "Block prod from dev");
+    assert_eq!(first.value[0].providers.len(), 1);
+    assert!(!first.hit);
+    assert!(p.enforcement_boundaries(CacheMode::Use).await.unwrap().hit);
+    assert_eq!(p.stats().calls, 1);
+}

@@ -19,7 +19,7 @@ pub use events::{Event, EventFilter};
 pub use labels::{Fqdn, IpList, IpRange, Label, LabelGroup, LabelUsageFlags, Service, ServicePort};
 pub use pairing_profiles::{PairingLabel, PairingProfile};
 pub use policy::{
-    Actor, DenyRule, IngressService, PendingChange, PolicyScope, ResolveLabelsAs, Rule, RuleSet,
+    Actor, DenyRule, EnforcementBoundary, IngressService, PendingChange, PolicyScope, ResolveLabelsAs, Rule, RuleSet,
     UNKNOWN_CHANGE_TYPE, parse_pending,
 };
 pub use traffic::{

@@ -430,6 +430,24 @@ impl Pce {
             .await
     }
 
+    /// The draft enforcement boundaries, cached with the policy (snapshots).
+    pub async fn enforcement_boundaries(
+        &self,
+        mode: CacheMode,
+    ) -> Result<Cached<Vec<models::EnforcementBoundary>>> {
+        let path = self
+            .client
+            .org_path("sec_policy/draft/enforcement_boundaries");
+        self.cached_list(
+            "policy:draft:enforcement_boundaries",
+            &path,
+            vec![],
+            self.ttls.policy,
+            mode,
+        )
+        .await
+    }
+
     /// Deny rules live on a per-ruleset endpoint that the OpenAPI spec omits.
     pub async fn deny_rules(
         &self,

@@ -167,6 +167,28 @@ pub struct RuleSet {
     pub extra: Map<String, Value>,
 }
 
+/// An enforcement boundary: a deny between providers and consumers on
+/// some services that allow rules cannot cross (`sec_policy/<scope>/
+/// enforcement_boundaries`). Read for snapshots only.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct EnforcementBoundary {
+    pub href: String,
+    #[serde(default)]
+    pub name: String,
+    #[serde(default)]
+    pub providers: Vec<Actor>,
+    #[serde(default)]
+    pub consumers: Vec<Actor>,
+    #[serde(default)]
+    pub ingress_services: Vec<IngressService>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub update_type: Option<String>,
+
+    /// Fields this model does not name, carried through a round trip.
+    #[serde(flatten)]
+    pub extra: Map<String, Value>,
+}
+
 /// The `change_type` of a pending entry that names none.
 pub const UNKNOWN_CHANGE_TYPE: &str = "unknown";
 
