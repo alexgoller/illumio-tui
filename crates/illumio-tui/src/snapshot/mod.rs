@@ -398,6 +398,14 @@ pub fn save(dir: &Path, snap: &Snapshot) -> std::io::Result<SavedFile> {
         f.write_all(&body)?;
         f.sync_all()
     })();
+    // Where hard links are not supported (FAT, exFAT, some network
+    // shares): the name reserved with `create_new`, then renamed over.
+    let fallback = |e: &std::io::Error| {
+        matches!(
+            e.kind(),
+            std::io::ErrorKind::Unsupported | std::io::ErrorKind::PermissionDenied
+        ) || e.raw_os_error().is_some_and(is_no_link_errno)
+    };
     let linked = written.and_then(|()| {
         let mut n = 0u32;
         loop {
@@ -407,7 +415,11 @@ pub fn save(dir: &Path, snap: &Snapshot) -> std::io::Result<SavedFile> {
                 format!("{base}-{n}")
             };
             let path = dir.join(format!("{id}.{EXT}"));
-            match std::fs::hard_link(&tmp, &path) {
+            let linked = match std::fs::hard_link(&tmp, &path) {
+                Err(e) if fallback(&e) => reserve_and_rename(&tmp, &path),
+                other => other,
+            };
+            match linked {
                 Ok(()) => return Ok((id, path)),
                 Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => n += 1,
                 Err(e) => return Err(e),
@@ -423,7 +435,42 @@ pub fn save(dir: &Path, snap: &Snapshot) -> std::io::Result<SavedFile> {
     })
 }
 
-/// Removes `.….tmp` files in `dir` older than [`STALE_TMP`]; best effort.
+/// `EPERM`/`EXDEV`-like errors a filesystem without hard links gives
+/// (`EPERM` 1, `EMLINK` 31, `ENOTSUP`/`EOPNOTSUPP` 45/95, `ENOSYS` 38/78).
+fn is_no_link_errno(code: i32) -> bool {
+    matches!(code, 1 | 31 | 38 | 45 | 78 | 95)
+}
+
+/// The name `path` reserved (`create_new`: fails when taken), then `tmp`
+/// renamed over the empty reservation.
+fn reserve_and_rename(tmp: &Path, path: &Path) -> std::io::Result<()> {
+    std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(path)?;
+    std::fs::rename(tmp, path).inspect_err(|_| {
+        let _ = std::fs::remove_file(path);
+    })
+}
+
+/// Whether `name` is a temporary file [`save`] writes:
+/// `.<snapshot id>.<pid>-<seq>.tmp`.
+fn is_own_tmp(name: &str) -> bool {
+    let Some(inner) = name.strip_prefix('.').and_then(|n| n.strip_suffix(".tmp")) else {
+        return false;
+    };
+    let Some((id, tag)) = inner.split_once('.') else {
+        return false;
+    };
+    let digits = |s: &str| !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit());
+    parse_id(id).is_some_and(|(_, n)| n == 0)
+        && tag
+            .split_once('-')
+            .is_some_and(|(pid, seq)| digits(pid) && digits(seq))
+}
+
+/// Removes the temporary files [`save`] left in `dir` (a crash) that are
+/// older than [`STALE_TMP`]; nothing else. Best effort.
 fn clean_stale(dir: &Path) {
     let Ok(entries) = std::fs::read_dir(dir) else {
         return;
@@ -437,7 +484,7 @@ fn clean_stale(dir: &Path) {
             .ok()
             .and_then(|t| t.elapsed().ok())
             .is_some_and(|age| age > STALE_TMP);
-        if name.starts_with('.') && name.ends_with(".tmp") && old {
+        if is_own_tmp(&name) && old {
             let _ = std::fs::remove_file(e.path());
         }
     }

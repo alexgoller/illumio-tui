@@ -262,7 +262,8 @@ pub struct RemovedRow {
 #[derive(Debug, Serialize)]
 pub struct Removed {
     pub removed: Vec<RemovedRow>,
-    /// Snapshots of the profile left.
+    /// Readable snapshots of the profile left (unreadable files are
+    /// never counted here; `meta.warnings` names how many there are).
     pub kept: usize,
 }
 
@@ -315,7 +316,17 @@ fn profile_only(global: &GlobalArgs) -> Result<String, CliError> {
             .map(|s| s.trim().to_string())
             .filter(|s| !s.is_empty())
     });
-    Ok(crate::config::profile_name(&file, named).0)
+    let (name, explicit) = crate::config::profile_name(&file, named);
+    // As `Context` does: a named profile the file lacks is an error; only
+    // the implicit `default` may be absent (an env-only connection).
+    if explicit && !file.profiles.contains_key(&name) {
+        return Err(crate::config::ConfigError::Message(format!(
+            "profile {name:?} not found in config; known: {}",
+            file.profiles.keys().cloned().collect::<Vec<_>>().join(", ")
+        ))
+        .into());
+    }
+    Ok(name)
 }
 
 /// Whether `cmd` reads only files: everything but `save` and a diff with
@@ -356,12 +367,11 @@ pub fn run_local(global: &GlobalArgs, cmd: &SnapshotCmd) -> Result<(), CliError>
         SnapshotCmd::Rm(a) => {
             let m = snapshot::find(&all, &a.timestamp).map_err(CliError::Args)?;
             snapshot::remove(m)?;
-            removed(&out, vec![m.clone()], &all, 1)
+            removed(&out, vec![m.clone()], &all)
         }
         SnapshotCmd::Prune(a) => {
             let gone = snapshot::prune(&all, a.keep as usize)?;
-            let n = gone.len();
-            removed(&out, gone, &all, n)
+            removed(&out, gone, &all)
         }
         SnapshotCmd::Diff(a) => {
             let [sa, sb] = a.sides();
@@ -370,7 +380,8 @@ pub fn run_local(global: &GlobalArgs, cmd: &SnapshotCmd) -> Result<(), CliError>
                 unreachable!("a local diff has no now side")
             };
             check_same(&fa, &ea.id, &fb, &eb.id).map_err(CliError::Args)?;
-            print_diff(&out, a, (*fa, ea), (*fb, eb), out.local_meta())
+            let order = pce::KeyOrder::default();
+            print_diff(&out, a, (*fa, ea), (*fb, eb), out.local_meta(), &order)
         }
         SnapshotCmd::Save(_) => unreachable!("save reads the PCE"),
     }
@@ -378,12 +389,7 @@ pub fn run_local(global: &GlobalArgs, cmd: &SnapshotCmd) -> Result<(), CliError>
 
 /// `rm`'s and `prune`'s report: what went, how many readable snapshots
 /// are left, and the unreadable files left alone.
-fn removed(
-    out: &Out,
-    gone: Vec<SnapshotMeta>,
-    all: &[SnapshotMeta],
-    n_gone: usize,
-) -> Result<(), CliError> {
+fn removed(out: &Out, gone: Vec<SnapshotMeta>, all: &[SnapshotMeta]) -> Result<(), CliError> {
     let data = Removed {
         removed: gone
             .into_iter()
@@ -392,7 +398,15 @@ fn removed(
                 path: m.path,
             })
             .collect(),
-        kept: all.len() - n_gone,
+        kept: 0,
+    };
+    // Readable snapshots left; unreadable files are counted apart.
+    let data = Removed {
+        kept: snapshot::usable(all)
+            .iter()
+            .filter(|m| !data.removed.iter().any(|r| r.id == m.id))
+            .count(),
+        ..data
     };
     let unreadable = all
         .iter()
@@ -595,27 +609,24 @@ async fn diff_now(ctx: &Context, args: &DiffArgs) -> Result<(), CliError> {
     };
     let (f, live) = ((*file.0, file.1), (t.snapshot, now_end));
     let (a, b) = if now_first { (live, f) } else { (f, live) };
-    print_diff(&out, args, a, b, meta)
+    print_diff(&out, args, a, b, meta, &ctx.config.key_order())
 }
 
 /// Compares and prints; exit 9 after the report with `--fail-on-change`.
-/// Labels in the order the PCE lists them (every key, none hidden).
+/// Label keys in `order`: the profile's for a live side, the default for
+/// two files (no config resolved).
 fn print_diff(
     out: &Out,
     args: &DiffArgs,
     (sa, ea): (Snapshot, End),
     (sb, eb): (Snapshot, End),
     meta: Meta,
+    order: &pce::KeyOrder,
 ) -> Result<(), CliError> {
     let mut warnings = Vec::new();
     truncation_warnings(&ea.id, &sa, &mut warnings);
     truncation_warnings(&eb.id, &sb, &mut warnings);
-    let report: SnapshotDiff = diff(
-        (&sa, ea),
-        (&sb, eb),
-        &args.section,
-        &pce::KeyOrder::default(),
-    );
+    let report: SnapshotDiff = diff((&sa, ea), (&sb, eb), &args.section, order);
     warnings.extend(
         report
             .not_compared

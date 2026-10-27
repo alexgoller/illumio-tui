@@ -747,6 +747,7 @@ async fn unreadable_and_foreign_files_are_never_latest_nor_pruned() {
     let v = schema_check::envelope(&p.get_output().stdout);
     assert_eq!(v["data"]["removed"][0]["id"], "2026-10-01T030000Z");
     assert_eq!(v["data"]["removed"].as_array().unwrap().len(), 1);
+    assert_eq!(v["data"]["kept"], 1, "readable survivors only");
     assert!(
         v["meta"]["warnings"]
             .to_string()
@@ -807,6 +808,20 @@ async fn file_commands_resolve_only_the_profile_name() {
     run(&["snapshot", "diff"]);
     run(&["snapshot", "prune", "--keep", "1"]);
     run(&["snapshot", "rm", "latest"]);
+    // A profile the file does not have: exit 2, as any command says it.
+    let e = Command::cargo_bin("illumio-tui")
+        .unwrap()
+        .env_clear()
+        .env("XDG_CONFIG_HOME", env.home.path().join("config"))
+        .env("XDG_DATA_HOME", env.data())
+        .args(["--profile", "lba", "snapshot", "list"])
+        .assert()
+        .code(2);
+    assert!(
+        stderr(&e).contains(r#"profile \"lba\" not found in config; known: lab"#),
+        "{}",
+        stderr(&e)
+    );
     // A live read does resolve the profile: its secret command fails.
     env.cmd(&server)
         .env_remove("PCE_HOST")

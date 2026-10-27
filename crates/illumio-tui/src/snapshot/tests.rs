@@ -388,6 +388,9 @@ fn save_never_overwrites_and_leaves_no_temporary_file() {
     std::fs::write(d.join("2026-10-01T000000Z.json"), "theirs").unwrap();
     // A crashed save's leftover, two hours old.
     let stale = d.join(".2026-09-01T000000Z.1-0.tmp");
+    // A hidden temp file of someone else's: never touched.
+    let theirs = d.join(".notes.tmp");
+    std::fs::write(&theirs, "keep").unwrap();
     std::fs::write(&stale, "x").unwrap();
     let old = std::time::SystemTime::now() - std::time::Duration::from_secs(7200);
     std::fs::File::options()
@@ -396,8 +399,16 @@ fn save_never_overwrites_and_leaves_no_temporary_file() {
         .unwrap()
         .set_modified(old)
         .unwrap();
+    std::fs::File::options()
+        .write(true)
+        .open(&theirs)
+        .unwrap()
+        .set_modified(old)
+        .unwrap();
     let s = save(d, &fixture("2026-10-01T00:00:00Z")).unwrap();
     assert_eq!(s.id, "2026-10-01T000000Z-1");
+    assert!(theirs.exists());
+    assert!(!stale.exists());
     assert_eq!(
         std::fs::read_to_string(d.join("2026-10-01T000000Z.json")).unwrap(),
         "theirs"
@@ -406,7 +417,12 @@ fn save_never_overwrites_and_leaves_no_temporary_file() {
         .unwrap()
         .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
         .collect();
-    assert!(names.iter().all(|n| !n.ends_with(".tmp")), "{names:?}");
+    assert!(
+        names
+            .iter()
+            .all(|n| !n.ends_with(".tmp") || n == ".notes.tmp"),
+        "{names:?}"
+    );
 }
 
 #[test]
@@ -519,4 +535,35 @@ fn the_identity_holds_host_port_and_org() {
     assert_eq!(a.pce, "pce.example:443");
     assert_eq!(b.pce, "pce.example:8443");
     assert_eq!(a.org, 7);
+}
+
+#[test]
+fn without_hard_links_the_name_is_reserved_then_renamed_over() {
+    let dir = tempfile::tempdir().unwrap();
+    let d = dir.path();
+    let tmp = d.join(".2026-10-01T000000Z.1-0.tmp");
+    std::fs::write(&tmp, "body").unwrap();
+    let taken = d.join("2026-10-01T000000Z.json");
+    std::fs::write(&taken, "theirs").unwrap();
+    let e = reserve_and_rename(&tmp, &taken).unwrap_err();
+    assert_eq!(e.kind(), std::io::ErrorKind::AlreadyExists);
+    assert_eq!(std::fs::read_to_string(&taken).unwrap(), "theirs");
+    let free = d.join("2026-10-01T000000Z-1.json");
+    reserve_and_rename(&tmp, &free).unwrap();
+    assert_eq!(std::fs::read_to_string(&free).unwrap(), "body");
+    assert!(!tmp.exists());
+}
+
+#[test]
+fn only_saves_own_temp_files_are_its_own() {
+    assert!(is_own_tmp(".2026-10-01T000000Z.123-0.tmp"));
+    for other in [
+        ".notes.tmp",
+        "2026-10-01T000000Z.123-0.tmp",
+        ".2026-10-01T000000Z.123.tmp",
+        ".2026-10-01T000000Z-1.123-0.tmp",
+        ".2026-10-01T000000Z.x-0.tmp",
+    ] {
+        assert!(!is_own_tmp(other), "{other}");
+    }
 }
