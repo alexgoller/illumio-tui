@@ -352,6 +352,62 @@ fn workload_lines(a: &Workload, b: &Workload, idx: &NameIndex) -> Vec<DiffLine> 
     out
 }
 
+/// What changed on a workload from `a` (older) to `b`, one short
+/// transition per field, from [`workload_lines`]: `app: shop→cart` (a
+/// label key; `-` where there is none), `mode: visibility→selective`,
+/// `ven: active→stopped`, `ven 23.2→23.5`, `name: a→b`. Empty: nothing
+/// changed. Workloads compare's `was→now` (#85).
+pub fn workload_transitions(a: &Workload, b: &Workload, idx: &NameIndex) -> Vec<String> {
+    // (a label key?, the field or key, before, after), first seen first.
+    let mut out: Vec<(bool, String, Option<String>, Option<String>)> = Vec::new();
+    for l in workload_lines(a, b, idx) {
+        if l.sign == Sign::Same {
+            continue;
+        }
+        let (label, f, v) = match l.text.strip_prefix("label ") {
+            Some(kv) => {
+                let (k, v) = kv.split_once('=').unwrap_or((kv, ""));
+                (true, k, v)
+            }
+            None => match l.text.split_once(": ") {
+                Some((f, v)) => (false, f, v),
+                None => continue,
+            },
+        };
+        let at = match out.iter().position(|e| e.0 == label && e.1 == f) {
+            Some(i) => i,
+            None => {
+                out.push((label, f.to_string(), None, None));
+                out.len() - 1
+            }
+        };
+        let v = Some(if !label && f == "enforcement_mode" {
+            v.replace("visibility_only", "visibility")
+        } else {
+            v.to_string()
+        });
+        if l.sign == Sign::Removed {
+            out[at].2 = v;
+        } else {
+            out[at].3 = v;
+        }
+    }
+    out.into_iter()
+        .map(|(label, f, was, now)| {
+            let (was, now) = (
+                was.unwrap_or_else(|| "-".into()),
+                now.unwrap_or_else(|| "-".into()),
+            );
+            match (label, f.as_str()) {
+                (false, "enforcement_mode") => format!("mode: {was}→{now}"),
+                (false, "ven_status") => format!("ven: {was}→{now}"),
+                (false, "ven_version") => format!("ven {was}→{now}"),
+                _ => format!("{f}: {was}→{now}"),
+            }
+        })
+        .collect()
+}
+
 fn rule_set_changes(
     scope: &'static str,
     older: &[RuleSet],

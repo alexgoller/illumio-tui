@@ -11,6 +11,9 @@
 //! - [`list`], [`load`], [`save`], [`find`], [`remove`], [`prune`]: the
 //!   files of one profile's directory.
 //! - [`diff`]: what changed between two snapshots, per section.
+//! - [`baseline`]: a snapshot as the Workloads baseline, and the
+//!   readiness trend over the snapshots (#85).
+pub mod baseline;
 pub mod diff;
 mod take;
 
@@ -548,5 +551,7 @@ pub fn prune(metas: &[SnapshotMeta], keep: usize) -> std::io::Result<Vec<Snapsho
     Ok(removed)
 }
 
+#[cfg(test)]
+mod baseline_tests;
 #[cfg(test)]
 mod tests;
