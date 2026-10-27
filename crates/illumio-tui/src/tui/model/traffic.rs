@@ -218,6 +218,31 @@ pub struct TrafficState {
     /// there are any (`shown_flows`).
     compare_hidden: BTreeSet<pce::traffic::FlowKey>,
     recent_view: Option<Vec<ResolvedFlow>>,
+    /// `:exposure` / `9` (#82): the screen is on the exposure query (its
+    /// own cache slot) until `Esc` on the Exposure view; `None` off.
+    pub exposure: Option<ExposureMode>,
+    /// The Exposure view's rows, rebuilt with the others while it is on.
+    pub exposure_rows: TableView<ExposureRow>,
+}
+
+/// Exposure mode (#82): the risky services asked for, and what the screen
+/// showed before, put back without a request when it ends.
+#[derive(Debug)]
+pub struct ExposureMode {
+    pub services: Vec<RiskyService>,
+    pub before_filter: TrafficFilter,
+    pub before_data: Option<TrafficData>,
+    pub before_view: TrafficView,
+}
+
+/// The filter `:exposure` runs: `f`'s sides, window, cap and transmission,
+/// every decision, and the services every port of `services` (any of them).
+pub fn exposure_filter(f: &TrafficFilter, services: &[RiskyService]) -> TrafficFilter {
+    TrafficFilter {
+        service: pce::traffic::service_terms(services).join(" | "),
+        decisions: pce::models::PolicyDecision::ALL.to_vec(),
+        ..f.clone()
+    }
 }
 
 /// Both optional Mesh columns shown.
@@ -243,6 +268,11 @@ pub enum Drill {
         app: Vec<String>,
         direction: Option<Direction>,
         decisions: Decisions,
+    },
+    /// An Exposure row: every flow of the risky service to the group.
+    Exposure {
+        dst: Vec<String>,
+        service: RiskyService,
     },
     /// A section's peer row: its peer and service under `app`.
     Peer {
@@ -279,6 +309,9 @@ impl Drill {
                     && &f.service_text() == service
             }
             Drill::Mesh { key, cols } => &mesh_key(f, keys, *cols) == key,
+            Drill::Exposure { dst, service } => {
+                service.matches(f) && &group_key(&f.dst, keys) == dst
+            }
             Drill::App {
                 app,
                 direction,
@@ -315,6 +348,7 @@ impl Drill {
                 key.dst.join("/"),
                 key.service_text()
             ),
+            Drill::Exposure { dst, service } => format!("* → {} {}", dst.join("/"), service.name),
             Drill::App {
                 app,
                 direction,
@@ -413,6 +447,8 @@ impl TrafficState {
             baseline_view: None,
             compare_hidden: BTreeSet::new(),
             recent_view: None,
+            exposure: None,
+            exposure_rows: TableView::new(exposure_columns()),
         }
     }
 
@@ -644,6 +680,11 @@ impl TrafficState {
                 .map(|r| vec![r.src.clone(), r.dst.clone()])
                 .unwrap_or_default(),
             TrafficView::Treemap => self.treemap_apps(),
+            TrafficView::Exposure => self
+                .exposure_rows
+                .selected_item()
+                .map(|r| vec![r.dst.clone()])
+                .unwrap_or_default(),
         };
         apps.dedup();
         apps
@@ -934,6 +975,81 @@ impl TrafficState {
         self.rebuild_pairs();
         self.rebuild_sections();
         self.relayout_treemap();
+        self.rebuild_exposure();
+    }
+
+    /// The Exposure view's rows from the flows every view aggregates
+    /// (focus and squelch applied); its `draft` column only with draft
+    /// decisions loaded. Empty outside exposure mode.
+    pub fn rebuild_exposure(&mut self) {
+        let rows = match &self.exposure {
+            Some(x) => pce::traffic::exposure_rows(self.view_flows(), &x.services, &self.keys),
+            None => Vec::new(),
+        };
+        let draft = rows.iter().any(|r| r.draft.is_some());
+        let cols: Vec<Column<ExposureRow>> = exposure_columns()
+            .into_iter()
+            .filter(|c| draft || c.title != "draft")
+            .collect();
+        if cols.len() != self.exposure_rows.columns.len() {
+            self.exposure_rows.set_columns(cols);
+        }
+        self.exposure_rows.set_rows(rows);
+    }
+
+    /// The cache slot a query of this screen runs in: the exposure query's
+    /// own while exposure mode is on, so neither evicts the other.
+    pub fn query_slot(&self) -> &'static str {
+        if self.exposure.is_some() {
+            pce::EXPOSURE_SLOT
+        } else {
+            "main"
+        }
+    }
+
+    /// `:exposure` / `9`: the screen on the exposure query of `services`.
+    /// The focus, a drill, compare mode and a query in flight end; what
+    /// was on screen is kept aside. Returns the filter to run (through the
+    /// cost guard, in the exposure slot). Already on: `None`, the view
+    /// shown again.
+    pub fn enter_exposure(&mut self, services: Vec<RiskyService>) -> Option<TrafficFilter> {
+        if self.exposure.is_some() {
+            self.view = TrafficView::Exposure;
+            return None;
+        }
+        self.drop_focus();
+        self.cancel_query();
+        self.compare = None;
+        self.drill = None;
+        let filter = exposure_filter(&self.filter, &services);
+        self.exposure = Some(ExposureMode {
+            services,
+            before_filter: std::mem::replace(&mut self.filter, filter.clone()),
+            before_data: self.data.take(),
+            before_view: self.view,
+        });
+        self.view = TrafficView::Exposure;
+        self.rebuild_views();
+        Some(filter)
+    }
+
+    /// `Esc` on the Exposure view: the filter, result and view from before
+    /// exposure mode back, without a request; whether it was on.
+    pub fn leave_exposure(&mut self) -> bool {
+        let Some(x) = self.exposure.take() else {
+            return false;
+        };
+        self.cancel_query();
+        self.cancel_draft_run();
+        self.compare = None;
+        self.focus_result = None;
+        self.unfocused = None;
+        self.drill = None;
+        self.filter = x.before_filter;
+        self.data = x.before_data;
+        self.view = x.before_view;
+        self.rebuild_views();
+        true
     }
 
     /// The baseline's flows the views compare with (`baseline_view`): the
@@ -1424,7 +1540,7 @@ impl TrafficState {
                 let rows = flow_section_rows(&self.flows_cache, self.flows_state.folded());
                 self.flows_grouped.set_rows(rows);
             }
-            TrafficView::Mesh | TrafficView::Treemap => {}
+            TrafficView::Mesh | TrafficView::Treemap | TrafficView::Exposure => {}
         }
     }
 
@@ -1709,6 +1825,7 @@ impl TrafficState {
             TrafficView::Aggregate => self.apps.is_searching(),
             TrafficView::Mesh => self.mesh.is_searching(),
             TrafficView::Blocked => self.blocked.is_searching(),
+            TrafficView::Exposure => self.exposure_rows.is_searching(),
             TrafficView::Treemap => false,
         }
     }

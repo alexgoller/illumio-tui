@@ -280,6 +280,8 @@ pub enum Cmd {
         filter: TrafficFilter,
         mode: CacheMode,
         cancel: CancellationToken,
+        /// The cache slot: `main`, or the exposure query's own (#82).
+        slot: &'static str,
     },
     /// `r` on a partial focus: `filter` with the app's labels on its side,
     /// one query per side (`Pce::focused_traffic`), answered with
@@ -472,15 +474,17 @@ impl PartialEq for Cmd {
                     seq: a,
                     filter: fa,
                     mode: ma,
+                    slot: sa,
                     ..
                 },
                 Cmd::RunQuery {
                     seq: b,
                     filter: fb,
                     mode: mb,
+                    slot: sb,
                     ..
                 },
-            ) => a == b && fa == fb && ma == mb,
+            ) => a == b && fa == fb && ma == mb && sa == sb,
             (
                 Cmd::RunFocused {
                     seq: a,

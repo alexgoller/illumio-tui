@@ -393,7 +393,7 @@ impl TrafficState {
             TrafficView::Aggregate => c.pairs,
             TrafficView::Mesh => c.mesh,
             TrafficView::Blocked => c.blocked,
-            TrafficView::Treemap => return None,
+            TrafficView::Treemap | TrafficView::Exposure => return None,
         })
     }
 

@@ -59,6 +59,7 @@ fn run_at(m: &Model, cap: u32) -> Cmd {
         filter,
         mode: CacheMode::Use,
         cancel: CancellationToken::new(),
+        slot: "main",
     }
 }
 

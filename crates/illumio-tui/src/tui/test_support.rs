@@ -656,6 +656,47 @@ pub fn model_with_marks(dir: &std::path::Path, marks: &str) -> Model {
     m
 }
 
+/// The rich fixture as the exposure query (#82) brings it: its flows of a
+/// risky service only, two of them allowed from outside their
+/// destination's group: hr/prod's web to shop/prod's db on 5432 (index
+/// 12) and the Corp IP list to erp/prod's api on 22 (index 20).
+pub fn exposure_flows() -> Vec<ResolvedFlow> {
+    let mut flows = fixture_flows_rich();
+    flows[12].policy_decision = pce::models::PolicyDecision::Allowed;
+    flows[20].policy_decision = pce::models::PolicyDecision::Allowed;
+    let list = pce::traffic::default_services();
+    flows.retain(|f| pce::traffic::exposure::service_of(&list, f).is_some());
+    flows
+}
+
+/// `:exposure` on `m`, answered with `flows` (the exposure slot's query):
+/// exposure mode with its result loaded.
+pub fn open_exposure_with(m: &mut Model, flows: Vec<ResolvedFlow>) {
+    use crate::tui::commands::Command;
+    use crate::tui::msg::{Cmd, Msg, QueryOutcome};
+    use crate::tui::update;
+    let cmds = update(m, Msg::Command(Command::Exposure));
+    let Some(Cmd::RunQuery { seq, filter, .. }) = cmds.into_iter().next() else {
+        panic!("no exposure query: {:?}", m.status);
+    };
+    update(
+        m,
+        Msg::QueryDone {
+            seq,
+            result: Ok(QueryOutcome {
+                flows,
+                truncated: false,
+                incomplete: false,
+                elapsed: Duration::from_millis(1200),
+                hit: false,
+                filter,
+                bounds: None,
+                hrefs: vec!["/orgs/5/traffic_flows/async_queries/x-1".into()],
+            }),
+        },
+    );
+}
+
 /// A baseline for the rich fixture: without its first flow (so recent's
 /// is new), its 8443 flow (index 5) allowed then (changed), and one flow
 /// only it holds, 9999/tcp (gone). The rest the very same records.

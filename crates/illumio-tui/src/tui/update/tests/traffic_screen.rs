@@ -1459,7 +1459,9 @@ fn search_captures_keys_on_aggregate_mesh_and_blocked_views() {
             TrafficView::Aggregate => m.traffic.groups.search_text().to_string(),
             TrafficView::Mesh => m.traffic.mesh.search_text().to_string(),
             TrafficView::Blocked => m.traffic.blocked.search_text().to_string(),
-            TrafficView::Flows | TrafficView::Treemap => unreachable!("v moved off Flows"),
+            TrafficView::Flows | TrafficView::Treemap | TrafficView::Exposure => {
+                unreachable!("v moved off Flows")
+            }
         };
         assert_eq!(table_search(&m), "q:?");
         quiet(

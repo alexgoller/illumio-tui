@@ -3650,3 +3650,28 @@ fn traffic_compare_80x24_and_160x48() {
         render_to_string(&m, 120, 30)
     );
 }
+
+#[test]
+fn exposure_view_80x24_and_160x48() {
+    use illumio_tui::tui::test_support::{
+        exposure_flows, model_with_rich_flows, open_exposure_with,
+    };
+    let mut m = model_with_rich_flows();
+    open_exposure_with(&mut m, exposure_flows());
+    let out = render_to_string(&m, 80, 24);
+    assert!(
+        out.contains("Exposure") && out.contains("erp/prod"),
+        "{out}"
+    );
+    assert!(
+        out.contains("exposure ·"),
+        "the Result header says the mode: {out}"
+    );
+    insta::assert_snapshot!("traffic_exposure_80x24", out);
+    let out = render_to_string(&m, 160, 48);
+    assert!(
+        out.contains("ssh: 2 destinations · 1 exposed (allowed from other apps)"),
+        "{out}"
+    );
+    insta::assert_snapshot!("traffic_exposure_160x48", out);
+}

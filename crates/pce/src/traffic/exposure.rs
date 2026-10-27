@@ -255,7 +255,7 @@ pub struct Sources {
 }
 
 impl Sources {
-    /// `2 apps · 1 ext (any)`, the table's sources cell.
+    /// `intra, 2 apps, 1 ext (any)`, the table's sources cell.
     pub fn text(&self) -> String {
         let mut parts = Vec::new();
         if self.intra > 0 {
@@ -276,7 +276,7 @@ impl Sources {
             };
             parts.push(format!("{} ext{flag}", self.ip_lists));
         }
-        parts.join(" · ")
+        parts.join(", ")
     }
 }
 
@@ -500,6 +500,15 @@ impl ServiceSummary {
         }
         s
     }
+
+    /// `text` for a narrow line: `rdp: 12 dst · 4 exposed · 3 pot.bl · 5
+    /// blocked`.
+    pub fn short(&self) -> String {
+        format!(
+            "{}: {} dst · {} exposed · {} pot.bl · {} blocked",
+            self.service, self.destinations, self.exposed, self.potentially_blocked, self.blocked
+        )
+    }
 }
 
 /// One summary per service of `list`, in its order, those no flow reached
@@ -720,7 +729,7 @@ mod tests {
                 internet: true,
             }
         );
-        assert_eq!(r.sources.text(), "intra · 2 apps · 2 ext (any)");
+        assert_eq!(r.sources.text(), "intra, 2 apps, 2 ext (any)");
         assert_eq!((r.flows, r.connections), (6, 13));
         assert_eq!((r.allowed, r.potentially_blocked, r.blocked), (1, 1, 4));
         assert_eq!(r.exposed_flows, 0, "the allowed flow is the group's own");
@@ -773,6 +782,7 @@ mod tests {
             ssh.text(),
             "ssh: 3 destinations · 1 exposed (allowed from other apps) · 1 potentially blocked · 1 blocked"
         );
+        assert_eq!(ssh.short(), "ssh: 3 dst · 1 exposed · 1 pot.bl · 1 blocked");
         let mysql = sums.iter().find(|s| s.service == "mysql").unwrap();
         assert_eq!(
             mysql.text(),

@@ -135,6 +135,7 @@ pub fn render(model: &Model, f: &mut Frame, body: Rect) {
         TrafficView::Mesh => render_mesh(model, f, l.table.union(l.detail)),
         TrafficView::Treemap => render_treemap(model, f, l.table.union(l.detail)),
         TrafficView::Blocked => render_blocked(model, f, l.table.union(l.detail)),
+        TrafficView::Exposure => render_exposure(model, f, l.table.union(l.detail)),
     }
 }
 
@@ -142,9 +143,15 @@ pub fn render(model: &Model, f: &mut Frame, body: Rect) {
 /// partial: r re-queries shop/prod · in`) in front of the query's meta.
 fn query_meta(model: &Model) -> String {
     let meta = result_meta(model);
-    match model.traffic.focus_meta() {
+    let meta = match model.traffic.focus_meta() {
         Some(focus) => format!("{focus} · {meta}"),
         None => meta,
+    };
+    // Exposure mode (#82): the result is the exposure query's.
+    if model.traffic.exposure.is_some() {
+        format!("exposure · {meta}")
+    } else {
+        meta
     }
 }
 
@@ -645,6 +652,65 @@ fn render_blocked(model: &Model, f: &mut Frame, area: Rect) {
         &model.traffic.blocked,
         &move |r| if gone(r.change()) { dim } else { bad },
     );
+}
+
+/// Exposure (#82): one row per destination group and risky service;
+/// exposed rows in the bad colour, potentially blocked ones in the
+/// warning one, blocked ones in the good one, intra ones dim. The meta is
+/// the selected row's service summary (`rdp: 12 destinations · 4 exposed
+/// …`), then the keys.
+fn render_exposure(model: &Model, f: &mut Frame, area: Rect) {
+    use pce::traffic::ExposureStatus as S;
+    let t = &model.theme;
+    let x = &model.traffic;
+    let table = &x.exposure_rows;
+    // The selected row's service summary, long or short; the marks' counts
+    // or the keys; sort and search: the longest that fits.
+    let (long, short) = match table.selected_item() {
+        Some(r) => {
+            let services = x.exposure.as_ref().map(|e| e.services.as_slice());
+            let sum = pce::traffic::summarize(table.rows(), services.unwrap_or_default());
+            match sum.into_iter().find(|s| s.service == r.service) {
+                Some(s) => (Some(s.text()), Some(s.short())),
+                None => (None, None),
+            }
+        }
+        None if x.exposure.is_none() => (Some("off: 9 or :exposure".into()), None),
+        None => (None, None),
+    };
+    let keys = x
+        .marks_meta(TrafficView::Exposure)
+        .unwrap_or_else(|| "Enter flows · E explain · Esc leaves".into());
+    let sort = crate::tui::ui::widgets::table::header_meta(table);
+    let join = |parts: &[Option<&str>]| {
+        parts
+            .iter()
+            .flatten()
+            .filter(|p| !p.is_empty())
+            .copied()
+            .collect::<Vec<_>>()
+            .join(" · ")
+    };
+    let (long, short) = (long.as_deref(), short.as_deref());
+    let room = area.width.saturating_sub(16) as usize;
+    let meta = [
+        join(&[long, Some(&keys), Some(&sort)]),
+        join(&[long, Some(&sort)]),
+        join(&[short, Some(&keys), Some(&sort)]),
+        join(&[short, Some(&sort)]),
+    ]
+    .into_iter()
+    .find(|m| Span::raw(m.as_str()).width() <= room)
+    .unwrap_or_else(|| join(&[short]));
+    let title = unit_title(TrafficView::Exposure.title(), &meta, area.width);
+    let block = panel(&title, &meta, t, true);
+    let theme = t.clone();
+    crate::tui::ui::widgets::table::render(f, area, table, t, block, &move |r| match r.status {
+        S::Exposed => Style::new().fg(theme.bad),
+        S::PotentiallyBlocked => Style::new().fg(theme.warn),
+        S::Blocked => Style::new().fg(theme.ok),
+        S::Intra => theme.dim_style(),
+    });
 }
 
 /// The selected flow's mark: `squelch m-7k2q9x · Nagios NRPE, known ·

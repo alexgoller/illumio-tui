@@ -1244,6 +1244,9 @@ mod draft_tests;
 mod event_actors_tests;
 #[cfg(test)]
 mod event_types_tests;
+/// `:exposure` / `9`: risky services per destination group (#82).
+#[cfg(test)]
+mod exposure_tests;
 #[cfg(test)]
 mod filter_completion_tests;
 #[cfg(test)]

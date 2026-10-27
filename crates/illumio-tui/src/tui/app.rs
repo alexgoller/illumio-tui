@@ -416,6 +416,7 @@ impl Runtime {
         filter: TrafficFilter,
         mode: CacheMode,
         cancel: CancellationToken,
+        slot: &'static str,
     ) {
         self.model.busy += 1;
         let (pce, tx) = self.task_ctx();
@@ -429,7 +430,9 @@ impl Runtime {
             });
             let result = async {
                 let query = filter.to_query(&pce, CacheMode::Use).await?;
-                let cached = pce.traffic(&query, mode, &cancel, Some(&ptx)).await?;
+                let cached = pce
+                    .traffic_slot(slot, &query, mode, &cancel, Some(&ptx))
+                    .await?;
                 let idx = pce.name_index(CacheMode::Use).await?;
                 let flows = pce::traffic::resolve_flows(&cached.value.flows, &idx);
                 let bounds = query
@@ -1106,7 +1109,8 @@ impl Runtime {
                 filter,
                 mode,
                 cancel,
-            } => self.run_traffic(seq, filter, mode, cancel),
+                slot,
+            } => self.run_traffic(seq, filter, mode, cancel, slot),
             Cmd::RunFocused {
                 seq,
                 filter,

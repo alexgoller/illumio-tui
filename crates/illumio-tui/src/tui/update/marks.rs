@@ -55,7 +55,7 @@ pub(super) fn mark_key(model: &mut Model) -> Vec<Cmd> {
             .blocked
             .selected_item()
             .and_then(|r| section_prefill(t, r, true)),
-        TrafficView::Treemap => {
+        TrafficView::Treemap | TrafficView::Exposure => {
             model.status = StatusLine::info("m: Enter drills to the flows, mark there");
             return Vec::new();
         }

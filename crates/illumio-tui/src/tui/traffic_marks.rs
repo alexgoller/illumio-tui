@@ -313,7 +313,8 @@ impl TrafficState {
             TrafficView::Aggregate => mv.pairs,
             TrafficView::Mesh => mv.mesh,
             TrafficView::Blocked => mv.blocked,
-            TrafficView::Treemap => mv.treemap,
+            // Exposure counts the squelched flows only, as the treemap.
+            TrafficView::Treemap | TrafficView::Exposure => mv.treemap,
         };
         let mut parts: Vec<String> = Vec::new();
         if view == TrafficView::Blocked && mv.accepted > 0 {
@@ -322,7 +323,8 @@ impl TrafficState {
                 mv.blocked_open, mv.accepted
             ));
         }
-        parts.extend(sq.meta(self.show_squelched, view != TrafficView::Treemap));
+        let rows = !matches!(view, TrafficView::Treemap | TrafficView::Exposure);
+        parts.extend(sq.meta(self.show_squelched, rows));
         if mv.waiting > 0 {
             parts.push(format!(
                 "{} {} for the draft decision (D)",

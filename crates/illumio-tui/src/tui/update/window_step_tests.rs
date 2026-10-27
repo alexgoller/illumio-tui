@@ -37,6 +37,7 @@ fn query_cmd(m: &Model, w: &str) -> Cmd {
         filter: with_window(m, w),
         mode: CacheMode::Use,
         cancel: CancellationToken::new(),
+        slot: "main",
     }
 }
 
@@ -216,6 +217,7 @@ fn plus_without_a_known_range_runs_one_full_query() {
             filter: with_window(&m, "2d"),
             mode: CacheMode::Use,
             cancel: CancellationToken::new(),
+            slot: "main",
         }]
     );
     quiet(&mut m, key('+')); // running: no second request
@@ -253,6 +255,7 @@ fn brackets_rerun_the_whole_query_once_with_the_next_cap() {
             filter: f,
             mode: CacheMode::Use,
             cancel: CancellationToken::new(),
+            slot: "main",
         }]
     );
     assert_eq!(m.traffic.filter.max_results, 2000);

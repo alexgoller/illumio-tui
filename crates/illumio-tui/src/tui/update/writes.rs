@@ -518,7 +518,10 @@ pub(super) fn flow_rule_key(model: &mut Model) -> Vec<Cmd> {
             t.first_flow(|f| r.contains(f, &keys, t.mesh_cols))
         }),
         TrafficView::Aggregate if t.apps_state.by_service => return service_pair_rule_key(model),
-        TrafficView::Blocked | TrafficView::Aggregate | TrafficView::Treemap => {
+        TrafficView::Blocked
+        | TrafficView::Aggregate
+        | TrafficView::Treemap
+        | TrafficView::Exposure => {
             model.status = StatusLine::warn("select a flow in the Flows view (Enter on a pair)");
             return Vec::new();
         }

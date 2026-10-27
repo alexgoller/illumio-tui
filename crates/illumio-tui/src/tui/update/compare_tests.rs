@@ -910,7 +910,7 @@ fn shown_with(m: &Model, c: Change) -> u64 {
             .filter(|r| is(r.change.as_ref()))
             .count(),
         TrafficView::Blocked => t.blocked.rows().iter().filter(|r| is(r.change())).count(),
-        TrafficView::Treemap => 0,
+        TrafficView::Treemap | TrafficView::Exposure => 0,
     };
     n as u64
 }
@@ -1021,7 +1021,7 @@ fn transitions(m: &Model) -> (Vec<String>, bool, usize) {
         TrafficView::Aggregate => of(t.pairs_table(), |r| r.change.as_ref()),
         TrafficView::Mesh => of(&t.mesh, |r| r.change.as_ref()),
         TrafficView::Blocked => of(&t.blocked, |r| r.change()),
-        TrafficView::Treemap => (Vec::new(), false, 0),
+        TrafficView::Treemap | TrafficView::Exposure => (Vec::new(), false, 0),
     }
 }
 
@@ -1191,7 +1191,7 @@ comment = "look again"
             TrafficView::Aggregate => fits(t.pairs_table(), 80),
             TrafficView::Mesh => fits(&t.mesh, 80),
             TrafficView::Blocked => fits(&t.blocked, 80),
-            TrafficView::Treemap => (true, 0),
+            TrafficView::Treemap | TrafficView::Exposure => (true, 0),
         };
         assert!(ok, "{what}: {used} cells at 80");
         if t.view != TrafficView::Treemap {

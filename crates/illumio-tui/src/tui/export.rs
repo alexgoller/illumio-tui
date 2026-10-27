@@ -29,6 +29,7 @@ pub fn current_table(model: &Model) -> Result<Csv, String> {
                 (_, Some(rows)) => sections(&rows),
                 (TrafficView::Flows, _) => without_transition(t.flows.export()),
                 (TrafficView::Mesh, _) => without_transition(t.mesh.export()),
+                (TrafficView::Exposure, _) => t.exposure_rows.export(),
                 (TrafficView::Treemap, _) => {
                     return Err("the treemap has no table to export".into());
                 }

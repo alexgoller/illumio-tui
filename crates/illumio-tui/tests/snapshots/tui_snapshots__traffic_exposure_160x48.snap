@@ -1,0 +1,52 @@
+---
+source: crates/illumio-tui/tests/tui_snapshots.rs
+expression: out
+---
+ illumio-tui pce.example · org 5 ●                                                                                                        api 5 calls · 20.8 KB
+  1 Traffic  │  2 Policy  │  3 Objects  │  4 Workloads  │  5 Events
+╭ Filters ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────── window 24h · cap 1000 ╮
+│window 24h  src *  dst *  svc 3389/tcp | 3389/udp | 445/tcp | 139/tcp | 137/udp | 138/udp | 135/tcp | 5985/tcp | 5986/tcp | 22/tcp | 23/tcp | 5900/tcp | 1433/│
+╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭ Result ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────── exposure · 18 flows · 0s ago ╮
+│18 flows allowed 11 pot.blocked 2 blocked 5  █████████████████████████████████████████████████████████████████████████████████████████████████████████████████│
+╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭ Exposure ────────────── ssh: 2 destinations · 1 exposed (allowed from other apps) · 1 potentially blocked · 0 blocked · Enter flows · E explain · Esc leaves ╮
+│  status      service  ports              dst                                                      sources              flows  conns    allowed pot.bl blocked│
+│▸ exposed     ssh      22/tcp             erp/prod                                                 1 ext                     1        4       1      0       0│
+│  exposed     postgres 5432/tcp           shop/prod                                                intra, 2 apps, 1 ext      7      845       5      0       2│
+│  pot.blocked ssh      22/tcp             shop/dev                                                 intra                     1        3       0      1       0│
+│  pot.blocked oracle   1521/tcp           erp/prod                                                 intra, 2 apps             4      609       2      1       1│
+│  blocked     mysql    3306/tcp           crm/prod                                                 intra, 1 app              3      862       2      0       1│
+│  blocked     postgres 5432/tcp           hr/dev                                                   1 app                     1       20       0      0       1│
+│  intra       postgres 5432/tcp           shop/dev                                                 intra                     1       90       1      0       0│
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+18 flows in 1.2s                          f filter  r run  a auto  v view  g group  / search  +/- window  ]/[ cap  D draft  c compare  :fl saved  : cmd  ? help

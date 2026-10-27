@@ -1,0 +1,29 @@
+---
+source: crates/illumio-tui/tests/tui_snapshots.rs
+assertion_line: 137
+expression: out
+---
+╭ Keys · Flows ─────────────────────────────────────────────────── 1-21 of 34 ╮
+│FLOWS                                                                        │
+│x / X          flat · by src app · by dst app · back (focused: X: direction) │╮
+│Enter          the flow's detail                                             ││
+│E              explain: the rule that allows or blocks the flow              │╯
+│                                                                             │╮
+│SECTIONS                                                                     ││
+│Space / z      fold a section · fold or unfold all (also Blocked, Flows)     │╯
+│s              order: conns ↓ · app A→Z · flows ↓ (App-to-app, Flows)        │╮
+│                                                                             ││
+│TRAFFIC                                                                      ││
+│v              cycle Flows · App-to-app · Mesh · Blocked · Treemap           ││
+│f              edit filter: window src dst svc decision transmission         ││
+│+ / -          widen (re-runs the window) / narrow (no request)              ││
+│B              re-run a truncated result at a larger cap                     │╯
+│] / [          raise / lower the result cap (re-runs the query)              │╮
+│g              pick the label keys every view groups by                      ││
+│F / X          focus on the row's app (again: other side) · in/out/both      ││
+│A              app overlay: peers, policy, workloads                         ││
+│D              draft decision per flow (PCE draft view; again: clear)        ││
+│c              compare with a baseline before the window (default 7d)        ││
+│n / C          show all · new · changed · gone / compare off                 ││
+│more: Commands · App-to-app · Blocked · Mesh · Treemap · Exposure · Marks +11│╯
+╰─────────────────────────── Tab next · S-Tab prev · a all · j/k scroll · Esc ╯

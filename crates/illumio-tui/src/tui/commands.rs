@@ -20,6 +20,8 @@ pub enum Command {
     Gen(Option<String>),
     /// `:readiness`: every app of the result on screen, judged for enforcement.
     Readiness,
+    /// `:exposure` (also `9`): the Traffic screen's Exposure view (#82).
+    Exposure,
     /// `:enforce <app>` opens the enforcement overlay; `:enforce` alone the picker.
     Enforce(Option<String>),
     Profile(String),
@@ -95,6 +97,7 @@ pub fn parse(input: &str) -> Result<Command, String> {
         "app" => Ok(Command::App((!arg.is_empty()).then(|| arg.to_string()))),
         "gen" => Ok(Command::Gen((!arg.is_empty()).then(|| arg.to_string()))),
         "readiness" => no_arg(Command::Readiness),
+        "exposure" => no_arg(Command::Exposure),
         "enforce" => Ok(Command::Enforce((!arg.is_empty()).then(|| arg.to_string()))),
         "window" => with_arg(Command::Window, "window <duration>  (e.g. 1h, 24h, 7d)"),
         "profile" => with_arg(Command::Profile, "profile <name>"),

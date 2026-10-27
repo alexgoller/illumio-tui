@@ -744,6 +744,8 @@ pub(super) fn on_screen_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
         (KeyCode::Char('3'), _) => switch(model, Screen::Objects),
         (KeyCode::Char('4'), _) => switch(model, Screen::Workloads),
         (KeyCode::Char('5'), _) => switch(model, Screen::Events),
+        // The Traffic screen's Exposure view (#82), as `:exposure`.
+        (KeyCode::Char('9'), _) => open_exposure(model),
         _ if model.screen == Screen::Traffic => traffic_key(model, k),
         _ if model.screen == Screen::Policy => policy_key(model, k),
         _ if model.screen == Screen::Objects => objects_key(model, k),
@@ -895,6 +897,7 @@ pub(super) fn scroll_focused(model: &mut Model, down: bool) {
                 TrafficView::Aggregate => step(&mut t.apps, down, page),
                 TrafficView::Mesh => step(&mut t.mesh, down, page),
                 TrafficView::Blocked => step(&mut t.blocked, down, page),
+                TrafficView::Exposure => step(&mut t.exposure_rows, down, page),
                 // The wheel moves table rows; the treemap has none.
                 TrafficView::Treemap => {}
             }

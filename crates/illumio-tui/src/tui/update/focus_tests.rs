@@ -68,6 +68,7 @@ fn x_and_esc_cycle_and_clear_the_focus_on_every_view_without_requests() {
             TrafficView::Treemap => {
                 assert!(!t.treemap.tiles.is_empty() && t.treemap.groups.iter().all(|g| crm(&g.dst)))
             }
+            TrafficView::Exposure => unreachable!("not in the list"),
         }
         quiet(&mut m, key('X'));
         assert_eq!(focused(&m).unwrap().1, FocusDirection::Out);

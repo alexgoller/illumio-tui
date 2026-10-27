@@ -98,6 +98,7 @@ pub const HELP_GROUPS: &[HelpGroup] = &[
             key("", ":app <app>  the app overlay (alone: the picker)"),
             key("", ":gen <app>  the policy generator (alone: the picker)"),
             key("", ":readiness  :enforce <app>  (alone: the picker)"),
+            key("", ":exposure (or 9)  risky services per destination"),
             key("", ":ven  the VEN fleet of the loaded workloads"),
             key("", ":used  where the selected object is used (Objects)"),
             key("", ":snapshot [label]  policy, labels, workloads to a file"),
@@ -209,6 +210,21 @@ pub const HELP_GROUPS: &[HelpGroup] = &[
             "x / X / d",
             "none here: Blocked is App-to-app's in · blocked (v to it)",
         )],
+    },
+    HelpGroup {
+        title: "Exposure",
+        lines: &[
+            key("9", "risky services per destination group (:exposure)"),
+            more("", "1 query over their ports, its own cache slot"),
+            more("", "the profile's [exposure] list, else rdp smb ssh …"),
+            key("Enter", "the row's flows (Flows, drilled)"),
+            key("E / e", "explain the row's busiest exposing flow"),
+            key("Esc", "leave: the result before it back (no request)"),
+            more(
+                "Status",
+                "exposed: allowed from other apps · pot.blocked · blocked",
+            ),
+        ],
     },
     HelpGroup {
         title: "Sections",
@@ -522,6 +538,7 @@ pub enum HelpTopic {
     Sections,
     Mesh,
     Treemap,
+    Exposure,
     Marks,
     AppOverlay,
     Generator,
@@ -537,7 +554,7 @@ pub enum HelpTopic {
 
 impl HelpTopic {
     /// The order `Tab` walks (and the footer names).
-    pub const ALL: [HelpTopic; 21] = [
+    pub const ALL: [HelpTopic; 22] = [
         HelpTopic::Everywhere,
         HelpTopic::Commands,
         HelpTopic::Traffic,
@@ -547,6 +564,7 @@ impl HelpTopic {
         HelpTopic::Sections,
         HelpTopic::Mesh,
         HelpTopic::Treemap,
+        HelpTopic::Exposure,
         HelpTopic::Marks,
         HelpTopic::AppOverlay,
         HelpTopic::Generator,
@@ -573,6 +591,7 @@ impl HelpTopic {
             HelpTopic::Sections => "Sections",
             HelpTopic::Mesh => "Mesh",
             HelpTopic::Treemap => "Treemap",
+            HelpTopic::Exposure => "Exposure",
             HelpTopic::Marks => "Marks",
             HelpTopic::AppOverlay => "App overlay",
             HelpTopic::Generator => "Generator",
@@ -620,6 +639,7 @@ pub enum HelpContext {
     Mesh,
     Blocked,
     Treemap,
+    Exposure,
     Policy,
     Objects,
     Workloads,
@@ -642,6 +662,7 @@ impl HelpContext {
             HelpContext::Mesh => "Mesh",
             HelpContext::Blocked => "Blocked",
             HelpContext::Treemap => "Treemap",
+            HelpContext::Exposure => "Exposure",
             HelpContext::Policy => "Policy",
             HelpContext::Objects => "Objects",
             HelpContext::Workloads => "Workloads",
@@ -665,6 +686,7 @@ impl HelpContext {
             HelpContext::Blocked => &[T::Blocked, T::Sections, T::Traffic, T::Everywhere],
             HelpContext::Mesh => &[T::Mesh, T::Traffic, T::Everywhere],
             HelpContext::Treemap => &[T::Treemap, T::Traffic, T::Everywhere],
+            HelpContext::Exposure => &[T::Exposure, T::Traffic, T::Everywhere],
             HelpContext::Policy => &[T::Policy, T::Pending, T::Writes, T::Everywhere],
             HelpContext::Objects => &[T::Objects, T::Writes, T::Everywhere],
             HelpContext::Workloads => &[T::Workloads, T::Writes, T::Everywhere],
@@ -702,6 +724,7 @@ impl HelpContext {
                 TrafficView::Mesh => HelpContext::Mesh,
                 TrafficView::Blocked => HelpContext::Blocked,
                 TrafficView::Treemap => HelpContext::Treemap,
+                TrafficView::Exposure => HelpContext::Exposure,
             },
             Screen::Policy => HelpContext::Policy,
             Screen::Objects => HelpContext::Objects,
@@ -1019,12 +1042,13 @@ mod tests {
         }
     }
 
-    const CONTEXTS: [(HelpContext, &str); 15] = [
+    const CONTEXTS: [(HelpContext, &str); 16] = [
         (HelpContext::Flows, "Flows"),
         (HelpContext::AppToApp, "App-to-app"),
         (HelpContext::Mesh, "Mesh"),
         (HelpContext::Blocked, "Blocked"),
         (HelpContext::Treemap, "Treemap"),
+        (HelpContext::Exposure, "Exposure"),
         (HelpContext::Policy, "Policy"),
         (HelpContext::Objects, "Objects"),
         (HelpContext::Workloads, "Workloads"),

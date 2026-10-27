@@ -452,17 +452,21 @@ pub enum TrafficView {
     Mesh,
     Blocked,
     Treemap,
+    /// `:exposure` / `9` (#82): risky services per destination group, on
+    /// the exposure query's result. Not in `v`'s cycle (`v` leaves it).
+    Exposure,
 }
 
 impl TrafficView {
-    /// `v`: Flows, App-to-app, Mesh, Blocked, Treemap, then Flows again.
+    /// `v`: Flows, App-to-app, Mesh, Blocked, Treemap, then Flows again
+    /// (from Exposure too).
     pub fn next(self) -> Self {
         match self {
             TrafficView::Flows => TrafficView::Aggregate,
             TrafficView::Aggregate => TrafficView::Mesh,
             TrafficView::Mesh => TrafficView::Blocked,
             TrafficView::Blocked => TrafficView::Treemap,
-            TrafficView::Treemap => TrafficView::Flows,
+            TrafficView::Treemap | TrafficView::Exposure => TrafficView::Flows,
         }
     }
 
@@ -473,6 +477,7 @@ impl TrafficView {
             TrafficView::Mesh => "Mesh",
             TrafficView::Blocked => "Blocked",
             TrafficView::Treemap => "Treemap",
+            TrafficView::Exposure => "Exposure",
         }
     }
 }
@@ -773,6 +778,121 @@ pub(super) fn conns_by_decision_columns() -> [Column<FlowGroup>; 3] {
             full_title: Some("blocked_conns"),
             full: None,
         },
+    ]
+}
+
+/// The Exposure view (#82): one row per destination group and risky
+/// service, exposed rows first.
+pub fn exposure_columns() -> Vec<Column<ExposureRow>> {
+    let col = |title, width, cell: fn(&ExposureRow) -> String, key, right, hide_below| Column {
+        title,
+        width,
+        cell,
+        key,
+        right,
+        hide_below,
+        narrow: None,
+        narrow_width: 0,
+        full_title: None,
+        full: None,
+    };
+    vec![
+        Column {
+            full: Some(|r| r.status.as_str().to_string()),
+            narrow: Some(|r| match r.status {
+                ExposureStatus::PotentiallyBlocked => "pot.bl".into(),
+                s => s.short().to_string(),
+            }),
+            narrow_width: 7,
+            ..col(
+                "status",
+                11,
+                |r| r.status.short().to_string(),
+                |r| SortKey::Num(r.status as u64),
+                false,
+                0,
+            )
+        },
+        col(
+            "service",
+            8,
+            |r| r.service.clone(),
+            |r| SortKey::Text(r.service.clone()),
+            false,
+            0,
+        ),
+        col(
+            "ports",
+            18,
+            |r| r.ports.join(","),
+            |r| SortKey::Text(r.ports.join(",")),
+            false,
+            120,
+        ),
+        col(
+            "dst",
+            0,
+            |r| r.dst_text(),
+            |r| SortKey::Text(r.dst_text()),
+            false,
+            0,
+        ),
+        col(
+            "sources",
+            20,
+            |r| r.sources.text(),
+            |r| SortKey::Num(r.sources.apps + r.sources.ip_lists),
+            false,
+            0,
+        ),
+        col(
+            "flows",
+            6,
+            |r| r.flows.to_string(),
+            |r| SortKey::Num(r.flows),
+            true,
+            100,
+        ),
+        col(
+            "conns",
+            8,
+            |r| r.connections.to_string(),
+            |r| SortKey::Num(r.connections),
+            true,
+            100,
+        ),
+        col(
+            "allowed",
+            7,
+            |r| r.allowed.to_string(),
+            |r| SortKey::Num(r.allowed),
+            true,
+            0,
+        ),
+        col(
+            "pot.bl",
+            6,
+            |r| r.potentially_blocked.to_string(),
+            |r| SortKey::Num(r.potentially_blocked),
+            true,
+            0,
+        ),
+        col(
+            "blocked",
+            7,
+            |r| r.blocked.to_string(),
+            |r| SortKey::Num(r.blocked),
+            true,
+            0,
+        ),
+        col(
+            "draft",
+            20,
+            |r| DraftCounts::text(r.draft.as_ref()),
+            |r| SortKey::Text(DraftCounts::text(r.draft.as_ref())),
+            false,
+            110,
+        ),
     ]
 }
 

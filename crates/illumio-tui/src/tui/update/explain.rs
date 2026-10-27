@@ -65,8 +65,9 @@ fn open(model: &mut Model, flow: ResolvedFlow, from_app: bool) -> Vec<Cmd> {
     Vec::new()
 }
 
-/// `E` on the Traffic screen: the selected flow (Flows), or the one flow
-/// behind an App-to-app pair row.
+/// `E` on the Traffic screen: the selected flow (Flows), the one flow
+/// behind an App-to-app pair row, or an Exposure row's busiest exposing
+/// flow (else its busiest; `e` there too).
 pub(super) fn explain_key(model: &mut Model) -> Vec<Cmd> {
     let t = &model.traffic;
     let flow = match t.view {
@@ -108,6 +109,13 @@ pub(super) fn explain_key(model: &mut Model) -> Vec<Cmd> {
                 }
             }
         }
+        TrafficView::Exposure => match t.exposure_rows.selected_item() {
+            Some(r) => r.sample.clone(),
+            None => {
+                model.status = StatusLine::warn("no row selected");
+                return Vec::new();
+            }
+        },
         _ => {
             model.status = StatusLine::warn("E explains a flow: select one in the Flows view");
             return Vec::new();

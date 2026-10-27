@@ -237,6 +237,7 @@ fn the_state_survives_g_and_r_and_a_profile_switch_resets_it() {
             filter: filter.clone(),
             mode: pce::CacheMode::Bypass,
             cancel: tokio_util::sync::CancellationToken::new(),
+            slot: "main",
         }],
         "r runs the query"
     );

@@ -73,6 +73,7 @@ pub(super) fn start_query(model: &mut Model, filter: TrafficFilter, mode: CacheM
         filter,
         mode,
         cancel,
+        slot: model.traffic.query_slot(),
     }]
 }
 
@@ -416,6 +417,10 @@ pub(super) fn traffic_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
                 search_key(&mut t.blocked, k);
                 t.blocked.ensure_visible(page);
             }
+            TrafficView::Exposure => {
+                search_key(&mut t.exposure_rows, k);
+                t.exposure_rows.ensure_visible(page);
+            }
             // `is_searching` is false on the treemap: it has no table.
             TrafficView::Treemap => {}
         }
@@ -642,6 +647,7 @@ pub(super) fn traffic_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
             }
             TrafficView::Blocked => {}
             TrafficView::Treemap => treemap_enter(model),
+            TrafficView::Exposure => exposure_enter(model),
         },
         KeyCode::Esc | KeyCode::Backspace
             if model.traffic.view == TrafficView::Flows && model.traffic.drill.is_some() =>
@@ -650,6 +656,16 @@ pub(super) fn traffic_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
             model.traffic.rebuild_views();
         }
         KeyCode::Esc if model.traffic.view == TrafficView::Treemap => treemap_out(model),
+        KeyCode::Esc if model.traffic.view == TrafficView::Exposure => {
+            if model.traffic.leave_exposure() {
+                model.status =
+                    StatusLine::info("exposure closed: the result before it again (no request)");
+            }
+        }
+        // Which rule allows the row's flow: `E` as everywhere, `e` too.
+        KeyCode::Char('e') if model.traffic.view == TrafficView::Exposure => {
+            return explain_key(model);
+        }
         KeyCode::Char('b') if model.traffic.view == TrafficView::Treemap => {
             let t = &mut model.traffic;
             if !t.treemap.has_bytes {
@@ -673,6 +689,7 @@ pub(super) fn traffic_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
                 TrafficView::Aggregate => table_key(&mut t.apps, k, page),
                 TrafficView::Mesh => table_key(&mut t.mesh, k, page),
                 TrafficView::Blocked => table_key(&mut t.blocked, k, page),
+                TrafficView::Exposure => table_key(&mut t.exposure_rows, k, page),
                 TrafficView::Treemap => {
                     let dir = match k.code {
                         KeyCode::Left | KeyCode::Char('h') => Some(Dir::Left),
@@ -701,6 +718,7 @@ pub(super) fn traffic_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
         TrafficView::Aggregate => t.apps.ensure_visible(page),
         TrafficView::Mesh => t.mesh.ensure_visible(page),
         TrafficView::Blocked => t.blocked.ensure_visible(page),
+        TrafficView::Exposure => t.exposure_rows.ensure_visible(page),
         TrafficView::Treemap => {}
     }
     Vec::new()
@@ -1248,4 +1266,52 @@ pub(super) fn request_query(model: &mut Model, f: TrafficFilter) -> Vec<Cmd> {
         return Vec::new();
     }
     update(model, Msg::ApplyFilter(f))
+}
+
+/// `:exposure` / `9` (#82): the Exposure view on the exposure query, the
+/// profile's risky services (a malformed `[exposure]` says so on the
+/// status line, no request). The first time one query, through the cost
+/// guard, in its own cache slot; the result on screen is kept aside for
+/// `Esc`. Already on: the view again, no request.
+pub(super) fn open_exposure(model: &mut Model) -> Vec<Cmd> {
+    model.screen = Screen::Traffic;
+    let services = match &model.limits.exposure_services {
+        Ok(s) => s.clone(),
+        Err(e) => {
+            model.status = StatusLine::error(format!("profile [exposure]: {e}"));
+            return Vec::new();
+        }
+    };
+    match model.traffic.enter_exposure(services) {
+        Some(f) => {
+            let cmds = request_query(model, f);
+            if cmds.is_empty() && model.overlay == Overlay::None {
+                model.status = StatusLine::info("exposure: Esc leaves it");
+            }
+            cmds
+        }
+        None => {
+            model.traffic.rebuild_exposure();
+            model.status = StatusLine::info("exposure · Esc leaves it (the result before it back)");
+            Vec::new()
+        }
+    }
+}
+
+/// `Enter` on an Exposure row: Flows, drilled to the risky service's flows
+/// to that destination group. No request.
+fn exposure_enter(model: &mut Model) {
+    let t = &mut model.traffic;
+    let (Some(r), Some(x)) = (t.exposure_rows.selected_item(), &t.exposure) else {
+        return;
+    };
+    let Some(service) = x.services.iter().find(|s| s.name == r.service).cloned() else {
+        return;
+    };
+    t.drill = Some(Drill::Exposure {
+        dst: r.dst.clone(),
+        service,
+    });
+    t.view = TrafficView::Flows;
+    t.rebuild_views();
 }
