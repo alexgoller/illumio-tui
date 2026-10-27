@@ -6,5 +6,6 @@ pub mod filters;
 pub mod marks;
 pub mod names;
 pub mod rule_scope;
+pub mod snapshot;
 pub mod tokens;
 pub mod tui;

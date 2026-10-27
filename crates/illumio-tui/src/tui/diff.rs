@@ -59,7 +59,12 @@ pub struct ObjectDiff {
 }
 
 /// One `label: value` line, or a removed and an added line when it changed.
-fn field(out: &mut Vec<DiffLine>, label: &str, active: Option<&str>, draft: Option<&str>) {
+pub(crate) fn field(
+    out: &mut Vec<DiffLine>,
+    label: &str,
+    active: Option<&str>,
+    draft: Option<&str>,
+) {
     let line = |sign, v: &str| DiffLine {
         sign,
         text: format!("{label}: {v}"),
@@ -78,7 +83,7 @@ fn field(out: &mut Vec<DiffLine>, label: &str, active: Option<&str>, draft: Opti
 }
 
 /// Draft entries in order (same or added), then entries only the active side has.
-fn entries(out: &mut Vec<DiffLine>, label: &str, active: &[String], draft: &[String]) {
+pub(crate) fn entries(out: &mut Vec<DiffLine>, label: &str, active: &[String], draft: &[String]) {
     for d in draft {
         let sign = if active.contains(d) {
             Sign::Same

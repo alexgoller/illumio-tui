@@ -19,8 +19,8 @@ pub use events::{Event, EventFilter};
 pub use labels::{Fqdn, IpList, IpRange, Label, LabelGroup, LabelUsageFlags, Service, ServicePort};
 pub use pairing_profiles::{PairingLabel, PairingProfile};
 pub use policy::{
-    Actor, DenyRule, EnforcementBoundary, IngressService, PendingChange, PolicyScope, ResolveLabelsAs, Rule, RuleSet,
-    UNKNOWN_CHANGE_TYPE, parse_pending,
+    Actor, DenyRule, EnforcementBoundary, IngressService, PendingChange, PolicyScope,
+    ResolveLabelsAs, Rule, RuleSet, UNKNOWN_CHANGE_TYPE, parse_pending,
 };
 pub use traffic::{
     ActorFilter, ActorMatch, AsyncQueryStatus, DraftDecision, Endpoint, Flow, FlowRule,

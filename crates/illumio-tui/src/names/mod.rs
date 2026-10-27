@@ -170,7 +170,7 @@ pub fn path_for(file: &ConfigFile, profile: &str) -> Option<PathBuf> {
 /// The profile name as a directory name, losslessly: ASCII letters,
 /// digits, `-` and `_` kept, every other byte `%XX` (so `.`, `..`, `/`
 /// and a space never reach the path, and `a b` and `a_b` stay apart).
-fn dir_name(profile: &str) -> String {
+pub(crate) fn dir_name(profile: &str) -> String {
     if profile.is_empty() {
         return "%".into();
     }
