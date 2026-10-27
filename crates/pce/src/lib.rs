@@ -18,6 +18,7 @@ pub mod enforcement;
 pub mod error;
 pub mod explain;
 pub mod generate;
+pub mod hygiene;
 pub mod impact;
 pub mod iplist_size;
 pub mod key_order;
