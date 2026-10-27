@@ -321,3 +321,157 @@ async fn fields_pick_the_change_columns() {
         }])
     );
 }
+
+const QHREF: &str = "/orgs/5/traffic_flows/async_queries/q-1";
+
+/// A completed status whose `updated_at` moves on every call, as the
+/// PCE's does: a draft `completed` after the PUT is then new.
+struct Ticking(std::sync::atomic::AtomicU64);
+
+impl wiremock::Respond for Ticking {
+    fn respond(&self, _: &wiremock::Request) -> ResponseTemplate {
+        let n = self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        ResponseTemplate::new(200).set_body_json(json!({
+            "status": "completed", "rules": "completed",
+            "result": {"href": format!("{QHREF}/download")}, "flows_count": 4,
+            "updated_at": format!("2026-10-14T00:00:{:02}Z", n % 60)
+        }))
+    }
+}
+
+/// Readiness's requests, each pinned to `n` runs: the name index's lists,
+/// one query (POST, status, `update_rules`, download), the workloads, the
+/// pending changes and the draft rulesets. Nothing else is mounted: a
+/// request `--trend` added would fail.
+async fn mount_readiness(server: &MockServer, n: u64) {
+    for (p, body) in [
+        (LABELS, include_str!("../../../fixtures/labels.json")),
+        (
+            "/api/v2/orgs/5/sec_policy/draft/label_groups",
+            include_str!("../../../fixtures/label_groups.json"),
+        ),
+        (
+            "/api/v2/orgs/5/sec_policy/draft/ip_lists",
+            include_str!("../../../fixtures/ip_lists.json"),
+        ),
+        (
+            "/api/v2/orgs/5/sec_policy/draft/services",
+            include_str!("../../../fixtures/services.json"),
+        ),
+        (WORKLOADS, include_str!("../../../fixtures/workloads.json")),
+        (
+            "/api/v2/orgs/5/sec_policy/pending",
+            include_str!("../../../fixtures/pending_list.json"),
+        ),
+        (
+            "/api/v2/orgs/5/sec_policy/draft/rule_sets",
+            include_str!("../../../fixtures/rule_sets.json"),
+        ),
+    ] {
+        expect(server, p, body, n).await;
+    }
+    Mock::given(method("POST"))
+        .and(path("/api/v2/orgs/5/traffic_flows/async_queries"))
+        .respond_with(
+            ResponseTemplate::new(202).set_body_json(json!({"href": QHREF, "status": "queued"})),
+        )
+        .expect(n)
+        .mount(server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path(format!("/api/v2{QHREF}")))
+        .respond_with(Ticking(std::sync::atomic::AtomicU64::new(0)))
+        .mount(server)
+        .await;
+    Mock::given(method("PUT"))
+        .and(path(format!("/api/v2{QHREF}/update_rules")))
+        .respond_with(ResponseTemplate::new(204))
+        .expect(n)
+        .mount(server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path(format!("/api/v2{QHREF}/download")))
+        .respond_with(answer(include_str!("../../../fixtures/traffic_flows.json")))
+        .expect(n)
+        .mount(server)
+        .await;
+}
+
+/// A snapshot holding only readiness: `apps` as (app, verdict, gaps).
+fn readiness_snap(server: &MockServer, at: &str, apps: &[(&str, &str, u64)]) -> Snapshot {
+    Snapshot {
+        version: VERSION,
+        profile: "default".into(),
+        pce: host(server),
+        org: 5,
+        taken_at: at.parse().unwrap(),
+        label: None,
+        truncated: Vec::new(),
+        sections: Sections {
+            readiness: Some(json!({
+                "window": "7d",
+                "draft": true,
+                "apps": apps
+                    .iter()
+                    .map(|(a, v, g)| json!({"app": a, "verdict": v, "gap_count": g}))
+                    .collect::<Vec<_>>()
+            })),
+            ..Sections::default()
+        },
+    }
+}
+
+#[tokio::test]
+async fn readiness_trend_reads_the_snapshots_and_adds_the_live_point() {
+    let server = MockServer::start().await;
+    // Two runs, readiness's requests each; the files add none.
+    mount_readiness(&server, 2).await;
+    let env = Env::new();
+    for (at, gaps) in [("2026-10-01T03:00:00Z", 9), ("2026-10-08T03:00:00Z", 4)] {
+        snapshot::save(
+            &env.dir(),
+            &readiness_snap(&server, at, &[("shop/prod", "needs_rules", gaps)]),
+        )
+        .unwrap();
+    }
+    let mut other = readiness_snap(
+        &server,
+        "2026-10-09T03:00:00Z",
+        &[("shop/prod", "ready", 0)],
+    );
+    other.pce = "other.example:8443".into();
+    snapshot::save(&env.dir(), &other).unwrap();
+    let a = env
+        .cmd(&server)
+        .args(["--json", "readiness", "--trend"])
+        .assert()
+        .success();
+    let v = schema_check::envelope(&a.get_output().stdout);
+    assert_eq!(v["meta"]["schema"], "readiness");
+    let warnings = v["meta"]["warnings"].to_string();
+    assert!(warnings.contains("other.example:8443"), "{warnings}");
+    let apps = v["data"]["apps"].as_array().unwrap();
+    let shop = apps.iter().find(|a| a["app"] == "shop/prod").unwrap();
+    let t = shop["trend"].as_array().unwrap();
+    assert_eq!(t.len(), 3, "{t:#?}");
+    assert_eq!(t[0]["gaps"], 9);
+    assert_eq!(t[0]["verdict"], "needs_rules");
+    assert_eq!(t[1]["taken_at"], "2026-10-08T03:00:00Z");
+    assert_eq!(t[2]["verdict"], shop["verdict"]);
+    assert_eq!(t[2]["gaps"], shop["gap_count"]);
+    // The table: a sparkline of the gaps, last.
+    let a = env
+        .cmd(&server)
+        .args(["--table", "readiness", "--trend"])
+        .assert()
+        .success();
+    let out = stdout(&a);
+    let head = out.lines().find(|l| l.contains("verdict")).unwrap();
+    assert!(head.trim_end().ends_with("trend"), "{out}");
+    let row = out.lines().find(|l| l.starts_with("shop/prod")).unwrap();
+    let live = shop["gap_count"].as_u64().unwrap() as usize;
+    let spark: String = snapshot::baseline::sparkline(&[9, 4, live])
+        .into_iter()
+        .collect();
+    assert!(row.trim_end().ends_with(&spark), "{spark} in {out}");
+}

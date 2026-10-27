@@ -773,7 +773,23 @@
           "additionalProperties": false
         },
         "warnings": {"type": "array", "items": {"$ref": "#/$defs/readiness_warning"}},
-        "gaps": {"type": "array", "items": {"$ref": "#/$defs/gap"}}
+        "gaps": {"type": "array", "items": {"$ref": "#/$defs/gap"}},
+        "trend": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "taken_at": {"type": "string"},
+              "verdict": {
+                "enum": ["not_evaluated", "needs_rules", "needs_provision", "ready", "enforced"]
+              },
+              "gaps": {"type": "integer"}
+            },
+            "required": ["taken_at", "verdict", "gaps"],
+            "additionalProperties": false
+          },
+          "description": "with --trend: the snapshots' readiness of the app, oldest first, then the live result's"
+        }
       },
       "required": [
         "app",

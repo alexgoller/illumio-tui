@@ -9,6 +9,7 @@ use super::marked::CliMarks;
 use super::output::Window;
 use super::output::{OutputFormat, TableRows, join_list};
 use super::traffic::{Fetched, FilterArgs, TransmissionArg, fetch};
+use crate::snapshot::baseline::{Trend, TrendPoint, spark_text};
 use clap::Args;
 use jiff::Timestamp;
 use pce::NameIndex;
@@ -46,6 +47,12 @@ pub struct ReadinessArgs {
     /// Ignore marks.toml: no flow counts as accepted (squelch, accept-blocked)
     #[arg(long)]
     pub no_marks: bool,
+    /// Each app's road to enforcement: its verdict and gap count in the newest 14 of the
+    /// profile's snapshots that hold readiness (`snapshot save --with-readiness`), then the
+    /// live result. JSON: trend per app; the table: a sparkline of the gaps. Reads the files
+    /// only, no extra request; another PCE's snapshots are skipped (a warning)
+    #[arg(long)]
+    pub trend: bool,
 }
 
 /// What `data` holds.
@@ -164,6 +171,91 @@ impl TableRows for Apps<'_> {
             })
             .collect()
     }
+}
+
+/// The apps table with `--trend`: a `trend` column last, the sparkline of
+/// each app's gaps (its points, CSV).
+struct Trended<'a> {
+    apps: Apps<'a>,
+    trends: &'a [Vec<TrendPoint>],
+}
+
+impl Trended<'_> {
+    /// The sparkline, with two points at least.
+    fn spark(points: &[TrendPoint]) -> String {
+        if points.len() < 2 {
+            return String::new();
+        }
+        spark_text(points)
+    }
+}
+
+impl TableRows for Trended<'_> {
+    fn units(&self) -> Option<&'static str> {
+        self.apps.units()
+    }
+    fn headers(&self) -> Vec<&'static str> {
+        let mut h = self.apps.headers();
+        h.push("trend");
+        h
+    }
+    fn rows(&self) -> Vec<Vec<String>> {
+        self.apps
+            .rows()
+            .into_iter()
+            .zip(self.trends)
+            .map(|(mut r, t)| {
+                r.push(Self::spark(t));
+                r
+            })
+            .collect()
+    }
+    fn full_headers(&self) -> Vec<&'static str> {
+        let mut h = self.apps.full_headers();
+        h.push("trend");
+        h
+    }
+    /// Each point as `2026-10-20T06:00:00Z needs_rules 12`.
+    fn full_rows(&self) -> Vec<Vec<String>> {
+        self.apps
+            .full_rows()
+            .into_iter()
+            .zip(self.trends)
+            .map(|(mut r, t)| {
+                r.push(join_list(t.iter().map(|p| {
+                    format!("{} {} {}", p.taken_at, p.verdict.as_str(), p.gaps)
+                })));
+                r
+            })
+            .collect()
+    }
+}
+
+/// `data` with `--trend`: each app with its trend.
+#[derive(Serialize)]
+struct TrendReport<'a> {
+    window: &'a str,
+    draft: bool,
+    apps: Vec<AppTrend<'a>>,
+}
+
+#[derive(Serialize)]
+struct AppTrend<'a> {
+    #[serde(flatten)]
+    app: &'a AppReadiness,
+    /// The snapshots' points, oldest first, then the live result's.
+    trend: &'a [TrendPoint],
+}
+
+/// `--trend`'s snapshots: the profile's, of this PCE (others skipped
+/// with a warning). Files only.
+fn load_trend(ctx: &Context) -> Result<Trend, CliError> {
+    let root = crate::snapshot::default_root().ok_or_else(|| {
+        CliError::Other("no data directory for snapshots: set HOME or XDG_DATA_HOME".into())
+    })?;
+    let dir = crate::snapshot::profile_dir(&root, &ctx.config.profile_name);
+    let me = crate::snapshot::Identity::of(&ctx.config.profile_name, ctx.pce.client());
+    crate::snapshot::baseline::load_trend(&dir, &me).map_err(CliError::Other)
 }
 
 pub(crate) struct Gaps<'a>(pub &'a [Gap]);
@@ -402,8 +494,52 @@ pub(crate) async fn evaluate(ctx: &Context, args: &ReadinessArgs) -> Result<Eval
 
 pub async fn run(ctx: &Context, args: &ReadinessArgs) -> Result<(), CliError> {
     let narrowed = !args.apps.is_empty();
-    let Evaluated { report, meta, .. } = evaluate(ctx, args).await?;
+    // The files first: a data directory that cannot be read sends nothing.
+    let trend = args.trend.then(|| load_trend(ctx)).transpose()?;
+    let Evaluated {
+        report, mut meta, ..
+    } = evaluate(ctx, args).await?;
     let apps_table = Apps(&report.apps);
+    // Each app's points: the snapshots', then the live result's.
+    let now = Timestamp::now();
+    let trends: Vec<Vec<TrendPoint>> = match &trend {
+        None => Vec::new(),
+        Some(t) => report
+            .apps
+            .iter()
+            .map(|r| {
+                let mut v = t.apps.get(&r.app).cloned().unwrap_or_default();
+                v.push(TrendPoint {
+                    taken_at: now,
+                    verdict: r.verdict,
+                    gaps: r.gap_count,
+                });
+                v
+            })
+            .collect(),
+    };
+    if let Some(t) = &trend {
+        let w = meta.warnings.get_or_insert_with(Vec::new);
+        w.extend(t.skipped.iter().map(|s| format!("--trend: skipped {s}")));
+        if t.snapshots == 0 {
+            w.push(
+                "--trend: no snapshot of this profile holds readiness (snapshot save --with-readiness keeps it)"
+                    .into(),
+            );
+        }
+        if w.is_empty() {
+            meta.warnings = None;
+        }
+    }
+    let trended = Trended {
+        apps: Apps(&report.apps),
+        trends: &trends,
+    };
+    let first: &dyn TableRows = if trend.is_some() {
+        &trended
+    } else {
+        &apps_table
+    };
     let mut tables: Vec<(String, &dyn TableRows)> = vec![(
         format!(
             "readiness · {} · {} app{}",
@@ -411,7 +547,7 @@ pub async fn run(ctx: &Context, args: &ReadinessArgs) -> Result<(), CliError> {
             report.apps.len(),
             if report.apps.len() == 1 { "" } else { "s" }
         ),
-        &apps_table,
+        first,
     )];
     let gaps: Vec<Gaps> = report
         .apps
@@ -432,6 +568,19 @@ pub async fn run(ctx: &Context, args: &ReadinessArgs) -> Result<(), CliError> {
                 tables.push((format!("pending · {} · {}", r.app, r.pending.count), p));
             }
         }
+    }
+    if trend.is_some() {
+        let data = TrendReport {
+            window: &report.window,
+            draft: report.draft,
+            apps: report
+                .apps
+                .iter()
+                .zip(&trends)
+                .map(|(app, trend)| AppTrend { app, trend })
+                .collect(),
+        };
+        return ctx.emit_report(&data, &tables, &meta);
     }
     ctx.emit_report(&report, &tables, &meta)
 }

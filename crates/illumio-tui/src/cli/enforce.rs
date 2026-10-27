@@ -283,6 +283,7 @@ async fn enforce(ctx: &Context, a: &EnforceArgs) -> Result<(), CliError> {
         max_results: a.max_results,
         yes: a.write.yes,
         no_marks: a.no_marks,
+        trend: false,
     };
     let ev = readiness::evaluate(ctx, &rargs).await?;
     let r = ev
