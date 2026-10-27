@@ -306,6 +306,10 @@ pub const HELP_GROUPS: &[HelpGroup] = &[
             ),
             key("c", "fan-in line: one rule off · Any · All Workloads"),
             key(
+                "N",
+                "new since: rules for the new traffic only (baseline) · off",
+            ),
+            key(
                 "Enter r Esc",
                 "plan the writes, one confirm (writes) · re-query · back",
             ),

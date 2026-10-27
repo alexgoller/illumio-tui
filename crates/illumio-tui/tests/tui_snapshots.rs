@@ -2478,6 +2478,84 @@ fn generator_80x24() {
     insta::assert_snapshot!("generator_80x24", out);
 }
 
+/// `generator_model` in "new since" (#81): `N`, `Enter` on 7d, and the
+/// baseline answered with the app's intra-app records.
+fn generator_since_model() -> illumio_tui::tui::model::Model {
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+    use illumio_tui::tui::msg::{Cmd, GenBaselineOutcome, Msg};
+    let mut m = generator_model();
+    gen_key(&mut m, 'N');
+    let cmds = illumio_tui::tui::update(
+        &mut m,
+        Msg::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)),
+    );
+    let [Cmd::RunGenBaseline { seq, focus, .. }] = &cmds[..] else {
+        panic!("{cmds:?}")
+    };
+    let shop = |e: &pce::traffic::ResolvedEndpoint| {
+        e.label_value("app") == Some("shop") && e.label_value("env") == Some("prod")
+    };
+    let flows = m
+        .traffic
+        .flows_for(focus)
+        .iter()
+        .filter(|f| shop(&f.src) && shop(&f.dst))
+        .cloned()
+        .collect();
+    illumio_tui::tui::update(
+        &mut m,
+        Msg::GenBaselineDone {
+            seq: *seq,
+            result: Ok(GenBaselineOutcome {
+                flows,
+                truncated: false,
+                incomplete: false,
+                hit: false,
+                queries: 1,
+            }),
+        },
+    );
+    m
+}
+
+#[test]
+fn generator_new_since_80x24() {
+    let m = generator_since_model();
+    let out = render_to_string(&m, 80, 24);
+    for s in ["new since 7d before", "N new since"] {
+        assert!(out.contains(s), "missing {s:?}:\n{out}");
+    }
+    assert!(!out.contains("intra-app"), "seen before:\n{out}");
+    insta::assert_snapshot!("generator_new_since_80x24", out);
+}
+
+#[test]
+fn generator_new_since_120x40() {
+    let mut m = generator_since_model();
+    gen_key(&mut m, 'p');
+    let out = render_to_string(&m, 120, 40);
+    for s in [
+        "new since 7d before · 4 flows seen before",
+        "not covered: 4 seen before · ",
+    ] {
+        assert!(out.contains(s), "missing {s:?}:\n{out}");
+    }
+    insta::assert_snapshot!("generator_new_since_120x40", out);
+}
+
+#[test]
+fn generator_new_since_prompt_80x24() {
+    let mut m = generator_model();
+    gen_key(&mut m, 'N');
+    let out = render_to_string(&m, 80, 24);
+    assert!(out.contains("new since, baseline length: 7d"), "{out}");
+    assert!(
+        out.contains("Generate · shop/prod"),
+        "the generator behind:\n{out}"
+    );
+    insta::assert_snapshot!("generator_new_since_prompt_80x24", out);
+}
+
 #[test]
 fn generator_outbound_role_ports_120x40() {
     let mut m = generator_model();

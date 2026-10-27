@@ -211,6 +211,11 @@ pub enum Overlay {
     Baseline {
         input: String,
     },
+    /// `N` in the generator: the same prompt for "new since" (#81); the
+    /// generator stays behind it.
+    GenBaseline {
+        input: String,
+    },
     FilterEditor(FilterEditor),
     /// `f` on Workloads: the label filter, one line.
     LabelFilter(LabelFilterEditor),
@@ -326,6 +331,7 @@ impl PartialEq for Overlay {
             | (Overlay::WhereUsed, Overlay::WhereUsed) => true,
             (Overlay::Prompt { input: a }, Overlay::Prompt { input: b })
             | (Overlay::Baseline { input: a }, Overlay::Baseline { input: b })
+            | (Overlay::GenBaseline { input: a }, Overlay::GenBaseline { input: b })
             | (Overlay::Error(a), Overlay::Error(b)) => a == b,
             (Overlay::GroupKeys(a), Overlay::GroupKeys(b))
             | (Overlay::LabelKeys(a), Overlay::LabelKeys(b)) => a == b,
@@ -447,6 +453,15 @@ pub enum PendingAction {
     /// `r` in the generator on incomplete data, past a cost threshold: the
     /// focused query for its app; `y` and `n` go back to the generator.
     GenRequery(TrafficFilter, pce::traffic::Focus),
+    /// `N` in the generator past a cost threshold: its baseline, the
+    /// focused query for its app (`filter`, its window the baseline's
+    /// length) over `[start, end)`; `y` and `n` go back to the generator.
+    GenBaseline {
+        filter: TrafficFilter,
+        focus: pce::traffic::Focus,
+        start: jiff::Timestamp,
+        end: jiff::Timestamp,
+    },
     /// `x` on `:marks`: this mark leaves `marks.toml`; `y` and `n` go back
     /// to the overlay. A local file only.
     DeleteMark(String),

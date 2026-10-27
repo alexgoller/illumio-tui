@@ -511,6 +511,7 @@ fn on_msg(model: &mut Model, msg: Msg) -> Vec<Cmd> {
         }
         Msg::DraftDone { seq, result } => draft_done(model, seq, result),
         Msg::BaselineDone { seq, result } => baseline_done(model, seq, result),
+        Msg::GenBaselineDone { seq, result } => generator::gen_baseline_done(model, seq, result),
         // Draft rulesets while the Policy screen shows the active ones (a
         // `w` form's load, or the screen's own from before a `d`): held for
         // forms, the screen's list untouched.
@@ -1237,6 +1238,8 @@ mod event_types_tests;
 mod filter_completion_tests;
 #[cfg(test)]
 mod focus_tests;
+#[cfg(test)]
+mod gen_since_tests;
 /// The Labels tab's `f` key filter, `=` searches, `i` and `u` (issue #9).
 #[cfg(test)]
 mod label_filter_tests;

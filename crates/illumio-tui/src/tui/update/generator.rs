@@ -1,17 +1,21 @@
 //! The generator's transitions (`G` / `:gen`): opening it, its keys, its
 //! rebuilds when traffic or rulesets land, and `Enter`'s plan. Pure; the
 //! only requests are the cached draft rulesets on open, the focused
-//! re-query on `r` (through the cost guard) and the plan on `Enter`.
+//! re-query on `r` and the baseline on `N` (both through the cost guard)
+//! and the plan on `Enter`.
 use super::{
     Cmd, Model, Overlay, PendingAction, StatusLine, load_form_drafts, start_focused, writes_refused,
 };
-use crate::tui::gen_view::{Drafts, GenView};
-use crate::tui::model::Gap;
+use crate::tui::filter::TrafficFilter;
+use crate::tui::gen_view::{Drafts, GenBaseline, GenSince, GenView};
+use crate::tui::model::{Gap, QueryState};
+use crate::tui::msg::GenBaselineOutcome;
 use crossterm::event::{KeyCode, KeyEvent};
 use pce::CacheMode;
-use pce::generate::{Consolidate, GenInput, Side, keys_refusal, propose, rows};
-use pce::traffic::{Focus, FocusDirection, queries_text};
+use pce::generate::{Consolidate, GenInput, Side, keys_refusal, new_since, propose, rows};
+use pce::traffic::{Change, ChangeSet, Focus, FocusDirection, ResolvedFlow, queries_text};
 use pce::write::BatchInput;
+use std::time::Instant;
 
 /// Opens the generator for `app` under the keys in force. Reopening the
 /// same app keeps its rows, checkboxes and slider. The only request: the
@@ -100,6 +104,13 @@ fn gap_text(model: &Model, v: &GenView) -> (Option<String>, bool, String) {
     let window = t
         .used_for(&v.focus.clone().with_direction(FocusDirection::In))
         .map_or_else(|_| t.filter.window.clone(), |d| d.filter.window.clone());
+    if let Some(s) = v.since.as_ref().filter(|s| s.baseline.is_none()) {
+        return (
+            Some(format!("new since {}: baseline query running…", s.length)),
+            false,
+            window,
+        );
+    }
     if t.is_running() {
         let ours = t.running_focus().is_some_and(|f| f.same_app(&v.focus));
         let g = if ours {
@@ -173,6 +184,15 @@ pub(super) fn rebuild_gen(model: &mut Model) {
         model.status = StatusLine::warn("g changed: G reopens the generator");
         return;
     }
+    if let Some(why) = since_ended(model, v) {
+        if let Some(v) = model.gen_view.as_mut() {
+            v.since = None;
+        }
+        model.status = StatusLine::info(why);
+    }
+    let Some(v) = model.gen_view.as_ref() else {
+        return;
+    };
     // The lists the target ruleset's rules name come first (an IP's row
     // may move when the draft rulesets arrive or `R` picks another).
     let drafts = v
@@ -180,9 +200,15 @@ pub(super) fn rebuild_gen(model: &mut Model) {
         .as_deref()
         .or(model.draft_rulesets())
         .unwrap_or_default();
-    let flows = model.traffic.flows_for(&v.focus);
+    let all = model.traffic.flows_for(&v.focus);
+    // New since: the rows from the records the baseline lacks only.
+    let since = v.since.as_ref().and_then(|s| s.baseline.as_ref()).map(|b| {
+        let keep = ChangeSet::of(&[Change::New]);
+        new_since(all, &b.flows, keep, &v.focus, v.outbound)
+    });
+    let flows: &[ResolvedFlow] = since.as_ref().map_or(all, |s| &s.flows);
     let target = pce::generate::app_ruleset(
-        flows,
+        all,
         &v.focus,
         &idx,
         drafts,
@@ -196,8 +222,7 @@ pub(super) fn rebuild_gen(model: &mut Model) {
         .traffic
         .active_marks()
         .map(|a| {
-            flows
-                .iter()
+            all.iter()
                 .filter(|f| v.focus.keeps(f))
                 .filter(|f| {
                     a.classify(f)
@@ -211,6 +236,9 @@ pub(super) fn rebuild_gen(model: &mut Model) {
     if let Some(v) = model.gen_view.as_mut() {
         v.any_missing = any_missing.map(str::to_string);
         v.squelched = squelched;
+        if let Some(s) = v.since.as_mut() {
+            s.result = since;
+        }
         v.set_rows(fresh);
         v.gap = gap;
         v.requery = requery;
@@ -232,8 +260,9 @@ pub(super) fn regen(model: &mut Model) {
             return;
         };
         let consolidate = v.consolidations();
+        let since = v.since.as_ref().and_then(|s| s.result.as_ref());
         let input = GenInput {
-            flows: model.traffic.flows_for(&v.focus),
+            flows: since.map_or_else(|| model.traffic.flows_for(&v.focus), |s| &s.flows),
             focus: &v.focus,
             tier_key: &model.limits.tier_key,
             drafts,
@@ -243,7 +272,7 @@ pub(super) fn regen(model: &mut Model) {
             outbound: v.outbound,
             picked: v.picked.as_deref(),
             consolidate: &consolidate,
-            seen_before: 0,
+            seen_before: since.map_or(0, |s| s.seen_before),
         };
         propose(&v.rows, v.global, &input)
     };
@@ -416,9 +445,249 @@ pub(super) fn gen_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
             regen(model);
         }
         KeyCode::Char('p') => v.list = Some(0),
+        KeyCode::Char('N') => return gen_since_key(model),
         KeyCode::Char('r') => return gen_reload(model),
         KeyCode::Enter => return gen_enter(model),
         _ => {}
+    }
+    Vec::new()
+}
+
+/// Why "new since" ends before a rebuild: the result's filter changed
+/// (`r` on the same one keeps it), `o` changed the sections, or its
+/// baseline query was cancelled. `None`: it stays (or is off).
+fn since_ended(model: &Model, v: &GenView) -> Option<&'static str> {
+    let s = v.since.as_ref()?;
+    let t = &model.traffic;
+    if s.direction != v.focus.direction {
+        return Some("o changed the sections: N compares again");
+    }
+    if t.used_for(&v.focus)
+        .is_ok_and(|d| !s.same_filter(&d.filter))
+    {
+        return Some("the traffic filter changed: N compares again");
+    }
+    let ours = t.is_running() && t.seq == s.seq;
+    (s.baseline.is_none() && !ours).then_some("the baseline query was cancelled: N compares again")
+}
+
+/// `N`: "new since" off (no request), else its prompt for the baseline's
+/// length (`7d`), on complete data only.
+fn gen_since_key(model: &mut Model) -> Vec<Cmd> {
+    let Some(v) = model.gen_view.as_mut() else {
+        return Vec::new();
+    };
+    if let Some(s) = v.since.take() {
+        // Our baseline still on its way: dropped.
+        if s.baseline.is_none() && model.traffic.is_running() && model.traffic.seq == s.seq {
+            model.traffic.cancel_query();
+        }
+        rebuild_gen(model);
+        model.status = StatusLine::info("new since off: every flow of the window");
+        return Vec::new();
+    }
+    if model.traffic.is_running() {
+        model.status = StatusLine::info("a query is running: N once it lands");
+        return Vec::new();
+    }
+    if let Some(g) = &v.gap {
+        model.status = StatusLine::warn(format!("{g}: N compares complete data only"));
+        return Vec::new();
+    }
+    model.overlay = Overlay::GenBaseline {
+        input: super::compare::DEFAULT_BASELINE.to_string(),
+    };
+    Vec::new()
+}
+
+/// Keys in `N`'s prompt: as Traffic `c`'s; `Esc` back to the generator.
+pub(super) fn gen_baseline_prompt_key(
+    model: &mut Model,
+    mut input: String,
+    k: KeyEvent,
+) -> Vec<Cmd> {
+    match k.code {
+        KeyCode::Esc => model.overlay = Overlay::Generator,
+        KeyCode::Enter => {
+            model.overlay = Overlay::Generator;
+            return request_gen_baseline(model, input.trim());
+        }
+        _ => {
+            super::compare::edit_length(&mut input, k);
+            model.overlay = Overlay::GenBaseline { input };
+        }
+    }
+    Vec::new()
+}
+
+/// The baseline of `length` before the window of the result the generator
+/// reads: the same focused query (one per side in force), through the
+/// cost guard (above 7d or a 10k cap it asks first).
+fn request_gen_baseline(model: &mut Model, length: &str) -> Vec<Cmd> {
+    let n = match pce::traffic::parse_window(length) {
+        Ok(n) if !n.is_zero() => n,
+        Ok(_) => {
+            model.status = StatusLine::error("baseline: give a length above 0, e.g. 7d");
+            return Vec::new();
+        }
+        Err(e) => {
+            model.status = StatusLine::error(format!("baseline: {e}"));
+            return Vec::new();
+        }
+    };
+    let Some(v) = model.gen_view.as_ref() else {
+        return Vec::new();
+    };
+    let focus = v.focus.clone();
+    let Some((filter, end)) = model
+        .traffic
+        .used_for(&focus)
+        .ok()
+        .and_then(|d| Some((d.filter.clone(), d.range?.start)))
+    else {
+        model.status = StatusLine::info("nothing to compare: r queries the app first");
+        return Vec::new();
+    };
+    let start = match jiff::Span::try_from(n).map(|span| end.checked_sub(span)) {
+        Ok(Ok(start)) => start,
+        _ => {
+            model.status = StatusLine::error(format!("baseline {length}: too long"));
+            return Vec::new();
+        }
+    };
+    // The recent filter with the baseline's length as its window: what the
+    // cost guard judges; the cap is the recent one's.
+    let filter = TrafficFilter {
+        window: length.to_string(),
+        ..filter
+    };
+    if let Some(reason) = filter.needs_confirmation() {
+        model.overlay = Overlay::Confirm {
+            reason: format!(
+                "{reason}. Run the {length} baseline for {} ({})? (y/n)",
+                focus.app_text(),
+                queries_text(focus.direction.query_count())
+            ),
+            action: PendingAction::GenBaseline {
+                filter,
+                focus,
+                start,
+                end,
+            },
+        };
+        return Vec::new();
+    }
+    start_gen_baseline(model, filter, focus, start, end)
+}
+
+/// `y` on `N`'s cost prompt: the baseline, back to the generator.
+pub(super) fn gen_baseline_confirmed(
+    model: &mut Model,
+    filter: TrafficFilter,
+    focus: Focus,
+    start: jiff::Timestamp,
+    end: jiff::Timestamp,
+) -> Vec<Cmd> {
+    model.overlay = Overlay::Generator;
+    start_gen_baseline(model, filter, focus, start, end)
+}
+
+/// Starts the baseline query: "new since" on, waiting for it (counted in
+/// the header).
+fn start_gen_baseline(
+    model: &mut Model,
+    filter: TrafficFilter,
+    focus: Focus,
+    start: jiff::Timestamp,
+    end: jiff::Timestamp,
+) -> Vec<Cmd> {
+    if model.traffic.is_running() {
+        model.status = StatusLine::info("a query is running: N once it lands");
+        return Vec::new();
+    }
+    let Ok(recent) = model.traffic.used_for(&focus).map(|d| d.filter.clone()) else {
+        model.status = StatusLine::info("nothing to compare: r queries the app first");
+        return Vec::new();
+    };
+    let Some(v) = model.gen_view.as_ref().filter(|v| v.focus == focus) else {
+        return Vec::new();
+    };
+    let n = focus.direction.query_count();
+    let app = v.focus.app_text();
+    let (seq, cancel) = model.traffic.start_side_run(Instant::now());
+    if let Some(v) = model.gen_view.as_mut() {
+        v.since = Some(GenSince {
+            length: filter.window.clone(),
+            filter: recent,
+            direction: focus.direction,
+            seq,
+            baseline: None,
+            result: None,
+        });
+        v.requests += n;
+    }
+    rebuild_gen(model);
+    model.status = StatusLine::info(format!(
+        "{app} · baseline query running: {} before the window ({})",
+        filter.window,
+        queries_text(n)
+    ));
+    vec![Cmd::RunGenBaseline {
+        seq,
+        filter,
+        focus,
+        start,
+        end,
+        cancel,
+    }]
+}
+
+/// The baseline's answer, if "new since" still waits for it: the rows and
+/// rules again from the new records; the status names what was left out.
+pub(super) fn gen_baseline_done(
+    model: &mut Model,
+    seq: u64,
+    result: Result<GenBaselineOutcome, String>,
+) -> Vec<Cmd> {
+    if model.traffic.seq != seq {
+        return Vec::new(); // cancelled
+    }
+    model.traffic.query = QueryState::Idle;
+    let Some(v) = model.gen_view.as_mut() else {
+        return Vec::new();
+    };
+    let Some(s) = v.since.as_mut().filter(|s| s.seq == seq) else {
+        return Vec::new();
+    };
+    match result {
+        Ok(o) => {
+            if o.hit {
+                v.cached += o.queries;
+            }
+            s.baseline = Some(GenBaseline {
+                flows: o.flows,
+                truncated: o.truncated,
+                incomplete: o.incomplete,
+            });
+            rebuild_gen(model);
+            if let Some(v) = model.gen_view.as_ref()
+                && let Some(s) = &v.since
+            {
+                let seen = s.result.as_ref().map_or(0, |r| r.seen_before);
+                let text = format!("new since {}: {seen} seen before", s.length);
+                model.status = match &s.baseline {
+                    Some(b) if b.truncated || b.incomplete => {
+                        StatusLine::warn(format!("{text} · baseline partial: new over-reports"))
+                    }
+                    _ => StatusLine::info(text),
+                };
+            }
+        }
+        Err(e) => {
+            v.since = None;
+            rebuild_gen(model);
+            super::fail(model, "baseline", &e, false);
+        }
     }
     Vec::new()
 }

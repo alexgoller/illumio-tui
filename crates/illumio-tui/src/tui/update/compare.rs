@@ -40,7 +40,6 @@ pub(super) fn compare_key(model: &mut Model) -> Vec<Cmd> {
 /// Keys in the baseline prompt: Enter runs it, Ctrl-N / Ctrl-P step
 /// through the window steps, Ctrl-U clears, Esc closes.
 pub(super) fn baseline_prompt_key(model: &mut Model, mut input: String, k: KeyEvent) -> Vec<Cmd> {
-    let ctrl = k.modifiers.contains(KeyModifiers::CONTROL);
     match k.code {
         KeyCode::Esc => {
             model.overlay = Overlay::None;
@@ -50,17 +49,28 @@ pub(super) fn baseline_prompt_key(model: &mut Model, mut input: String, k: KeyEv
             model.overlay = Overlay::None;
             return request_baseline(model, input.trim());
         }
+        _ => edit_length(&mut input, k),
+    }
+    model.overlay = Overlay::Baseline { input };
+    Vec::new()
+}
+
+/// A baseline length prompt's editing keys (Traffic `c`, the generator's
+/// `N`): Ctrl-N / Ctrl-P step through the window steps, Ctrl-U clears.
+pub(super) fn edit_length(input: &mut String, k: KeyEvent) {
+    let ctrl = k.modifiers.contains(KeyModifiers::CONTROL);
+    match k.code {
         KeyCode::Char(c @ ('n' | 'p')) if ctrl => {
             let steps = pce::traffic::WINDOW_STEPS;
-            let next = match pce::traffic::parse_window(&input) {
+            let next = match pce::traffic::parse_window(input) {
                 Ok(cur) if c == 'n' => pce::traffic::next_window(cur),
                 Ok(cur) => pce::traffic::prev_window(cur),
                 Err(_) => None,
             };
-            input = next
+            *input = next
                 .or_else(|| {
                     // An unreadable length starts at an end of the steps.
-                    pce::traffic::parse_window(&input).is_err().then(|| {
+                    pce::traffic::parse_window(input).is_err().then(|| {
                         if c == 'n' {
                             steps[0]
                         } else {
@@ -69,7 +79,7 @@ pub(super) fn baseline_prompt_key(model: &mut Model, mut input: String, k: KeyEv
                     })
                 })
                 .map(str::to_string)
-                .unwrap_or(input);
+                .unwrap_or_else(|| input.clone());
         }
         KeyCode::Char('u') if ctrl => input.clear(),
         KeyCode::Backspace => {
@@ -78,8 +88,6 @@ pub(super) fn baseline_prompt_key(model: &mut Model, mut input: String, k: KeyEv
         KeyCode::Char(c) if !ctrl => input.push(c),
         _ => {}
     }
-    model.overlay = Overlay::Baseline { input };
-    Vec::new()
 }
 
 /// The baseline of `length` before the window of the result on screen,

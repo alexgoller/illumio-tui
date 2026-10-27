@@ -77,6 +77,64 @@ pub struct GenView {
     /// The app's flows a squelch mark hides elsewhere: the rules include
     /// them (marks are not policy), the header says so.
     pub squelched: u64,
+    /// `N`: "new since" (#81), the rows and rules from the new traffic
+    /// only; `None` off.
+    pub since: Option<GenSince>,
+}
+
+/// `N`'s state: the baseline, the same focused query over the window
+/// before the result's, and what it leaves of the recent records.
+#[derive(Debug, Clone)]
+pub struct GenSince {
+    /// The baseline's length as typed (`7d`).
+    pub length: String,
+    /// The recent result's filter it is for (any cap): another one ends it.
+    pub filter: crate::tui::filter::TrafficFilter,
+    /// The sides it was queried for: `o` turned on later ends it.
+    pub direction: pce::traffic::FocusDirection,
+    /// The baseline query's sequence number (the traffic screen's: one
+    /// query at a time).
+    pub seq: u64,
+    /// `None` while the baseline query runs.
+    pub baseline: Option<GenBaseline>,
+    /// The recent records judged against it (`rebuild_gen`).
+    pub result: Option<pce::generate::Since>,
+}
+
+/// The baseline's answer.
+#[derive(Debug, Clone)]
+pub struct GenBaseline {
+    pub flows: Vec<pce::traffic::ResolvedFlow>,
+    pub truncated: bool,
+    pub incomplete: bool,
+}
+
+impl GenSince {
+    /// Whether `f` is the filter it is for (any cap).
+    pub fn same_filter(&self, f: &crate::tui::filter::TrafficFilter) -> bool {
+        crate::tui::filter::TrafficFilter {
+            max_results: self.filter.max_results,
+            ..f.clone()
+        } == self.filter
+    }
+
+    /// The header's part: `new since 7d before · 40 flows seen before`,
+    /// `… · baseline running`, and a truncated or incomplete baseline.
+    pub fn text(&self) -> String {
+        let head = format!("new since {} before", self.length);
+        let Some(b) = &self.baseline else {
+            return format!("{head} · baseline running");
+        };
+        let seen = self.result.as_ref().map_or(0, |r| r.seen_before);
+        let mut s = format!("{head} · {seen} flows seen before");
+        if b.truncated {
+            s.push_str(" · baseline truncated: new over-reports");
+        }
+        if b.incomplete {
+            s.push_str(" · baseline incomplete: new over-reports");
+        }
+        s
+    }
 }
 
 /// What the fresh read at `Enter` changed against the preview, for the
@@ -183,6 +241,7 @@ impl GenView {
             consolidate: BTreeMap::new(),
             any_missing: None,
             squelched: 0,
+            since: None,
         }
     }
 
@@ -496,8 +555,12 @@ impl GenView {
         } else {
             String::new()
         };
+        let since = self
+            .since
+            .as_ref()
+            .map_or_else(String::new, |s| format!(" · {}", s.text()));
         format!(
-            "Generate · {} · last {} · {flows} flows · {}{squelched}",
+            "Generate · {} · last {} · {flows} flows · {}{since}{squelched}",
             self.focus.app_text(),
             self.window,
             if self.gap.is_some() {
@@ -506,6 +569,13 @@ impl GenView {
                 "complete"
             }
         )
+    }
+
+    /// The line under the target in "new since" once its baseline is in:
+    /// `new since 7d before · 40 flows seen before · N: every flow`.
+    pub fn since_line(&self) -> Option<String> {
+        let s = self.since.as_ref().filter(|s| s.baseline.is_some())?;
+        Some(format!("{} · N: every flow", s.text()))
     }
 
     /// `1 req · cached`, `0 req · cached`.
@@ -809,7 +879,12 @@ impl GenView {
         }
         let c = &p.coverage;
         out.push(format!(
-            "not covered: {} unchecked · {} folded IPs · {} unsupported proto · {} broadcast/multicast · {} no target · {} override deny",
+            "not covered: {}{} unchecked · {} folded IPs · {} unsupported proto · {} broadcast/multicast · {} no target · {} override deny",
+            if self.since.is_some() {
+                format!("{} seen before · ", c.seen_before)
+            } else {
+                String::new()
+            },
             c.unchecked,
             c.folded_ips,
             c.unsupported_proto,

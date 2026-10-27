@@ -46,6 +46,18 @@ pub struct BaselineOutcome {
     pub end: jiff::Timestamp,
 }
 
+/// The generator's baseline answer (`Cmd::RunGenBaseline`, #81).
+#[derive(Debug)]
+pub struct GenBaselineOutcome {
+    pub flows: Vec<ResolvedFlow>,
+    pub truncated: bool,
+    pub incomplete: bool,
+    /// Every query was answered from the cache.
+    pub hit: bool,
+    /// The Explorer queries it took: 2 with the outbound section.
+    pub queries: u32,
+}
+
 /// A focused re-query's answer: the merged flows (as one query's outcome),
 /// the focus they were queried for and the number of Explorer queries.
 #[derive(Debug)]
@@ -144,6 +156,11 @@ pub enum Msg {
     BaselineDone {
         seq: u64,
         result: Result<BaselineOutcome, String>,
+    },
+    /// The answer to `Cmd::RunGenBaseline`.
+    GenBaselineDone {
+        seq: u64,
+        result: Result<GenBaselineOutcome, String>,
     },
     /// The answer to `Cmd::RunDraft`.
     DraftDone {
@@ -279,6 +296,18 @@ pub enum Cmd {
     RunBaseline {
         seq: u64,
         filter: TrafficFilter,
+        start: jiff::Timestamp,
+        end: jiff::Timestamp,
+        cancel: CancellationToken,
+    },
+    /// `N` in the generator: its baseline, `filter` with the app's labels
+    /// on its side over exactly `[start, end)`, one query per side of
+    /// `focus`, in the cache's `focus-baseline:{in,out}` slots. Answered
+    /// with `Msg::GenBaselineDone`.
+    RunGenBaseline {
+        seq: u64,
+        filter: TrafficFilter,
+        focus: Focus,
         start: jiff::Timestamp,
         end: jiff::Timestamp,
         cancel: CancellationToken,
@@ -474,6 +503,24 @@ impl PartialEq for Cmd {
                     ..
                 },
             ) => a == b && fa == fb && sa == sb && ea == eb,
+            (
+                Cmd::RunGenBaseline {
+                    seq: a,
+                    filter: fa,
+                    focus: xa,
+                    start: sa,
+                    end: ea,
+                    ..
+                },
+                Cmd::RunGenBaseline {
+                    seq: b,
+                    filter: fb,
+                    focus: xb,
+                    start: sb,
+                    end: eb,
+                    ..
+                },
+            ) => a == b && fa == fb && xa == xb && sa == sb && ea == eb,
             (
                 Cmd::RunDraft {
                     seq: a,

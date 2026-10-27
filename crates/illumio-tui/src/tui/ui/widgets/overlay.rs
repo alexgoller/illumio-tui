@@ -172,6 +172,15 @@ pub fn render_prompt(model: &Model, input: &str, f: &mut Frame, area: Rect) {
 
 /// `c` on Traffic: the baseline's length on the bottom line, with its keys.
 pub fn render_baseline_prompt(model: &Model, input: &str, f: &mut Frame, area: Rect) {
+    draw_length_prompt(model, "compare, baseline length: ", input, f, area);
+}
+
+/// `N` in the generator: the same prompt, for "new since" (#81).
+pub fn render_gen_baseline_prompt(model: &Model, input: &str, f: &mut Frame, area: Rect) {
+    draw_length_prompt(model, "new since, baseline length: ", input, f, area);
+}
+
+fn draw_length_prompt(model: &Model, title: &str, input: &str, f: &mut Frame, area: Rect) {
     let t = &model.theme;
     let r = Rect::new(
         area.x,
@@ -181,7 +190,7 @@ pub fn render_baseline_prompt(model: &Model, input: &str, f: &mut Frame, area: R
     );
     f.render_widget(Clear, r);
     let line = Line::from(vec![
-        Span::styled("compare, baseline length: ", t.header_style()),
+        Span::styled(title.to_string(), t.header_style()),
         Span::styled(input.to_string(), t.base()),
         Span::styled("▏", t.dim_style()),
         Span::styled("  Ctrl-N/P step · Enter run · Esc", t.dim_style()),

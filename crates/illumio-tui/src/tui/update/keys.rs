@@ -129,6 +129,7 @@ pub(super) fn on_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
             _ => Vec::new(),
         },
         Overlay::Baseline { input } => baseline_prompt_key(model, input, k),
+        Overlay::GenBaseline { input } => generator::gen_baseline_prompt_key(model, input, k),
         Overlay::GroupKeys(picker) => {
             match picker.key(k) {
                 PickerOutcome::Open(p) => model.overlay = Overlay::GroupKeys(p),
@@ -278,6 +279,12 @@ pub(super) fn on_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
                     }
                     PendingAction::ReloadApp => app_reload(model),
                     PendingAction::GenRequery(f, focus) => generator::gen_requery(model, f, focus),
+                    PendingAction::GenBaseline {
+                        filter,
+                        focus,
+                        start,
+                        end,
+                    } => generator::gen_baseline_confirmed(model, filter, focus, start, end),
                     PendingAction::DeleteMark(id) => marks::delete_mark(model, &id),
                     PendingAction::EnforceWatch => enforce::start_watch(model),
                     PendingAction::SaveFilter(name, s) => {
@@ -296,7 +303,10 @@ pub(super) fn on_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
                 if matches!(action, PendingAction::ReloadApp) {
                     model.overlay = Overlay::App;
                 }
-                if matches!(action, PendingAction::GenRequery(..)) {
+                if matches!(
+                    action,
+                    PendingAction::GenRequery(..) | PendingAction::GenBaseline { .. }
+                ) {
                     model.overlay = Overlay::Generator;
                 }
                 if matches!(action, PendingAction::DeleteMark(_)) {

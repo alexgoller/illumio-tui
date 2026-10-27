@@ -39,6 +39,6 @@ expression: out
 │                                                                                                                      │
 │                                                                                                                      │
 │3 rules (2 new · 0 add services · 1 exist) · covers 6 of 10 flows · 4 not                                             │
-│p lists the rules · Enter plans the writes · Space toggles · o outbound                                               │
+│p lists the rules · Enter plans · Space toggles · o outbound · N new since                                            │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
 shop/prod · generator · 0 req                                         │ ←/→ stop  </> row  R pick  r re-query  Esc back

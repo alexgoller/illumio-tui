@@ -23,6 +23,6 @@ expression: out
 │                                                                              │
 │                                                                              │
 │3 rules (3 new · 0 add services · 0 exist) · covers 7 of 8 flows · 1 not      │
-│p lists the rules · Enter plans · Space toggles · c consolidates · o outbound │
+│p rules · Enter plans · Space toggles · c fan-in · o outbound · N new since   │
 ╰──────────────────────────────────────────────────────────────────────────────╯
 destination only: 5432/tcp fr │ ←/→ stop  </> row  R pick  r re-query  Esc back

@@ -1,0 +1,28 @@
+---
+source: crates/illumio-tui/tests/tui_snapshots.rs
+expression: out
+---
+ illumio-tui pce.example · org 5 ●                        api 5 calls · 20.8 KB
+  1 Traffic  │  2 Policy  │  3 Objects  │  4 Workloads  │  5 Events
+╭ Generate · shop/prod · last 24h · 4 flows · complete · new since 7d be 1 req ╮
+│granularity  app·all ─ [app·ports] ─ role·ports ─ role·all                    │
+│target  Shop-Prod (draft, 2 rules)                                            │
+│new since 7d before · 4 flows seen before · N: every flow                     │
+│Inbound → Shop-Prod                                                           │
+│[x] hr/prod             app·ports   5432/tcp         ✗ 1                      │
+│[ ] shop/dev            app·ports   5432/tcp         ✗ 1 ⚠ env mismatch       │
+│[ ] IP list Corp · 1 IP app·ports   443/tcp 5432/tcp ✓ 1 ✗ 1                  │
+│Outbound (o: off)                                                             │
+│2 rows hidden: o shows them                                                   │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│1 rules (1 new · 0 add services · 0 exist) · covers 1 of 8 flows · 7 not      │
+│p lists the rules · Enter plans · Space toggles · o outbound · N new since    │
+╰──────────────────────────────────────────────────────────────────────────────╯
+new since 7d: 4 seen before   │ ←/→ stop  </> row  R pick  r re-query  Esc back

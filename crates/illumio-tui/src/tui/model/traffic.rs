@@ -1758,13 +1758,20 @@ impl TrafficState {
     /// `start_query` for compare mode's baseline (`c`, `B` on a truncated
     /// baseline): the result on screen stays.
     pub fn start_baseline_run(&mut self, now: Instant) -> (u64, CancellationToken) {
-        let last_run = self.auto.last_run;
-        let started = self.start_query(now);
-        // Not a refresh of the result: the auto-refresh clock keeps its time.
-        self.auto.last_run = last_run;
+        let started = self.start_side_run(now);
         if let QueryState::Running { baseline, .. } = &mut self.query {
             *baseline = true;
         }
+        started
+    }
+
+    /// `start_query` for a query whose answer is not a new result (a
+    /// baseline: `c`, the generator's `N`): the result on screen stays, the
+    /// auto-refresh clock keeps its time.
+    pub fn start_side_run(&mut self, now: Instant) -> (u64, CancellationToken) {
+        let last_run = self.auto.last_run;
+        let started = self.start_query(now);
+        self.auto.last_run = last_run;
         started
     }
 

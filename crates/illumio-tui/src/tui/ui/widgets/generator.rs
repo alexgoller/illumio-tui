@@ -186,7 +186,7 @@ fn layout(v: &GenView, area: Rect) -> (Rect, std::rc::Rc<[Rect]>) {
         height: body.height.saturating_sub(2),
     };
     let parts = Layout::vertical([
-        Constraint::Length(2 + u16::from(v.gap.is_some())),
+        Constraint::Length(2 + u16::from(v.gap.is_some()) + u16::from(v.since_line().is_some())),
         Constraint::Fill(1),
         Constraint::Length(2),
     ])
@@ -238,6 +238,18 @@ pub fn render_generator(model: &Model, f: &mut Frame, area: Rect) {
         top.push(Line::from(Span::styled(
             format!("⚠ {g}"),
             Style::new().fg(t.warn),
+        )));
+    }
+    // New since: the header's part again, whole at any width.
+    if let Some(s) = v.since_line() {
+        let warn = s.contains("over-reports");
+        top.push(Line::from(Span::styled(
+            s,
+            if warn {
+                Style::new().fg(t.warn)
+            } else {
+                t.header_style()
+            },
         )));
     }
     f.render_widget(Paragraph::new(top), parts[0]);
@@ -361,9 +373,9 @@ pub fn render_generator(model: &Model, f: &mut Frame, area: Rect) {
         "planning… · Esc drops the plan"
     } else {
         if v.candidates.is_empty() {
-            "p lists the rules · Enter plans the writes · Space toggles · o outbound"
+            "p lists the rules · Enter plans · Space toggles · o outbound · N new since"
         } else {
-            "p lists the rules · Enter plans · Space toggles · c consolidates · o outbound"
+            "p rules · Enter plans · Space toggles · c fan-in · o outbound · N new since"
         }
     };
     let keys = if more.is_empty() {

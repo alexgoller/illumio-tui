@@ -23,6 +23,6 @@ expression: out
 │Outbound (o: on) · IP peers → Shop-Prod                                       │
 │[x] crm/prod            app·ports   443/tcp          ✓ 1 → RF-crm-prod        │
 │3 rules (3 new · 0 add services · 0 exist) · covers 6 of 10 flows · 4 not     │
-│↑ 4 more above · ↓ 1 more below · p lists the rules · Enter plans the writes …│
+│↑ 4 more above · ↓ 1 more below · p lists the rules · Enter plans · Space tog…│
 ╰──────────────────────────────────────────────────────────────────────────────╯
 shop/prod · generator · 0 req │ ←/→ stop  </> row  R pick  r re-query  Esc back

@@ -560,6 +560,60 @@ impl Runtime {
         });
     }
 
+    /// `N` in the generator: its baseline (`Cmd::RunGenBaseline`), one
+    /// query per side in the `focus-baseline:{in,out}` slots, answered
+    /// with `Msg::GenBaselineDone`.
+    fn run_gen_baseline(
+        &mut self,
+        seq: u64,
+        (filter, focus): (TrafficFilter, Focus),
+        (start, end): (jiff::Timestamp, jiff::Timestamp),
+        cancel: CancellationToken,
+    ) {
+        self.model.busy += 1;
+        let (pce, tx) = self.task_ctx();
+        tokio::spawn(async move {
+            let (ptx, mut prx) = tokio::sync::mpsc::unbounded_channel();
+            let forward_tx = tx.clone();
+            let forward = tokio::spawn(async move {
+                while let Some(p) = prx.recv().await {
+                    let _ = forward_tx.send(Msg::QueryProgress { seq, progress: p });
+                }
+            });
+            let result = async {
+                let query = filter
+                    .to_query_between(start, end, &pce, CacheMode::Use)
+                    .await?;
+                let idx = pce.name_index(CacheMode::Use).await?;
+                let ft = pce
+                    .focused_traffic(
+                        pce::FOCUS_BASELINE_SLOT,
+                        &focus,
+                        &query,
+                        &idx,
+                        CacheMode::Use,
+                        &cancel,
+                        Some(&ptx),
+                    )
+                    .await?;
+                let queries = ft.query_count();
+                Ok::<_, pce::PceError>(crate::tui::msg::GenBaselineOutcome {
+                    flows: ft.flows,
+                    truncated: ft.truncated,
+                    incomplete: ft.incomplete,
+                    hit: ft.hit,
+                    queries,
+                })
+            }
+            .await
+            .map_err(|e| e.to_string());
+            drop(ptx);
+            let _ = forward.await;
+            let _ = tx.send(Msg::GenBaselineDone { seq, result });
+            let _ = tx.send(Msg::Stats(pce.stats()));
+        });
+    }
+
     /// `D`: the result on screen against the draft policy (`Cmd::RunDraft`),
     /// answered with `Msg::DraftDone`. Through the cache's draft slot.
     fn run_draft(
@@ -1060,6 +1114,14 @@ impl Runtime {
                 end,
                 cancel,
             } => self.run_baseline(seq, filter, (start, end), cancel),
+            Cmd::RunGenBaseline {
+                seq,
+                filter,
+                focus,
+                start,
+                end,
+                cancel,
+            } => self.run_gen_baseline(seq, (filter, focus), (start, end), cancel),
             Cmd::LoadRuleSets { scope, mode } => {
                 self.model.busy += 1;
                 let (pce, tx) = self.task_ctx();
@@ -1286,6 +1348,7 @@ impl Runtime {
                 | Msg::FocusedDone { .. }
                 | Msg::DraftDone { .. }
                 | Msg::BaselineDone { .. }
+                | Msg::GenBaselineDone { .. }
                 | Msg::RuleSetsLoaded { .. }
                 | Msg::DenyRulesLoaded { .. }
                 | Msg::PendingLoaded(_)
