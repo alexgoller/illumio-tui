@@ -1431,7 +1431,9 @@ scan. Columns: `kind`, `name` (`key=value` for a label, a workload's hostname el
 `href`, `reason` (`unused`, or `missing labels: app,env`), `missing` (a workload's keys, a
 list; `null` for the other kinds, `;`-joined in CSV) and `certain` (`false`: the row rests on
 rulesets whose deny rules were not read, or, for a label the PCE's flags settle, on a
-ruleset list cut short: whether the flags count draft rules is not known). It never guesses: a kind that a
+ruleset list cut short: whether the flags count draft rules is not known) and, in JSON
+only, `usage` (a label's usage object as the PCE returned it, passed through; `null` when
+it returned none and for the other kinds). It never guesses: a kind that a
 list not read in full may hold (rulesets, label groups, pairing profiles or workloads cut
 short, or a failed pairing profile read) is not listed, labels only where the PCE's flags do
 not settle them; `meta.hygiene.withheld` names those kinds, `meta.hygiene.uncertain` the

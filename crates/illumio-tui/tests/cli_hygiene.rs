@@ -126,7 +126,7 @@ async fn every_kind_in_seven_reads_unused_objects_then_workloads() {
     assert_eq!(
         v["data"][0],
         json!({"kind": "label", "name": "loc=eu", "href": "/orgs/5/labels/5",
-            "reason": "unused", "missing": null, "certain": true})
+            "reason": "unused", "missing": null, "certain": true, "usage": null})
     );
     assert_eq!(v["data"][4]["reason"], "missing labels: role,app,env,loc");
     assert_eq!(
@@ -492,6 +492,13 @@ async fn the_pces_usage_flags_settle_labels_in_the_same_one_read() {
     // loc=eu: a pairing profile and a permission hold it, says the PCE.
     assert_eq!(rows(&v), ["label os=windows"]);
     assert_eq!(v["data"][0]["certain"], true);
+    // The PCE's usage object, verbatim: every flag it sent.
+    let usage = v["data"][0]["usage"]
+        .as_object()
+        .expect("usage passed through");
+    assert_eq!(usage["workload"], false);
+    assert_eq!(usage["container_workload"], false);
+    assert_eq!(usage.len(), 20);
     assert_eq!(v["meta"]["hygiene"]["withheld"], json!([]));
     let ns = v["meta"]["not_searched"].as_str().unwrap();
     assert!(ns.contains("labels: also the PCE's usage flags"), "{ns}");

@@ -37,6 +37,14 @@
       "certain": {
         "type": "boolean",
         "description": "false: the verdict rests on rulesets whose deny rules were not read, which may name the object; workloads are always true"
+      },
+      "usage": {
+        "$comment": "label: the PCE's usage object (GET /labels?usage=true), passed through; null when it returned none and for the other kinds",
+        "type": [
+          "object",
+          "null"
+        ],
+        "additionalProperties": true
       }
     },
     "required": [
@@ -45,7 +53,8 @@
       "href",
       "reason",
       "missing",
-      "certain"
+      "certain",
+      "usage"
     ],
     "additionalProperties": false
   }

@@ -320,6 +320,7 @@ mod tests {
             reason: "missing labels: app,env".into(),
             missing: Some(vec!["app".into(), "env".into()]),
             certain: true,
+            usage: None,
         }]);
         assert_eq!(rows.rows()[0][4], "app, env");
         assert_eq!(rows.full_rows()[0][4], join_list(["app", "env"]));

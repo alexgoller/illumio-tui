@@ -106,7 +106,7 @@ impl Kind {
 }
 
 /// One row: an unused object, or a workload missing label keys.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct Finding {
     pub kind: Kind,
     /// `key=value` for a label; a workload as the Workloads screen names it
@@ -120,6 +120,10 @@ pub struct Finding {
     /// `false`: the verdict rests on rulesets whose deny rules were not
     /// read, which may name the object. Workload rows are always certain.
     pub certain: bool,
+    /// A label's `usage` object as the PCE returned it
+    /// (`labels?usage=true`); `None` when it returned none (an empty or
+    /// non-object answer reads as none) and for the other kinds.
+    pub usage: Option<crate::models::LabelUsageFlags>,
 }
 
 /// Every href something names, by its draft form: built in one pass over
@@ -284,6 +288,7 @@ fn unused_row(kind: Kind, name: String, href: &str, certain: bool) -> Finding {
         reason: "unused".to_string(),
         missing: None,
         certain,
+        usage: None,
     }
 }
 
@@ -369,6 +374,17 @@ pub fn unused(objects: &Objects, used: &Used, gaps: Gaps) -> Unused {
                 .collect()
         }),
     );
+    // A label row carries the PCE's usage object, so a reader sees what
+    // the flags said.
+    if let Some(ls) = objects.labels {
+        let by_href: std::collections::HashMap<&str, &crate::models::LabelUsageFlags> = ls
+            .iter()
+            .filter_map(|l| l.usage.as_ref().map(|u| (l.href.as_str(), u)))
+            .collect();
+        for r in out.rows.iter_mut().filter(|r| r.kind == Kind::Label) {
+            r.usage = by_href.get(r.href.as_str()).map(|u| (*u).clone());
+        }
+    }
     out
 }
 
@@ -387,6 +403,7 @@ pub fn missing_labels(workloads: &[Workload], keys: &[String]) -> Vec<Finding> {
                 reason: format!("missing labels: {}", missing.join(",")),
                 missing: Some(missing),
                 certain: true,
+                usage: None,
             })
         })
         .collect()
@@ -729,6 +746,7 @@ mod tests {
         let u = unused(&objs, &none, Gaps::default());
         assert_eq!(names(&u.rows), ["label os=windows"]);
         assert!(u.rows[0].certain);
+        assert_eq!(u.rows[0].usage, l[6].usage, "the PCE's object, carried");
         // Every holder list cut short or unread: the flags still decide.
         let all_gaps = Gaps {
             rule_sets: true,

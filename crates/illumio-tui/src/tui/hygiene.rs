@@ -241,6 +241,7 @@ mod tests {
             },
             missing: missing.map(|m| m.iter().map(|k| k.to_string()).collect()),
             certain: true,
+            usage: None,
         }
     }
 
