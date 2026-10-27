@@ -43,6 +43,8 @@ pub enum Command {
     Ven,
     /// `:used`: where the selected object is used (Objects), as `W`.
     Used,
+    /// `:hygiene`: unused objects and workloads missing labels.
+    Hygiene,
     /// `:save <name>`: the screen's filter in force, saved under the name.
     Save(String),
     /// `:filters` / `:fl`: a picker of the screen's saved filters.
@@ -123,6 +125,7 @@ pub fn parse(input: &str) -> Result<Command, String> {
         "batch" => no_arg(Command::Batch),
         "ven" | "vens" => no_arg(Command::Ven),
         "used" | "where-used" => no_arg(Command::Used),
+        "hygiene" => no_arg(Command::Hygiene),
         "marks" => Ok(Command::Marks((!arg.is_empty()).then(|| arg.to_string()))),
         "save" => with_arg(Command::Save, "save <name>"),
         "filters" | "fl" => no_arg(Command::Filters),

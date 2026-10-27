@@ -18,7 +18,10 @@ use crate::where_used::Inputs;
 use serde::Serialize;
 use std::collections::HashSet;
 
-pub use crate::where_used::NOT_SEARCHED;
+/// What hygiene does not search, in one line: what where-used leaves out
+/// ([`crate::where_used::NOT_SEARCHED`]) and the other holders of labels
+/// and IP lists, so an unused row reads as a candidate, not a verdict.
+pub const NOT_SEARCHED: &str = "not searched: virtual services, enforcement boundaries, container workload profiles, RBAC scopes, firewall settings";
 
 /// The `external_data_set` the PCE gives its built-in objects.
 const ILO_DEFAULTS: &str = "com.illumio.ilo_defaults";
@@ -587,6 +590,13 @@ mod tests {
             counts_by_kind(&rows, &[Kind::Label, Kind::Workload]),
             [(Kind::Label, 0), (Kind::Workload, 4)]
         );
+    }
+
+    #[test]
+    fn not_searched_names_what_where_used_leaves_out_and_more() {
+        let wu = crate::where_used::NOT_SEARCHED.trim_start_matches("not searched: ");
+        assert!(NOT_SEARCHED.contains(wu));
+        assert!(NOT_SEARCHED.contains("RBAC scopes"));
     }
 
     #[test]

@@ -314,6 +314,9 @@ pub enum Overlay {
     /// `W` / `:used` on Objects: what names the selected object; its state
     /// is `ObjectsState::where_used`.
     WhereUsed,
+    /// `:hygiene`: unused objects and workloads missing labels; its state
+    /// is `ObjectsState::hygiene`.
+    Hygiene,
 }
 
 impl PartialEq for Overlay {
@@ -328,7 +331,8 @@ impl PartialEq for Overlay {
             | (Overlay::Readiness, Overlay::Readiness)
             | (Overlay::Enforce, Overlay::Enforce)
             | (Overlay::Matched, Overlay::Matched)
-            | (Overlay::WhereUsed, Overlay::WhereUsed) => true,
+            | (Overlay::WhereUsed, Overlay::WhereUsed)
+            | (Overlay::Hygiene, Overlay::Hygiene) => true,
             (Overlay::Prompt { input: a }, Overlay::Prompt { input: b })
             | (Overlay::Baseline { input: a }, Overlay::Baseline { input: b })
             | (Overlay::GenBaseline { input: a }, Overlay::GenBaseline { input: b })

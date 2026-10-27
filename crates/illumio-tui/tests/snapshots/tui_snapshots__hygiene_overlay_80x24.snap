@@ -1,0 +1,28 @@
+---
+source: crates/illumio-tui/tests/tui_snapshots.rs
+expression: out
+---
+ illumio-tui pce.example · org 5 ●                        api 5 calls · 20.8 KB
+  1 Traffic  │  2 Policy  │  3 Objects  │  4 Workloads  │  5 Events
+  ╭ hygiene ────────────────────────── 2 unused · 4 workloads missing labels ╮
+╭ │Unused: labels 1 · label groups 0 · IP lists 0 · services 1               │ ╮
+│ │Missing labels: role 2 · app 2 · env 2 · loc 4 (of 4 workloads)           │ │
+│▸│not searched: virtual svcs, boundaries, container profiles, RBAC, firewall│ │
+│ │                                                                          │ │
+│ │  kind         name                           reason                      │ │
+│ │▸ label        loc=eu                         unused                      │ │
+│ │  service      Web                            unused                      │ │
+│ │  workload     host-1.example                 missing loc                 │ │
+│ │  workload     host-2.example                 missing loc                 │ │
+│ │  workload     unmanaged-nas                  missing role, app, env, loc │ │
+│ │  workload     host-4.example                 missing role, app, env, loc │ │
+│ │                                                                          │ │
+│ │                                                                          │ │
+│ │                                                                          │ │
+│ │                                                                          │ │
+│ │                                                                          │ │
+│ │                                                                          │ │
+│ │Enter (object on its tab, workload) · W where used · / search · Esc close │ │
+│ ╰──────────────────────────────────────────────────────────────────────────╯ │
+╰──────────────────────────────────────────────────────────────────────────────╯
+hygiene · 2 unused objects · 4 w │ Enter open  W where used  / search  Esc back

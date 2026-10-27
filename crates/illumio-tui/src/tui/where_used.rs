@@ -80,6 +80,8 @@ pub struct WhereUsedView {
     /// The user moved the cursor since the overlay opened: rows landing
     /// keep it on the same reference; until then it stays on the first row.
     pub moved: bool,
+    /// Opened by `W` on a `:hygiene` row: `Esc` goes back to it.
+    pub from_hygiene: bool,
 }
 
 impl WhereUsedView {
@@ -93,6 +95,7 @@ impl WhereUsedView {
             deny_unread: 0,
             failed: None,
             moved: false,
+            from_hygiene: false,
         }
     }
 

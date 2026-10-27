@@ -102,6 +102,7 @@ pub const HELP_GROUPS: &[HelpGroup] = &[
             key("", ":ven  the VEN fleet of the loaded workloads"),
             key("", ":used  where the selected object is used (Objects)"),
             key("", ":snapshot [label]  policy, labels, workloads to a file"),
+            key("", ":hygiene  unused objects, workloads missing labels"),
             key("", ":writes [on|off]  :export[!] <path>  :batch"),
             key("", "(the table on screen as CSV; ! overwrites)"),
             key("", ":save <name>  the screen's filter, in the profile"),
@@ -422,6 +423,16 @@ pub const HELP_GROUPS: &[HelpGroup] = &[
             more("", "draft policy; rulesets loaded once if missing (1 req)"),
             more("", "a label: also pairing profiles (read once, 1 req)"),
             more("", "Enter: the rule, ruleset, group, or Workloads filtered"),
+            key(
+                ":hygiene",
+                "unused labels, groups, IP lists, services (candidates)",
+            ),
+            more(
+                "",
+                "and workloads missing label keys; loads once if missing",
+            ),
+            more("", "Enter: the object on its tab (x deletes), the workload"),
+            more("", "W: where used for the object, Esc back to the report"),
         ],
     },
     HelpGroup {

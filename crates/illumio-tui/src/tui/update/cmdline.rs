@@ -33,6 +33,7 @@ pub fn on_command(model: &mut Model, cmd: Command) -> Vec<Cmd> {
         }
         Command::Used => open_where_used(model),
         Command::Exposure => open_exposure(model),
+        Command::Hygiene => open_hygiene(model),
         Command::Save(name) => saved::save_filter(model, &name),
         Command::Filters => {
             saved::open_filters(model);

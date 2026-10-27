@@ -18,6 +18,7 @@ pub mod filter;
 pub mod form;
 pub mod gen_view;
 pub mod help;
+pub mod hygiene;
 pub mod impact;
 pub mod impact_list;
 pub mod label_editor;

@@ -9,15 +9,11 @@ use super::context::{Context, cache_label};
 use super::error::CliError;
 use super::output::{HygieneMeta, KeyCount, KindCount, OutputFormat, TableRows, join_list};
 use clap::{Args, ValueEnum};
-use pce::hygiene::{Finding, Kind, Objects, Used};
+use pce::hygiene::{Finding, Kind, NOT_SEARCHED, Objects, Used};
 use pce::models::{PolicyScope, WorkloadFilter};
 use pce::where_used::Inputs;
 use serde::Serialize;
 use std::collections::HashMap;
-
-/// What hygiene does not search, in one line: an unused row is a
-/// candidate, not a verdict.
-pub const NOT_SEARCHED: &str = "not searched: virtual services, enforcement boundaries, container workload profiles, RBAC scopes, firewall settings";
 
 /// A `--kind` value.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
@@ -272,13 +268,6 @@ mod tests {
         };
         assert_eq!(a.kinds(), [Kind::IpList, Kind::Workload]);
         assert_eq!(HygieneArgs::default().kinds(), Kind::ALL);
-    }
-
-    #[test]
-    fn not_searched_names_what_where_used_leaves_out_and_more() {
-        let wu = pce::where_used::NOT_SEARCHED.trim_start_matches("not searched: ");
-        assert!(NOT_SEARCHED.contains(wu));
-        assert!(NOT_SEARCHED.contains("RBAC scopes"));
     }
 
     #[test]

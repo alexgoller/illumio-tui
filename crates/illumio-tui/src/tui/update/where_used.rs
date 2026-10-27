@@ -59,6 +59,12 @@ pub(super) fn open_where_used(model: &mut Model) -> Vec<Cmd> {
         model.status = StatusLine::warn("no row selected");
         return Vec::new();
     };
+    open_where_used_on(model, target, name)
+}
+
+/// The overlay for `target` (`name` as its title says it), wherever it was
+/// picked: the Objects screen's row, or a `:hygiene` row (`W`).
+pub(super) fn open_where_used_on(model: &mut Model, target: Target, name: String) -> Vec<Cmd> {
     let label = (target.kind == ObjectType::Label).then(|| target.href.clone());
     let label_target = label.is_some();
     model.objects.where_used = Some(WhereUsedView::new(target, name));
@@ -323,8 +329,13 @@ pub(super) fn where_used_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
     }
     match k.code {
         KeyCode::Esc | KeyCode::Char('q') => {
+            let back = v.from_hygiene && model.objects.hygiene.is_some();
             model.objects.where_used = None;
             model.overlay = Overlay::None;
+            if back {
+                // `W` on a `:hygiene` row: back to the report.
+                reopen_hygiene(model);
+            }
             Vec::new()
         }
         KeyCode::Char('?') => {

@@ -337,6 +337,18 @@ const NOT_SEARCHED_SHORT: &str = "not searched: virtual services, boundaries, co
 /// missing), the table, the keys.
 /// Shared by `view` and `update` (page size).
 pub fn where_used_layout(area: Rect) -> WhereUsedLayout {
+    report_layout(area, 3)
+}
+
+/// The `:hygiene` box: as where-used's, with four head lines (unused,
+/// missing labels, what is not searched, then what is loading or failed).
+pub fn hygiene_layout(area: Rect) -> WhereUsedLayout {
+    report_layout(area, 4)
+}
+
+/// A report box: centred, at most 110 wide; `head` lines, the table, the
+/// keys.
+fn report_layout(area: Rect, head: u16) -> WhereUsedLayout {
     let w = area.width.saturating_sub(4).min(110);
     let h = area.height.saturating_sub(4);
     let rect = crate::tui::ui::layout::centered(area, w, h);
@@ -347,7 +359,7 @@ pub fn where_used_layout(area: Rect) -> WhereUsedLayout {
         rect.height.saturating_sub(2),
     );
     let [head, table, foot] = Layout::vertical([
-        Constraint::Length(3),
+        Constraint::Length(head),
         Constraint::Min(1),
         Constraint::Length(1),
     ])
@@ -444,6 +456,107 @@ pub fn render_where_used(model: &Model, f: &mut Frame, area: Rect) {
     let foot = cut_to(
         // Fits the 74 columns of the box at 80.
         "Enter (rule, ruleset, group, profile, workloads) · / search · Esc close",
+        l.foot.width as usize,
+    );
+    f.render_widget(
+        Paragraph::new(Line::from(Span::styled(foot, t.dim_style()))).style(t.base()),
+        l.foot,
+    );
+}
+
+/// `hygiene::NOT_SEARCHED` where the box is too narrow for it: the
+/// widest that fits, the last one 74 columns (the box at 80).
+const HYGIENE_NOT_SEARCHED_SHORT: [&str; 2] = [
+    "not searched: virtual services, boundaries, container profiles, RBAC scopes, firewall settings",
+    "not searched: virtual svcs, boundaries, container profiles, RBAC, firewall",
+];
+
+/// `:hygiene`: the candidates and the workloads missing labels in the
+/// title; unused objects per kind, workloads missing each key, what is not
+/// searched, what is loading or failed; the rows; the keys.
+pub fn render_hygiene(model: &Model, f: &mut Frame, area: Rect) {
+    use ratatui::widgets::{Block, Clear};
+    let Some(v) = model.objects.hygiene.as_ref() else {
+        return;
+    };
+    let t = &model.theme;
+    let l = hygiene_layout(area);
+    f.render_widget(Clear, l.rect);
+    // Only what is counted: no `0 unused` before the lists are in.
+    let (u, m) = (v.unused_total(), v.missing_total());
+    let mut parts = Vec::new();
+    if !v.unused.is_empty() {
+        parts.push(format!("{u} unused"));
+    }
+    if v.workloads.is_some() {
+        parts.push(format!(
+            "{m} workload{} missing labels",
+            if m == 1 { "" } else { "s" }
+        ));
+    }
+    if parts.is_empty() && !v.waiting.is_empty() {
+        parts.push("loading".to_string());
+    }
+    let mut meta = parts.join(" · ");
+    if v.requests > 0 {
+        let sep = if meta.is_empty() { "" } else { " · " };
+        meta.push_str(&format!(
+            "{sep}{} req{}",
+            v.requests,
+            if v.requests == 1 { "" } else { "s" }
+        ));
+    }
+    let room = (l.rect.width as usize).saturating_sub(7 + meta.chars().count());
+    let title = cut_to("hygiene", room);
+    f.render_widget(panel(&title, &meta, t, true), l.rect);
+    let width = l.head.width as usize;
+    let unused = if v.unused.is_empty() {
+        "Unused: listed once every list it reads is in".to_string()
+    } else {
+        v.unused_line()
+    };
+    // Always shown, whole: an unused row is a candidate, not a verdict.
+    let not_searched = std::iter::once(pce::hygiene::NOT_SEARCHED)
+        .chain(HYGIENE_NOT_SEARCHED_SHORT)
+        .find(|s| s.chars().count() <= width)
+        .unwrap_or(HYGIENE_NOT_SEARCHED_SHORT[1]);
+    let (fourth, style) = if let Some(e) = &v.failed {
+        (e.clone(), Style::new().fg(t.warn))
+    } else if !v.waiting.is_empty() {
+        (format!("loading {}…", v.waiting.join(", ")), t.dim_style())
+    } else if v.deny_unread > 0 {
+        (
+            format!(
+                "{} ruleset{} may hold deny rules not loaded (selecting one on Policy loads them)",
+                v.deny_unread,
+                if v.deny_unread == 1 { "" } else { "s" },
+            ),
+            Style::new().fg(t.warn),
+        )
+    } else if v.workloads_truncated {
+        (
+            "the workload list was cut short: the rest are not checked".to_string(),
+            Style::new().fg(t.warn),
+        )
+    } else {
+        (String::new(), t.dim_style())
+    };
+    let head = vec![
+        Line::from(Span::styled(cut_to(&unused, width), t.header_style())),
+        Line::from(Span::styled(
+            cut_to(&v.missing_line(), width),
+            t.header_style(),
+        )),
+        Line::from(Span::styled(cut_to(not_searched, width), t.dim_style())),
+        Line::from(Span::styled(cut_to(&fourth, width), style)),
+    ];
+    f.render_widget(Paragraph::new(head).style(t.base()), l.head);
+    render(f, l.table, &v.table, t, Block::default(), &|_| {
+        Style::default()
+    });
+    let foot = cut_to(
+        // Fits the 74 columns of the box at 80.
+        "Enter (object on its tab, workload) · W where used · / search · Esc close",
         l.foot.width as usize,
     );
     f.render_widget(

@@ -429,6 +429,12 @@ pub struct ObjectsState {
     pub pairing_loading: bool,
     /// Why the last read of them failed, for the overlay (until W asks again).
     pub pairing_error: Option<String>,
+    /// `:hygiene`: the report (`Overlay::Hygiene`); kept while `W` checks
+    /// one of its rows, so `Esc` there comes back to it.
+    pub hygiene: Option<crate::tui::hygiene::HygieneView>,
+    /// `Enter` on a `:hygiene` row whose tab is still loading: the tab and
+    /// the href selected once it arrives.
+    pub select_on_load: Option<(ObjectKind, String)>,
 }
 
 impl ObjectsState {
@@ -460,6 +466,8 @@ impl ObjectsState {
             pairing_profiles: None,
             pairing_loading: false,
             pairing_error: None,
+            hygiene: None,
+            select_on_load: None,
         }
     }
 

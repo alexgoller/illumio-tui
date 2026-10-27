@@ -43,6 +43,9 @@ mod explain;
 #[cfg(test)]
 mod explain_tests;
 mod generator;
+mod hygiene;
+#[cfg(test)]
+mod hygiene_tests;
 mod keys;
 mod marks;
 #[cfg(test)]
@@ -69,6 +72,7 @@ use app_overlay::*;
 use compare::*;
 use events::*;
 use explain::*;
+use hygiene::*;
 use keys::*;
 use objects::*;
 use policy::*;
@@ -98,9 +102,16 @@ pub fn update(model: &mut Model, msg: Msg) -> Vec<Cmd> {
             | Msg::ObjectsLoaded { .. }
             | Msg::IndexLoaded { .. }
     );
+    // What the hygiene report reads, the same and the lists only it waits
+    // for.
+    let hygiene_data =
+        used_data || matches!(msg, Msg::IpListsLoaded(_) | Msg::PairingProfilesLoaded(_));
     let mut cmds = on_msg(model, msg);
     if used_data {
         where_used_answer(model);
+    }
+    if hygiene_data {
+        hygiene_answer(model);
     }
     // A traffic answer that lands under the open app overlay (or one of its
     // prompts): its peers follow (no request).

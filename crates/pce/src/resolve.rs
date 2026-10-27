@@ -191,6 +191,20 @@ impl NameIndex {
             .map(|l| l.name.as_str())
     }
 
+    /// Every label, deleted ones too, by key, then value, then href.
+    pub fn labels(&self) -> Vec<&Label> {
+        let mut v: Vec<&Label> = self.labels.values().collect();
+        v.sort_by(|a, b| (&a.key, &a.value, &a.href).cmp(&(&b.key, &b.value, &b.href)));
+        v
+    }
+
+    /// Every IP list, by name, case-insensitively, then href.
+    pub fn ip_lists(&self) -> Vec<&IpList> {
+        let mut v: Vec<&IpList> = self.ip_lists.values().collect();
+        v.sort_by_cached_key(|l| (l.name.to_ascii_lowercase(), l.href.clone()));
+        v
+    }
+
     /// Every label group, by name.
     pub fn label_groups(&self) -> Vec<&LabelGroup> {
         let mut v: Vec<&LabelGroup> = self.label_groups.values().collect();
@@ -888,6 +902,25 @@ mod tests {
         assert_eq!(text, vec!["role=web", "bu=x"]);
         assert_eq!(idx.key_order().ignored(), ["bu".to_string()]);
         assert!(idx.label_keys().contains(&"bu".to_string()));
+    }
+
+    #[test]
+    fn every_label_and_ip_list_in_a_stable_order() {
+        let idx = index();
+        let labels: Vec<String> = idx
+            .labels()
+            .iter()
+            .map(|l| format!("{}={}", l.key, l.value))
+            .collect();
+        assert_eq!(
+            labels,
+            [
+                "app=", "app=shop", "env=prod", "loc=eu", "role=db", "role=web"
+            ],
+            "the deleted label too"
+        );
+        let lists: Vec<&str> = idx.ip_lists().iter().map(|l| l.name.as_str()).collect();
+        assert_eq!(lists, ["Any (0.0.0.0/0 and ::/0)", "Corp"]);
     }
 
     #[test]
