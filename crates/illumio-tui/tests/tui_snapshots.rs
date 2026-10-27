@@ -3716,10 +3716,10 @@ fn hygiene_overlay_120x40_80x24_and_loading() {
     update(&mut m, Msg::Command(Command::Hygiene));
     let out = render_to_string(&m, 100, 30);
     assert!(
-        out.contains("loading rulesets, label usage, pairing profiles, workloads…"),
+        out.contains("loading rulesets, label usage, label groups, pairing profiles,"),
         "{out}"
     );
-    assert!(out.contains("4 reqs"), "{out}");
+    assert!(out.contains("5 reqs"), "{out}");
     insta::assert_snapshot!("hygiene_overlay_loading_100x30", out);
 
     let mut m = loaded();

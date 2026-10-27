@@ -371,7 +371,16 @@ pub fn hygiene_head(v: &crate::tui::hygiene::HygieneView, width: usize) -> Vec<(
         (cut_to(&v.missing_line(), width), HeadTone::Header),
     ];
     // Always shown, whole: an unused row is a candidate, not a verdict.
-    for l in wrap_text(pce::hygiene::NOT_SEARCHED, width) {
+    let not_searched = if v.flags {
+        format!(
+            "{}; {}",
+            pce::hygiene::NOT_SEARCHED,
+            pce::hygiene::LABELS_BY_FLAGS
+        )
+    } else {
+        pce::hygiene::NOT_SEARCHED.to_string()
+    };
+    for l in wrap_text(&not_searched, width) {
         out.push((cut_to(&l, width), HeadTone::Dim));
     }
     let warnings = v.warnings();

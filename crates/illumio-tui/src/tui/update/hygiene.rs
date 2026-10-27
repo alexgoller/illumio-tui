@@ -7,7 +7,8 @@
 //! loads nothing again.
 use super::*;
 use crate::tui::hygiene::{
-    HygieneView, OBJECT_KINDS, WAIT_PROFILES, WAIT_RULESETS, WAIT_USAGE, WAIT_WORKLOADS,
+    HygieneView, OBJECT_KINDS, WAIT_GROUPS, WAIT_PROFILES, WAIT_RULESETS, WAIT_USAGE,
+    WAIT_WORKLOADS,
 };
 use pce::hygiene::{Gaps, Kind, Objects, Unused, Used};
 use pce::where_used::{Inputs, ObjectType, Target};
@@ -46,6 +47,12 @@ pub(super) fn open_hygiene(model: &mut Model) -> Vec<Cmd> {
     if model.workloads.loaded_at.is_none() && !model.workloads.loading && model.is_connected() {
         cmds.extend(load_workloads(model, CacheMode::Use));
     }
+    // The label groups' own read says whether it was cut short (a cache
+    // hit after the name index).
+    let g = ObjectKind::LabelGroups.index();
+    if model.objects.ages[g].is_none() && !model.objects.loading[g] && model.is_connected() {
+        cmds.extend(load_objects(model, ObjectKind::LabelGroups, CacheMode::Use));
+    }
     // The PCE's own word on what holds each label: holders this tool
     // cannot read (container workloads, permissions, mapping rules ...).
     if model.objects.pce_usage == PceUsage::Unknown
@@ -65,7 +72,8 @@ pub(super) fn open_hygiene(model: &mut Model) -> Vec<Cmd> {
     let coming = usize::from(rulesets_coming)
         + usize::from(model.objects.pairing_loading)
         + usize::from(model.workloads.loading)
-        + usize::from(model.objects.pce_usage_loading);
+        + usize::from(model.objects.pce_usage_loading)
+        + usize::from(model.objects.loading[g]);
     if let Some(v) = model.objects.hygiene.as_mut() {
         v.requests = coming;
     }
@@ -151,6 +159,7 @@ pub(super) fn refresh_hygiene(model: &mut Model) {
     // The PCE's usage flags, once `u` or `:hygiene` asked: they settle a
     // label whatever this tool could read. A failed or flagless answer
     // leaves the scan to decide.
+    let flags = matches!(o.pce_usage, PceUsage::Flags(_));
     match &o.pce_usage {
         PceUsage::Flags(m) => {
             for l in &mut labels {
@@ -160,9 +169,15 @@ pub(super) fn refresh_hygiene(model: &mut Model) {
         _ if o.pce_usage_loading => waiting.push(WAIT_USAGE),
         _ => {}
     }
+    // The label groups from their tab's read, which says whether it was
+    // cut short (the name index does not); `:hygiene` loads it (a cache hit
+    // after the index).
     let groups: Vec<pce::models::LabelGroup> = if tab(ObjectKind::LabelGroups) {
         o.groups.rows().to_vec()
     } else {
+        if o.loading[ObjectKind::LabelGroups.index()] {
+            waiting.push(WAIT_GROUPS);
+        }
         idx.label_groups().into_iter().cloned().collect()
     };
     let ip_lists: Vec<pce::models::IpList> = if o.ip_lists.loaded_at.is_some() {
@@ -218,9 +233,10 @@ pub(super) fn refresh_hygiene(model: &mut Model) {
     // Unused rows wait for every list that may name an object; a list
     // that failed or came back cut short withholds the kinds it may hold.
     let complete = waiting.is_empty();
+    // As the CLI: a list missing, failed or cut short is a gap.
     let gaps = Gaps {
-        rule_sets: model.draft_rulesets().is_none(),
-        groups: false,
+        rule_sets: model.draft_rulesets().is_none() || o.rule_sets_cut,
+        groups: o.groups_cut,
         profiles: o.pairing_profiles.is_none(),
         workloads: w.loaded_at.is_none() || w.truncated,
     };
@@ -246,9 +262,11 @@ pub(super) fn refresh_hygiene(model: &mut Model) {
         .map(|v| v.keys.clone())
         .unwrap_or_default();
     let missing = pce::hygiene::missing_labels(workloads, &keys);
+    // Counts are the rows shown: a withheld kind counts only when some of
+    // it (labels the flags settle) is listed.
     let listed: Vec<Kind> = OBJECT_KINDS
         .into_iter()
-        .filter(|k| !found.withheld.contains(k))
+        .filter(|k| !found.withheld.contains(k) || rows.iter().any(|r| r.kind == *k))
         .collect();
     let unused = if complete {
         pce::hygiene::counts_by_kind(&rows, &listed)
@@ -267,6 +285,7 @@ pub(super) fn refresh_hygiene(model: &mut Model) {
     v.withheld = found.withheld;
     v.uncertain = found.uncertain;
     v.gaps = gaps.text();
+    v.flags = flags;
     v.missing = per_key;
     v.workloads = loaded;
     v.workloads_truncated = truncated && loaded.is_some();

@@ -116,6 +116,13 @@ pub struct EventsPayload {
     pub window: (String, String),
 }
 
+/// A list whose truncation `:hygiene` needs (`Msg::ListCut`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CutList {
+    DraftRuleSets,
+    LabelGroups,
+}
+
 #[derive(Debug)]
 pub enum Msg {
     Key(KeyEvent),
@@ -191,6 +198,13 @@ pub enum Msg {
     },
     /// The pairing profiles (`Cmd::LoadPairingProfiles`).
     PairingProfilesLoaded(Result<Vec<pce::models::PairingProfile>, String>),
+    /// Whether a list `:hygiene` reads came back cut short, sent just
+    /// before its own answer (`RuleSetsLoaded` of the draft, the label
+    /// groups' `ObjectsLoaded`).
+    ListCut {
+        list: CutList,
+        cut: bool,
+    },
     /// The draft IP lists with the cache age in seconds.
     IpListsLoaded(Result<(Vec<IpList>, u64), String>),
     /// Workloads with the cache age in seconds.

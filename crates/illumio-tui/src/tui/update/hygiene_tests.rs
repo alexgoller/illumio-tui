@@ -6,7 +6,7 @@ use super::*;
 use crate::tui::commands;
 use crate::tui::model::PceUsage;
 use crate::tui::model::{Model, Overlay, Screen};
-use crate::tui::msg::{Cmd, Msg, ObjectsPayload};
+use crate::tui::msg::{Cmd, CutList, Msg, ObjectsPayload};
 use crate::tui::test_support::{
     model_fixture, model_with_objects, with_pairing_profiles, with_policy, with_workloads,
 };
@@ -51,6 +51,27 @@ fn select(m: &mut Model, name: &str) {
     let v = m.objects.hygiene.as_mut().unwrap();
     v.table.select_where(|r| r.name == name);
     assert_eq!(v.table.selected_item().unwrap().name, name);
+}
+
+/// The label groups tab's read lands, `cut` short or not (`Msg::ListCut`
+/// first, as the runtime sends it).
+fn groups_loaded(m: &mut Model, cut: bool) {
+    update(
+        m,
+        Msg::ListCut {
+            list: CutList::LabelGroups,
+            cut,
+        },
+    );
+    let groups: Vec<pce::models::LabelGroup> =
+        serde_json::from_str(include_str!("../../../../../fixtures/label_groups.json")).unwrap();
+    update(
+        m,
+        Msg::ObjectsLoaded {
+            kind: ObjectKind::LabelGroups,
+            result: Ok(ObjectsPayload::LabelGroups(groups, 0)),
+        },
+    );
 }
 
 fn rule_sets() -> Vec<pce::models::RuleSet> {
@@ -103,26 +124,36 @@ fn what_is_missing_loads_once_through_the_cache_and_reopening_loads_nothing() {
             },
             Cmd::LoadPairingProfiles(CacheMode::Use),
             Cmd::LoadWorkloads(CacheMode::Use),
+            Cmd::LoadObjects {
+                kind: ObjectKind::LabelGroups,
+                mode: CacheMode::Use
+            },
             Cmd::LoadLabelUsage(CacheMode::Use),
         ]
     );
     let v = m.objects.hygiene.as_ref().unwrap();
-    assert_eq!(v.requests, 4);
+    assert_eq!(v.requests, 5);
     assert_eq!(
         v.waiting,
-        ["rulesets", "label usage", "pairing profiles", "workloads"]
+        [
+            "rulesets",
+            "label usage",
+            "label groups",
+            "pairing profiles",
+            "workloads"
+        ]
     );
     assert!(rows(&m).is_empty(), "no candidate before every list is in");
     assert!(
         m.status
             .text
-            .contains("loading rulesets, label usage, pairing profiles, workloads…")
+            .contains("loading rulesets, label usage, label groups, pairing profiles, workloads…")
     );
     // Closed and reopened while they are on their way: nothing more.
     press(&mut m, KeyCode::Esc);
     assert_eq!(m.overlay, Overlay::None);
     assert_eq!(hygiene(&mut m), Vec::<Cmd>::new());
-    assert_eq!(m.objects.hygiene.as_ref().unwrap().requests, 4);
+    assert_eq!(m.objects.hygiene.as_ref().unwrap().requests, 5);
 
     update(
         &mut m,
@@ -135,6 +166,7 @@ fn what_is_missing_loads_once_through_the_cache_and_reopening_loads_nothing() {
         serde_json::from_str(include_str!("../../../../../fixtures/workloads.json")).unwrap();
     update(&mut m, Msg::WorkloadsLoaded(Ok((raw, 0, false))));
     update(&mut m, Msg::LabelUsageLoaded(Ok(usage_labels())));
+    groups_loaded(&mut m, false);
     // The workloads are checked already; the objects wait for the profiles.
     assert_eq!(rows(&m).len(), 4);
     assert_eq!(
@@ -214,10 +246,61 @@ fn unread_deny_rules_mark_rows_uncertain_and_every_warning_shows() {
 }
 
 #[test]
+fn cut_short_rulesets_or_label_groups_withhold_as_the_cli_does() {
+    // The draft rulesets cut short: every object kind a rule may name.
+    let mut m = loaded();
+    update(
+        &mut m,
+        Msg::ListCut {
+            list: CutList::DraftRuleSets,
+            cut: true,
+        },
+    );
+    hygiene(&mut m);
+    let v = m.objects.hygiene.as_ref().unwrap();
+    assert_eq!(
+        v.withheld,
+        [Kind::Label, Kind::LabelGroup, Kind::IpList, Kind::Service]
+    );
+    assert!(rows(&m).iter().all(|r| r.starts_with("workload")));
+    assert!(
+        v.warnings().iter().any(
+            |w| w.starts_with("not listed: labels, label groups, IP lists, services (rulesets")
+        ),
+        "{:?}",
+        v.warnings()
+    );
+    // The label groups cut short: labels and groups.
+    let mut m = loaded();
+    m.objects.ages[ObjectKind::LabelGroups.index()] = None;
+    hygiene(&mut m);
+    groups_loaded(&mut m, true);
+    let v = m.objects.hygiene.as_ref().unwrap();
+    assert_eq!(v.withheld, [Kind::Label, Kind::LabelGroup]);
+    assert_eq!(v.unused_line(), "Unused: IP lists 0 · services 1");
+    // Flags settle labels, but a cut-short ruleset list leaves them
+    // uncertain: a draft rule not read may name them.
+    let mut m = loaded();
+    m.objects.pce_usage = PceUsage::from_labels(usage_labels());
+    m.objects.rule_sets_cut = true;
+    hygiene(&mut m);
+    let v = m.objects.hygiene.as_ref().unwrap();
+    assert_eq!(v.uncertain, [Kind::Label]);
+    assert!(v.flags);
+    let head = crate::tui::ui::screens::objects::hygiene_head(v, 200);
+    assert!(
+        head.iter()
+            .any(|(l, _)| l.contains("labels: also the PCE's usage flags")),
+        "{head:?}"
+    );
+}
+
+#[test]
 fn a_failed_load_is_said_and_lists_no_candidate() {
     let mut m = with_workloads(with_policy(model_fixture()));
     m.objects.pce_usage = PceUsage::Unsupported;
     hygiene(&mut m);
+    groups_loaded(&mut m, false);
     update(&mut m, Msg::PairingProfilesLoaded(Err("HTTP 403".into())));
     let v = m.objects.hygiene.as_ref().unwrap();
     assert_eq!(
@@ -282,6 +365,7 @@ fn enter_on_an_object_whose_tab_is_loading_selects_it_when_it_lands() {
     let mut m = with_pairing_profiles(with_workloads(with_policy(model_fixture())));
     m.objects.pce_usage = PceUsage::Unsupported;
     hygiene(&mut m);
+    groups_loaded(&mut m, false);
     select(&mut m, "loc=eu");
     let cmds = press(&mut m, KeyCode::Enter);
     // The Objects screen loads its tabs as always (cache hits after the index).

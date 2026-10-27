@@ -9,7 +9,7 @@ use crate::tui::filter::TrafficFilter;
 use crate::tui::model::ObjectKind;
 use crate::tui::model::{Limits, Model, ProfileInfo, WRITES_OFF, WritesState};
 use crate::tui::msg::{
-    Cmd, DraftFailure, DraftOutcome, EventsPayload, FocusedOutcome, Msg, ObjectsPayload,
+    Cmd, CutList, DraftFailure, DraftOutcome, EventsPayload, FocusedOutcome, Msg, ObjectsPayload,
     QueryOutcome,
 };
 use crate::tui::{update, view};
@@ -1144,9 +1144,14 @@ impl Runtime {
                 self.model.busy += 1;
                 let (pce, tx) = self.task_ctx();
                 tokio::spawn(async move {
-                    let result = pce
-                        .rule_sets(scope, mode)
-                        .await
+                    let read = pce.rule_sets(scope, mode).await;
+                    if let (PolicyScope::Draft, Ok(c)) = (scope, &read) {
+                        let _ = tx.send(Msg::ListCut {
+                            list: CutList::DraftRuleSets,
+                            cut: c.truncated,
+                        });
+                    }
+                    let result = read
                         .map(|c| (c.value, c.age.as_secs(), c.hit))
                         .map_err(|e| e.to_string());
                     let _ = tx.send(Msg::RuleSetsLoaded { scope, result });
@@ -1193,10 +1198,13 @@ impl Runtime {
                             .labels(mode)
                             .await
                             .map(|c| ObjectsPayload::Labels(c.value, c.age.as_secs())),
-                        ObjectKind::LabelGroups => pce
-                            .label_groups(mode)
-                            .await
-                            .map(|c| ObjectsPayload::LabelGroups(c.value, c.age.as_secs())),
+                        ObjectKind::LabelGroups => pce.label_groups(mode).await.map(|c| {
+                            let _ = tx.send(Msg::ListCut {
+                                list: CutList::LabelGroups,
+                                cut: c.truncated,
+                            });
+                            ObjectsPayload::LabelGroups(c.value, c.age.as_secs())
+                        }),
                         ObjectKind::Services => pce
                             .services(mode)
                             .await

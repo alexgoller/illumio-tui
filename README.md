@@ -884,7 +884,8 @@ the full tab row (69 columns) the tabs read `Traf`, `Pol`, `Obj`, `Wl`, `Ev`.
   full may hold (the workload list cut short, a failed read) is not listed and the header
   says `not listed: labels (workloads not read in full …)`, unless the PCE's flags settle
   each label; rows that rest on rulesets whose deny rules are not loaded are marked
-  `unused (uncertain)` and the header names the kinds (selecting a ruleset on Policy loads
+  `unused (uncertain)`, labels the flags settle too (and when the rulesets were cut short),
+  since whether the flags count draft rules is not known; the counts are the rows shown and the header names the kinds (selecting a ruleset on Policy loads
   its deny rules). Every warning shows, each on its own lines. The PCE's built-ins (the
   `Any (0.0.0.0/0 and ::/0)` IP list, `All Services`, anything the PCE ships as
   `ilo_defaults`), deleted labels and objects pending deletion (already on their way out)
@@ -893,7 +894,8 @@ the full tab row (69 columns) the tabs read `Traf`, `Pol`, `Obj`, `Wl`, `Ev`.
   the PCE has a `loc` label (a profile naming `app`, `env` / `role` itself is the default
   model); managed and unmanaged workloads alike. It reads the object lists from the name
   index (or the Objects tabs once loaded) and loads the draft rulesets, the label usage
-  flags, the pairing profiles and the workload list once if missing (cached, counted in its
+  flags, the label groups (their tab's read says whether it was cut short; a cache hit after
+  the index), the pairing profiles and the workload list once if missing (cached, counted in its
   title); unused rows wait until all are in, a failed read is named and `:hygiene` again
   asks. `Enter` selects the object on its Objects tab, where `x` deletes it with the usual
   confirm (a tab still loading selects it when it arrives), or opens the workload's detail
@@ -1428,7 +1430,8 @@ plain list: still one request) hold it nowhere too; a PCE without flags leaves i
 scan. Columns: `kind`, `name` (`key=value` for a label, a workload's hostname else its name),
 `href`, `reason` (`unused`, or `missing labels: app,env`), `missing` (a workload's keys, a
 list; `null` for the other kinds, `;`-joined in CSV) and `certain` (`false`: the row rests on
-rulesets whose deny rules were not read, which may name it). It never guesses: a kind that a
+rulesets whose deny rules were not read, or, for a label the PCE's flags settle, on a
+ruleset list cut short: whether the flags count draft rules is not known). It never guesses: a kind that a
 list not read in full may hold (rulesets, label groups, pairing profiles or workloads cut
 short, or a failed pairing profile read) is not listed, labels only where the PCE's flags do
 not settle them; `meta.hygiene.withheld` names those kinds, `meta.hygiene.uncertain` the

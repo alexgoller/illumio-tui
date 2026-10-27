@@ -14,7 +14,7 @@ use crate::tui::model::{
     rule_line,
 };
 use crate::tui::msg::{
-    Cmd, DraftFailure, DraftOutcome, FocusedOutcome, Msg, ObjectsPayload, QueryOutcome,
+    Cmd, CutList, DraftFailure, DraftOutcome, FocusedOutcome, Msg, ObjectsPayload, QueryOutcome,
 };
 use crate::tui::picker::{KeyPicker, PickerOutcome};
 use crate::tui::ui::widgets::overlay::{
@@ -827,6 +827,13 @@ fn on_msg(model: &mut Model, msg: Msg) -> Vec<Cmd> {
         Msg::LabelUsageLoaded(result) => label_usage_loaded(model, result),
         Msg::LabelWorkloadsCounted { href, result } => {
             probe_answered(model, href, result);
+            Vec::new()
+        }
+        Msg::ListCut { list, cut } => {
+            match list {
+                CutList::DraftRuleSets => model.objects.rule_sets_cut = cut,
+                CutList::LabelGroups => model.objects.groups_cut = cut,
+            }
             Vec::new()
         }
         Msg::PairingProfilesLoaded(result) => {

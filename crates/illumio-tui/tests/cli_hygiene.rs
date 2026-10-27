@@ -540,3 +540,45 @@ async fn a_cut_short_workload_list_withholds_labels_without_flags() {
     );
     server.verify().await;
 }
+
+#[tokio::test]
+async fn counts_are_the_rows_shown_when_some_labels_are_withheld() {
+    // os=windows: flags, none set. loc=eu: no flags; the workload list
+    // cut short withholds it. The count is the one label listed.
+    let mut labels: Value =
+        serde_json::from_str(include_str!("../../../fixtures/labels_usage.json")).unwrap();
+    labels[4]["usage"] = Value::Null;
+    let server = MockServer::start().await;
+    expect(&server, LABELS, &labels.to_string(), 1).await;
+    for (p, body) in [
+        (GROUPS, include_str!("../../../fixtures/label_groups.json")),
+        (RULE_SETS, include_str!("../../../fixtures/rule_sets.json")),
+        (
+            PAIRING,
+            include_str!("../../../fixtures/pairing_profiles.json"),
+        ),
+    ] {
+        expect(&server, p, body, 1).await;
+    }
+    Mock::given(method("GET"))
+        .and(path(WORKLOADS))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_string(include_str!("../../../fixtures/workloads.json"))
+                .insert_header("Content-Type", "application/json")
+                .insert_header("X-Total-Count", "50000"),
+        )
+        .expect(1)
+        .mount(&server)
+        .await;
+    let a = cmd(&server)
+        .args(["--json", "hygiene", "--kind", "label"])
+        .assert()
+        .success();
+    let v = schema_check::envelope(&a.get_output().stdout);
+    assert_eq!(rows(&v), ["label os=windows"]);
+    let h = &v["meta"]["hygiene"];
+    assert_eq!(h["withheld"], json!(["label"]));
+    assert_eq!(h["unused"], json!([{"kind": "label", "count": 1}]));
+    server.verify().await;
+}

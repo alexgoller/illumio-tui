@@ -289,7 +289,8 @@ fn unused_row(kind: Kind, name: String, href: &str, certain: bool) -> Finding {
 
 /// The objects nothing holds. A label with the PCE's usage flags is
 /// unused only when `used` does not hold it and no flag is set; its row is
-/// certain. Otherwise a kind is withheld when `gaps` hits it, and its rows
+/// certain unless deny rules are unread or the rulesets were cut short.
+/// Otherwise a kind is withheld when `gaps` hits it, and its rows
 /// are uncertain while deny rules are unread. Built-ins, deleted labels
 /// and objects pending deletion are left out.
 pub fn unused(objects: &Objects, used: &Used, gaps: Gaps) -> Unused {
@@ -299,12 +300,17 @@ pub fn unused(objects: &Objects, used: &Used, gaps: Gaps) -> Unused {
         // (name, href, Some(flags say used) | None: no flags)
         let Some(items) = checked else { return };
         let mut rows = Vec::new();
-        let (mut withheld, mut scanned) = (false, false);
+        let (mut withheld, mut scanned, mut flag_unsure) = (false, false, false);
+        // A flag-settled label is certain only when every draft rule was
+        // read: whether the PCE's `ruleset` flag counts draft rules is not
+        // known, so a draft rule not read may still name it.
+        let flag_certain = scan_certain && !gaps.rule_sets;
         for (name, href, flags) in items {
             match flags {
                 Some(held) => {
+                    flag_unsure |= !flag_certain;
                     if !held && !used.contains(href) {
-                        rows.push(unused_row(k, name, href, true));
+                        rows.push(unused_row(k, name, href, flag_certain));
                     }
                 }
                 None if gaps.hit(k) => withheld = true,
@@ -320,7 +326,7 @@ pub fn unused(objects: &Objects, used: &Used, gaps: Gaps) -> Unused {
         out.rows.extend(rows);
         if withheld {
             out.withheld.push(k);
-        } else if scanned && !scan_certain {
+        } else if (scanned && !scan_certain) || flag_unsure {
             out.uncertain.push(k);
         }
     };
@@ -732,7 +738,18 @@ mod tests {
         };
         let u = unused(&objs, &none, all_gaps);
         assert_eq!(names(&u.rows), ["label os=windows"]);
-        assert!(u.withheld.is_empty() && u.uncertain.is_empty());
+        assert!(u.withheld.is_empty());
+        // The rulesets cut short: a draft rule not read may name it.
+        assert!(!u.rows[0].certain);
+        assert_eq!(u.uncertain, [Kind::Label]);
+        let gaps = Gaps {
+            workloads: true,
+            profiles: true,
+            groups: true,
+            ..Gaps::default()
+        };
+        let u = unused(&objs, &none, gaps);
+        assert!(u.rows[0].certain && u.uncertain.is_empty());
         // A label only container workloads (or only a permission) hold.
         let mut l = usage_labels();
         let flags = l[6].usage.as_mut().unwrap();
@@ -828,15 +845,16 @@ mod tests {
         assert_eq!(names(&u.rows), ["service Web"]);
         assert!(!u.rows[0].certain);
         assert_eq!(u.uncertain, [Kind::IpList, Kind::Service]);
-        // Labels the PCE's flags settle stay certain.
+        // Labels the PCE's flags settle are uncertain too: an unread deny
+        // rule may name them, whatever the flags count.
         let l = usage_labels();
         let objs = Objects {
             labels: Some(&l),
             ..Objects::default()
         };
         let u = unused(&objs, &used, Gaps::default());
-        assert!(u.rows[0].certain);
-        assert!(u.uncertain.is_empty());
+        assert!(!u.rows[0].certain);
+        assert_eq!(u.uncertain, [Kind::Label]);
     }
 
     #[test]

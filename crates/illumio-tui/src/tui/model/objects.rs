@@ -435,6 +435,11 @@ pub struct ObjectsState {
     /// `Enter` on a `:hygiene` row whose tab is still loading: the tab and
     /// the href selected once it arrives.
     pub select_on_load: Option<(ObjectKind, String)>,
+    /// The last draft ruleset read came back cut short (`Msg::ListCut`):
+    /// `:hygiene` withholds what those rulesets may hold.
+    pub rule_sets_cut: bool,
+    /// The same for the label groups tab's read.
+    pub groups_cut: bool,
 }
 
 impl ObjectsState {
@@ -468,6 +473,8 @@ impl ObjectsState {
             pairing_error: None,
             hygiene: None,
             select_on_load: None,
+            rule_sets_cut: false,
+            groups_cut: false,
         }
     }
 

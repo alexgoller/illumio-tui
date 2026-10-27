@@ -256,7 +256,12 @@ pub async fn run(ctx: &Context, args: &HygieneArgs) -> Result<(), CliError> {
     let object_kinds: Vec<Kind> = kinds
         .iter()
         .copied()
-        .filter(|k| *k != Kind::Workload && !found.withheld.contains(k))
+        // Counts are the rows shown: a withheld kind counts only when some
+        // of it (labels the flags settle) is listed.
+        .filter(|k| {
+            *k != Kind::Workload
+                && (!found.withheld.contains(k) || found.rows.iter().any(|r| r.kind == *k))
+        })
         .collect();
     let mut rows = found.rows;
     let unused_counts = pce::hygiene::counts_by_kind(&rows, &object_kinds)

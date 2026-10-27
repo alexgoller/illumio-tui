@@ -13,6 +13,7 @@ pub const WAIT_RULESETS: &str = "rulesets";
 pub const WAIT_PROFILES: &str = "pairing profiles";
 pub const WAIT_WORKLOADS: &str = "workloads";
 pub const WAIT_USAGE: &str = "label usage";
+pub const WAIT_GROUPS: &str = "label groups";
 
 /// The object kinds, in their section's order.
 pub const OBJECT_KINDS: [Kind; 4] = [Kind::Label, Kind::LabelGroup, Kind::IpList, Kind::Service];
@@ -77,6 +78,8 @@ pub struct HygieneView {
     pub gaps: String,
     /// Kinds whose rows rest on rulesets whose deny rules were not read.
     pub uncertain: Vec<Kind>,
+    /// The PCE's label usage flags were read: they also count.
+    pub flags: bool,
     /// The workloads checked; `None` before the list is here.
     pub workloads: Option<usize>,
     /// The workload list was cut short: the rest are not checked, and a
@@ -106,6 +109,7 @@ impl HygieneView {
             withheld: Vec::new(),
             gaps: String::new(),
             uncertain: Vec::new(),
+            flags: false,
             workloads: None,
             workloads_truncated: false,
             waiting: Vec::new(),
@@ -135,7 +139,15 @@ impl HygieneView {
         let kinds: Vec<String> = self
             .unused
             .iter()
-            .map(|(k, n)| format!("{} {n}", k.plural()))
+            .map(|(k, n)| {
+                // Some listed, the rest withheld (labels the flags settle).
+                let more = if self.withheld.contains(k) {
+                    " (others not listed)"
+                } else {
+                    ""
+                };
+                format!("{} {n}{more}", k.plural())
+            })
             .collect();
         format!("Unused: {}", kinds.join(" · "))
     }
@@ -177,12 +189,16 @@ impl HygieneView {
             ));
         }
         if !self.uncertain.is_empty() {
-            out.push(format!(
-                "uncertain: {} ({} ruleset{} may hold deny rules not loaded; selecting one on Policy loads them)",
-                words(&self.uncertain),
-                self.deny_unread,
-                if self.deny_unread == 1 { "" } else { "s" }
-            ));
+            let why = if self.deny_unread > 0 {
+                format!(
+                    "{} ruleset{} may hold deny rules not loaded; selecting one on Policy loads them",
+                    self.deny_unread,
+                    if self.deny_unread == 1 { "" } else { "s" }
+                )
+            } else {
+                "rulesets not read in full: a draft rule may still name them".to_string()
+            };
+            out.push(format!("uncertain: {} ({why})", words(&self.uncertain)));
         }
         if self.workloads_truncated {
             out.push("the workload list was cut short: the rest are not checked".to_string());
