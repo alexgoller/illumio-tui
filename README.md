@@ -1817,33 +1817,61 @@ groups or IP lists are pending, and a partial provision (the PCE cannot evaluate
 `--csv` prints the pair rows (`direction,src,dst,services,flows,connections,transitions`);
 `illumio-tui schema policy impact` prints the JSON shape.
 
-<!-- real output: illumio-tui policy impact --window 24h --table -->
+<!-- real output from the demo PCE, 2026-10-29; the rules list is cut -->
 
-    $ illumio-tui policy impact --window 24h --table     # illustrative: shapes as printed, numbers made up
-    changes · 3 pending changes
+    $ illumio-tui policy impact --window 24h --limit 3 --table
+    changes · 13 pending changes
     object_type  change_type  count
     ───────────────────────────────
-    ip_lists     create       1
-    rule_sets    create       1
-    sec_rules    update       1
+    rule_sets    create       8
+    rule_sets    update       3
+    services     create       2
 
-    rules · 2 pending rulesets · 1 added · 0 removed · 1 changed
+    rules · 11 pending rulesets · 50 added · 0 removed · 0 changed
     providers, consumers: workloads matched, active → draft (- not in force)
-    ruleset       change   kind   rule                                                 providers  consumers
-    ───────────────────────────────────────────────────────────────────────────────────────────────────────
-    Global-Infra  added    allow  allow all ← group:All prod envs All Services         -→12       -→40
-    Shop-Prod     changed  allow  allow role=web ← iplist:Corp 443/tcp, 8000-8099/tcp (extra-scope)  4→4  3→0
-      was: allow role=web ← role=db 443/tcp, 8000-8099/tcp (extra-scope)
+    ruleset                                change  kind           rule                                                          providers  consumers
+    ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+    16. payment | prod - vdi browser only  added   allow          allow app=payment, env=Production ← app=vdi, env=Users 443/…  -→14       -→8
+    16. payment | prod - vdi browser only  added   deny           deny app=payment, env=Production ← app=vdi, env=Users All S…  -→14       -→0
+    syslog                                 added   allow          allow role=syslog ← app=ordering, env=Production, role=db 5…  -→2        -→6
+    jump-infra | Production                added   allow          allow role=jumpbox ← env=Users, role=contractor, app=vdi, a…  -→2        -→6
+    jump-infra | Production                added   allow          allow role=jumpbox ← app=vdi, env=Users, role=admin S-RDP, …  -→2        -→2
+    13. ordering | prod                    added   allow          allow app=ad ← app=pos 443/tcp (extra-scope)                  -→0        -→35
+    illumio-tui-test                       added   allow          allow app=ad ← app=pos S-HTTPS (extra-scope)                  -→4        -→35
+    Access policy                          added   allow          allow all, iplist:Any (0.0.0.0/0 and ::/0) ← app=jump-infra…  -→216      -→2
+    Access policy                          added   deny           deny all ← all rdp, S-SSH                                     -→216      -→216
+    test-alex                              create                 (no rule changes)
+    …  (40 more added rules in 4 rulesets)
 
-    traffic · 24h · 8812 flow records · 14 newly blocked · 409 newly allowed
+    traffic · 24h · 5163 flow records · 2295 newly blocked · 447 newly allowed
     reported → draft       flows  conns
-    ───────────────────────────────────
-    allowed → blocked      14     2210
-    pot.blocked → allowed  409    51873
-    unchanged              8389
+    ──────────────────────────────────────
+    allowed → pot.blocked  1617   10898975
+    allowed → blocked      678    2375103
+    blocked → allowed      447    1083456
+    blocked → pot.blocked  1126   1254401
+    unchanged              1295
 
-    newly blocked or potentially blocked · 3 pairs
-    …
+    newly blocked or potentially blocked · top 3 of 142 pairs
+    flows: flow records the draft moves · conns: their lifetime counts
+    src             dst                   services                                                      flows  conns   reported → draft
+    ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+    laptop/Users    ipl:internet/-        443/tcp                                                       477    132406  allowed → pot.blocked 352 · allowed → blocked 125
+    vdi/Users       ipl:internet/-        443/tcp                                                       474    142211  allowed → pot.blocked 474
+    ipl:internet/-  ordering/Development  21/tcp, 22/tcp, 23/tcp, 25/tcp, 53/tcp, 53/udp, 80/tcp, 110…  196    39719   allowed → blocked 196
+
+    newly allowed · top 3 of 66 pairs
+    flows: flow records the draft moves · conns: their lifetime counts
+    src                  dst                  services                                                      flows  conns   reported → draft
+    ───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+    pos/Staging          pos/Staging          22/tcp, 23/tcp, 80/tcp, 143/tcp, 389/tcp, 443/tcp, 445/tcp,…  65     158280  blocked → allowed 65
+    ordering/Production  ordering/Production  22/tcp, 23/tcp, 80/tcp, 110/tcp, 161/udp, 443/tcp, 1433/tcp…  46     139032  blocked → allowed 46
+    pos/PCI              pos/PCI              3306/tcp, 5432/tcp, 8070/tcp, 8080/tcp, 8443/tcp              40     67844   blocked → allowed 40
+
+    not counted:
+      workload enforcement modes and labels: not pending, never provisioned
+      rule coverage: virtual services, virtual servers and enforcement boundaries are not counted (the traffic section shows their effect)
+      a partial provision: the PCE evaluates the whole draft
 
 `policy provision ... --impact` prints the same summary in front of the request (`--dry-run`),
 or computes it after the guard and the plan and before the send (`--yes`), as `rules add
