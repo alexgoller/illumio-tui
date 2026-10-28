@@ -82,7 +82,7 @@ pub fn render_screen(model: &Model, f: &mut Frame, body: Rect) {
     let theme = t.clone();
     let mut rules_meta = header_meta(&p.rules);
     // The allow rules come intra-scope first, then extra-scope (`scope`
-    // column); the meta counts both.
+    // column); the meta counts intra and extra over allow and deny rules.
     let scopes = scope_counts(p.rules.rows());
     if !scopes.is_empty() {
         rules_meta = if rules_meta.is_empty() {
