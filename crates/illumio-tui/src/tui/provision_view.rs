@@ -208,6 +208,14 @@ pub fn report_lines(r: &ProvisionImpact, limit: usize) -> Vec<(LineKind, String)
 }
 
 impl ImpactView {
+    /// After a write: the summary is stale; the next open loads it again.
+    /// A load on its way stays on its way.
+    pub fn forget(&mut self) {
+        self.report = None;
+        self.loaded_at = None;
+        self.error = None;
+    }
+
     /// The report's lines, or what stands in for them: the load on its way
     /// or its error.
     pub fn lines(&self) -> Vec<(LineKind, String)> {

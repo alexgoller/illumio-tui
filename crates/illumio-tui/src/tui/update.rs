@@ -990,6 +990,9 @@ fn on_msg(model: &mut Model, msg: Msg) -> Vec<Cmd> {
             // The runtime dropped `policy:pending`; the next `p` fetches again.
             model.policy.pending = None;
             model.policy.pending_marked.clear();
+            // The draft moved: the impact summary is stale, the next `I`
+            // or `:impact` loads it again (nothing is sent now).
+            model.policy.impact.forget();
             let counts = model.policy.provision_counts.take();
             // Only a written ruleset sends the rule waiting for it.
             let rule_after = model.policy.rule_after_ruleset.take();

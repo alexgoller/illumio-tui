@@ -145,3 +145,29 @@ fn the_report_lines_name_every_section() {
         "nothing pending: provisioning would change nothing"
     );
 }
+
+#[test]
+fn a_write_forgets_the_summary_and_the_next_open_loads_it_again() {
+    let mut m = model_fixture();
+    impact(&mut m);
+    update(&mut m, Msg::ImpactLoaded(Ok(impact_fixture())));
+    press(&mut m, KeyCode::Esc);
+    update(
+        &mut m,
+        Msg::WriteDone {
+            kind: pce::write::ObjectKind::Rule,
+            method: Some(pce::WriteMethod::Post),
+            result: Ok(pce::write::Outcome::Written(pce::write::Written {
+                href: "/orgs/5/sec_policy/draft/rule_sets/100/sec_rules/9".into(),
+                pending: true,
+                status: 201,
+                object: serde_json::json!({}),
+                dropped_fields: Vec::new(),
+                warnings: Vec::new(),
+                audit_failed: None,
+            })),
+        },
+    );
+    assert!(m.policy.impact.report.is_none());
+    assert_eq!(one_load(&impact(&mut m)), CacheMode::Use);
+}
