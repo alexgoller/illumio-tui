@@ -1028,7 +1028,7 @@ providers, consumers: workloads matched, active → draft (- not in force)
 ruleset                                change  kind           rule                                                          providers  consumers
 ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 16. payment | prod - vdi browser only  added   allow          allow app=payment, env=Production ← app=vdi, env=Users 443/…  -→14       -→8
-16. payment | prod - vdi browser only  added   deny           deny app=payment, env=Production ← app=vdi, env=Users All S…  -→14       -→0
+16. payment | prod - vdi browser only  added   deny           deny app=payment, env=Production ← app=vdi, env=Users All S…  -→14       -→8
 syslog                                 added   allow          allow role=syslog ← app=ordering, env=Production, role=db 5…  -→2        -→6
 jump-infra | Production                added   allow          allow role=jumpbox ← env=Users, role=contractor, app=vdi, a…  -→2        -→6
 jump-infra | Production                added   allow          allow role=jumpbox ← app=vdi, env=Users, role=admin S-RDP, …  -→2        -→2
@@ -1039,30 +1039,30 @@ Access policy                          added   deny           deny all ← all r
 test-alex                              create                 (no rule changes)
 …  (40 more added rules in 4 rulesets)
 
-traffic · 24h · 5163 flow records · 2295 newly blocked · 447 newly allowed
+traffic · 24h · 5233 flow records · 2329 newly blocked · 447 newly allowed
 reported → draft       flows  conns
 ──────────────────────────────────────
-allowed → pot.blocked  1617   10898975
-allowed → blocked      678    2375103
-blocked → allowed      447    1083456
-blocked → pot.blocked  1126   1254401
-unchanged              1295
+allowed → pot.blocked  1646   10605577
+allowed → blocked      683    2253082
+blocked → allowed      447    953838
+blocked → pot.blocked  1152   1162090
+unchanged              1305
 
 newly blocked or potentially blocked · top 3 of 142 pairs
 flows: flow records the draft moves · conns: their lifetime counts
 src             dst                   services                                                      flows  conns   reported → draft
 ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-laptop/Users    ipl:internet/-        443/tcp                                                       477    132406  allowed → pot.blocked 352 · allowed → blocked 125
-vdi/Users       ipl:internet/-        443/tcp                                                       474    142211  allowed → pot.blocked 474
-ipl:internet/-  ordering/Development  21/tcp, 22/tcp, 23/tcp, 25/tcp, 53/tcp, 53/udp, 80/tcp, 110…  196    39719   allowed → blocked 196
+vdi/Users       ipl:internet/-        443/tcp                                                       478    129380  allowed → pot.blocked 478
+laptop/Users    ipl:internet/-        443/tcp                                                       475    123806  allowed → pot.blocked 351 · allowed → blocked 124
+ipl:internet/-  ordering/Development  21/tcp, 22/tcp, 23/tcp, 25/tcp, 53/tcp, 53/udp, 80/tcp, 110…  204    38958   allowed → blocked 204
 
 newly allowed · top 3 of 66 pairs
 flows: flow records the draft moves · conns: their lifetime counts
 src                  dst                  services                                                      flows  conns   reported → draft
 ───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-pos/Staging          pos/Staging          22/tcp, 23/tcp, 80/tcp, 143/tcp, 389/tcp, 443/tcp, 445/tcp,…  65     158280  blocked → allowed 65
-ordering/Production  ordering/Production  22/tcp, 23/tcp, 80/tcp, 110/tcp, 161/udp, 443/tcp, 1433/tcp…  46     139032  blocked → allowed 46
-pos/PCI              pos/PCI              3306/tcp, 5432/tcp, 8070/tcp, 8080/tcp, 8443/tcp              40     67844   blocked → allowed 40
+pos/Staging          pos/Staging          22/tcp, 23/tcp, 80/tcp, 143/tcp, 389/tcp, 443/tcp, 445/tcp,…  65     148618  blocked → allowed 65
+ordering/Production  ordering/Production  22/tcp, 23/tcp, 80/tcp, 110/tcp, 161/udp, 443/tcp, 1433/tcp…  46     127676  blocked → allowed 46
+pos/PCI              pos/PCI              3306/tcp, 5432/tcp, 8070/tcp, 8080/tcp, 8443/tcp              40     53038   blocked → allowed 40
 
 not counted:
   workload enforcement modes and labels: not pending, never provisioned
