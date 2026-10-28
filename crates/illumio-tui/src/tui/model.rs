@@ -326,6 +326,9 @@ pub enum Overlay {
     /// `:hygiene`: unused objects and workloads missing labels; its state
     /// is `ObjectsState::hygiene`.
     Hygiene,
+    /// `I` in the pending overlay, `:impact`: what provisioning the draft
+    /// would change; its state is `PolicyState::impact`.
+    Impact,
 }
 
 impl PartialEq for Overlay {
@@ -341,7 +344,8 @@ impl PartialEq for Overlay {
             | (Overlay::Enforce, Overlay::Enforce)
             | (Overlay::Matched, Overlay::Matched)
             | (Overlay::WhereUsed, Overlay::WhereUsed)
-            | (Overlay::Hygiene, Overlay::Hygiene) => true,
+            | (Overlay::Hygiene, Overlay::Hygiene)
+            | (Overlay::Impact, Overlay::Impact) => true,
             (Overlay::Prompt { input: a }, Overlay::Prompt { input: b })
             | (Overlay::Baseline { input: a }, Overlay::Baseline { input: b })
             | (Overlay::GenBaseline { input: a }, Overlay::GenBaseline { input: b })
@@ -538,6 +542,7 @@ impl PolicyState {
             found_loaded: 0,
             deny_endpoint_missing: false,
             matched: None,
+            impact: Default::default(),
         }
     }
 

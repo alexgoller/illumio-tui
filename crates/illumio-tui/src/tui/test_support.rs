@@ -806,3 +806,67 @@ pub fn compare_with(m: &mut Model, flows: Vec<ResolvedFlow>, truncated: bool) {
         },
     );
 }
+
+/// A provision impact as `provision_impact::load` builds it from the
+/// fixtures: the pending ruleset Global-Infra (created) and IP list Corp,
+/// Shop-Prod's rule 2 changed (from role=db in the active policy to Corp),
+/// and the fixture flows re-evaluated: the potentially blocked one allowed
+/// in draft, the allowed 443 one blocked.
+pub fn impact_fixture() -> crate::provision_impact::ProvisionImpact {
+    use crate::provision_impact::{
+        NOT_COUNTED, ProvisionImpact, RuleInputs, changes_section, rules_section, traffic_section,
+    };
+    use pce::models::{DraftDecision, PendingChange, PolicyDecision, RuleSet, Workload};
+    let mut pending: Vec<PendingChange> = pce::models::parse_pending(
+        serde_json::from_str(include_str!("../../../../fixtures/pending_list.json")).unwrap(),
+    );
+    pending.push(PendingChange {
+        href: "/orgs/5/sec_policy/draft/rule_sets/100/sec_rules/2".into(),
+        change_type: "update".into(),
+        name: None,
+        object_type: "sec_rules".into(),
+    });
+    let draft: Vec<RuleSet> =
+        serde_json::from_str(include_str!("../../../../fixtures/rule_sets.json")).unwrap();
+    let text = include_str!("../../../../fixtures/rule_sets.json")
+        .replace("/sec_policy/draft/", "/sec_policy/active/");
+    let mut active: Vec<serde_json::Value> = serde_json::from_str(&text).unwrap();
+    active.truncate(1);
+    active[0]["rules"][1]["consumers"] =
+        serde_json::json!([{"label": {"href": "/orgs/5/labels/2"}}]);
+    let active: Vec<RuleSet> = serde_json::from_value(serde_json::Value::Array(active)).unwrap();
+    let workloads: Vec<Workload> =
+        serde_json::from_str(include_str!("../../../../fixtures/workloads.json")).unwrap();
+    let idx = fixture_index();
+    let rulesets = rules_section(&RuleInputs {
+        pending: &pending,
+        draft: &draft,
+        active: &active,
+        draft_index: &idx,
+        active_index: &idx,
+        workloads: &workloads,
+        truncated: false,
+    });
+    let mut flows = fixture_flows();
+    for f in &mut flows {
+        f.draft_policy_decision = Some(match (f.policy_decision, f.port) {
+            (PolicyDecision::PotentiallyBlocked, _) => DraftDecision::Allowed,
+            (PolicyDecision::Allowed, Some(443)) => DraftDecision::Blocked,
+            (d, _) => DraftDecision::parse(d.as_str()),
+        });
+    }
+    let keys = vec!["app".to_string(), "env".to_string()];
+    ProvisionImpact {
+        pending: pending.len(),
+        changes: changes_section(&pending, None),
+        rulesets,
+        not_counted: NOT_COUNTED.iter().map(|s| s.to_string()).collect(),
+        traffic: Some(traffic_section(
+            &flows,
+            &keys,
+            std::time::Duration::from_secs(86_400),
+            false,
+            false,
+        )),
+    }
+}

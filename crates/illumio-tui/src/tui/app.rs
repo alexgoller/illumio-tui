@@ -1188,6 +1188,22 @@ impl Runtime {
                     let _ = tx.send(Msg::Stats(pce.stats()));
                 });
             }
+            Cmd::LoadImpact(spec) => {
+                self.model.busy += 1;
+                let (pce, tx) = self.task_ctx();
+                tokio::spawn(async move {
+                    let result = crate::provision_impact::load(
+                        &pce,
+                        &spec,
+                        &tokio_util::sync::CancellationToken::new(),
+                    )
+                    .await
+                    .map(|l| l.report)
+                    .map_err(|e| e.to_string());
+                    let _ = tx.send(Msg::ImpactLoaded(result));
+                    let _ = tx.send(Msg::Stats(pce.stats()));
+                });
+            }
             Cmd::LoadPending(mode) => {
                 self.model.busy += 1;
                 let (pce, tx) = self.task_ctx();
@@ -1395,6 +1411,7 @@ impl Runtime {
                 | Msg::RuleSetsLoaded { .. }
                 | Msg::DenyRulesLoaded { .. }
                 | Msg::PendingLoaded(_)
+                | Msg::ImpactLoaded(_)
                 | Msg::ObjectsLoaded { .. }
                 | Msg::IpListsLoaded(_)
                 | Msg::LabelUsageLoaded(_)

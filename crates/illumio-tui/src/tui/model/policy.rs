@@ -450,6 +450,9 @@ pub struct PolicyState {
     pub deny_endpoint_missing: bool,
     /// `I`: the open list of a rule's matched workloads (`Overlay::Matched`).
     pub matched: Option<crate::tui::impact_list::MatchedView>,
+    /// `I` in the pending overlay, `:impact`: what provisioning would
+    /// change (`Overlay::Impact`).
+    pub impact: crate::tui::provision_view::ImpactView,
 }
 
 /// One loaded rule that names an IP list, for the IP lists tab.

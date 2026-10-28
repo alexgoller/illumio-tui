@@ -620,6 +620,7 @@ pub(super) fn on_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
                         p.pending_marked.insert(href);
                     }
                 }
+                KeyCode::Char('I') => return open_provision_impact(model, true),
                 KeyCode::Char('P') => return provision_key(model),
                 KeyCode::Char('R') => return revert_key(model),
                 KeyCode::Enter => return pending_diff(model),
@@ -667,6 +668,7 @@ pub(super) fn on_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
         Overlay::Matched => matched_key(model, k),
         Overlay::WhereUsed => where_used_key(model, k),
         Overlay::Hygiene => hygiene_key(model, k),
+        Overlay::Impact => provision_impact_key(model, k),
         Overlay::Error(_) => {
             if matches!(k.code, KeyCode::Esc | KeyCode::Enter | KeyCode::Char('q')) {
                 model.overlay = Overlay::None;
@@ -817,6 +819,7 @@ pub(super) fn open_help(model: &mut Model) {
         | Overlay::Matched
         | Overlay::WhereUsed
         | Overlay::Hygiene
+        | Overlay::Impact
         | Overlay::RuleFilter(_)) => o.clone(),
         _ => Overlay::None,
     };

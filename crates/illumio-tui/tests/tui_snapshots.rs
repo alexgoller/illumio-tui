@@ -604,6 +604,32 @@ fn policy_pending_overlay_80x24() {
     insta::assert_snapshot!("policy_pending_80x24", out);
 }
 
+/// #86: `:impact`, what provisioning the draft would change: loading,
+/// then the three sections (scrolled on a short terminal, whole on a wide
+/// one).
+#[test]
+fn provision_impact_overlay_80x24_and_160x48() {
+    use illumio_tui::tui::commands;
+    use illumio_tui::tui::model::{Overlay, Screen};
+    use illumio_tui::tui::msg::Msg;
+    use illumio_tui::tui::test_support::{impact_fixture, model_with_policy};
+    let mut m = model_with_policy();
+    m.screen = Screen::Policy;
+    illumio_tui::tui::update(&mut m, Msg::Command(commands::parse("impact").unwrap()));
+    assert_eq!(m.overlay, Overlay::Impact);
+    let loading = render_to_string(&m, 80, 24);
+    assert!(loading.contains("loading…"), "{loading}");
+    insta::assert_snapshot!("provision_impact_loading_80x24", loading);
+    illumio_tui::tui::update(&mut m, Msg::ImpactLoaded(Ok(impact_fixture())));
+    let out = render_to_string(&m, 80, 24);
+    assert!(out.contains("Provision impact"), "{out}");
+    assert!(out.contains("loaded 0s ago"), "{out}");
+    insta::assert_snapshot!("provision_impact_80x24", out);
+    let wide = render_to_string(&m, 160, 48);
+    assert!(wide.contains("Not counted"), "{wide}");
+    insta::assert_snapshot!("provision_impact_160x48", wide);
+}
+
 #[test]
 fn policy_rule_detail_overlay_80x24() {
     use illumio_tui::tui::model::{Overlay, Screen};
@@ -1463,7 +1489,7 @@ fn pending_marks_and_provision_confirm_80x24() {
     assert!(out.contains("[ ] rule_sets"), "{out}");
     assert!(out.contains("2/2 · 1 marked"), "{out}");
     assert!(
-        out.contains("j/k select · Space mark · Enter diff · P provision · R revert · Esc"),
+        out.contains("Space mark · Enter diff · I impact · P provision · R revert · Esc"),
         "{out}"
     );
     insta::assert_snapshot!("policy_pending_marks_80x24", out);

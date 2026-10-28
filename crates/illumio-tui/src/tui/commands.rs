@@ -45,6 +45,8 @@ pub enum Command {
     Used,
     /// `:hygiene`: unused objects and workloads missing labels.
     Hygiene,
+    /// `:impact`: what provisioning the draft would change (#86).
+    Impact,
     /// `:save <name>`: the screen's filter in force, saved under the name.
     Save(String),
     /// `:filters` / `:fl`: a picker of the screen's saved filters.
@@ -126,6 +128,7 @@ pub fn parse(input: &str) -> Result<Command, String> {
         "ven" | "vens" => no_arg(Command::Ven),
         "used" | "where-used" => no_arg(Command::Used),
         "hygiene" => no_arg(Command::Hygiene),
+        "impact" => no_arg(Command::Impact),
         "marks" => Ok(Command::Marks((!arg.is_empty()).then(|| arg.to_string()))),
         "save" => with_arg(Command::Save, "save <name>"),
         "filters" | "fl" => no_arg(Command::Filters),

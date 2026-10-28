@@ -46,6 +46,9 @@ mod generator;
 mod hygiene;
 #[cfg(test)]
 mod hygiene_tests;
+mod impact;
+#[cfg(test)]
+mod impact_tests;
 mod keys;
 mod marks;
 #[cfg(test)]
@@ -74,6 +77,7 @@ use compare::*;
 use events::*;
 use explain::*;
 use hygiene::*;
+use impact::*;
 use keys::*;
 use objects::*;
 use policy::*;
@@ -930,6 +934,10 @@ fn on_msg(model: &mut Model, msg: Msg) -> Vec<Cmd> {
                 Vec::new()
             }
         },
+        Msg::ImpactLoaded(result) => {
+            provision_impact_loaded(model, result);
+            Vec::new()
+        }
         Msg::PendingLoaded(result) => {
             model.policy.pending_loading = false;
             match result {

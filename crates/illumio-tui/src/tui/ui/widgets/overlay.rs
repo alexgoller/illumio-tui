@@ -1474,7 +1474,7 @@ pub fn render_rule_detail(model: &Model, rule: &RuleView, f: &mut Frame, area: R
 }
 
 /// The pending overlay's key line, the last row inside its box.
-const PENDING_KEYS: &str = "j/k select · Space mark · Enter diff · P provision · R revert · Esc";
+const PENDING_KEYS: &str = "Space mark · Enter diff · I impact · P provision · R revert · Esc";
 
 pub fn render_pending(model: &Model, f: &mut Frame, area: Rect) {
     let t = &model.theme;
@@ -1529,6 +1529,65 @@ pub fn render_pending(model: &Model, f: &mut Frame, area: Rect) {
     f.render_widget(
         Paragraph::new(lines)
             .block(panel("Pending changes", &meta, t, true))
+            .style(t.base()),
+        r,
+    );
+}
+
+/// `I` / `:impact`: what provisioning the draft would change, scrolled;
+/// the title says when it was loaded (or that it is loading).
+pub fn render_impact(model: &Model, f: &mut Frame, area: Rect) {
+    use crate::tui::provision_view::LineKind;
+    let t = &model.theme;
+    let v = &model.policy.impact;
+    let all = v.lines();
+    // As wide and as tall as the lines need, within the screen.
+    let need_w = all
+        .iter()
+        .map(|(_, t)| t.chars().count())
+        .max()
+        .unwrap_or(0)
+        + 2;
+    let need_h = all.len() + 2;
+    let r = centered(
+        area,
+        u16::try_from(need_w).unwrap_or(u16::MAX).max(60),
+        u16::try_from(need_h)
+            .unwrap_or(u16::MAX)
+            .min(area.height.saturating_sub(2))
+            .max(5),
+    );
+    f.render_widget(Clear, r);
+    let rows = r.height.saturating_sub(2) as usize;
+    let first = (v.scroll as usize).min(all.len().saturating_sub(rows));
+    let width = r.width.saturating_sub(2) as usize;
+    let lines: Vec<Line> = all
+        .iter()
+        .skip(first)
+        .take(rows)
+        .map(|(kind, text)| {
+            let style = match kind {
+                LineKind::Heading => t.header_style(),
+                LineKind::Text => t.base(),
+                LineKind::Dim => t.dim_style(),
+                LineKind::Good => Style::new().fg(t.ok),
+                LineKind::Bad => Style::new().fg(t.bad),
+                LineKind::Changed => Style::new().fg(t.warn),
+            };
+            Line::from(Span::styled(clip(&plain(text), width), style))
+        })
+        .collect();
+    let meta = match (v.loading, v.loaded_at) {
+        (true, _) => "loading…".to_string(),
+        (false, Some(at)) => format!(
+            "loaded {} · r reload",
+            crate::tui::ui::widgets::bars::age_text(at.elapsed())
+        ),
+        (false, None) => "r loads".to_string(),
+    };
+    f.render_widget(
+        Paragraph::new(lines)
+            .block(panel("Provision impact", &meta, t, true))
             .style(t.base()),
         r,
     );

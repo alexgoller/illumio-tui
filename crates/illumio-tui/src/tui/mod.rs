@@ -27,6 +27,7 @@ pub mod marks_view;
 pub mod model;
 pub mod msg;
 pub mod picker;
+pub mod provision_view;
 pub mod rule_search;
 pub mod saved;
 pub mod table;

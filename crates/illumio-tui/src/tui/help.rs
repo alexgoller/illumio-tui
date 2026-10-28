@@ -103,6 +103,7 @@ pub const HELP_GROUPS: &[HelpGroup] = &[
             key("", ":used  where the selected object is used (Objects)"),
             key("", ":snapshot [label]  policy, labels, workloads to a file"),
             key("", ":hygiene  unused objects, workloads missing labels"),
+            key("", ":impact  what provisioning the draft would change"),
             key("", ":writes [on|off]  :export[!] <path>  :batch"),
             key("", "(the table on screen as CSV; ! overwrites)"),
             key("", ":save <name>  the screen's filter, in the profile"),
@@ -398,6 +399,15 @@ pub const HELP_GROUPS: &[HelpGroup] = &[
             key("j/k Space Enter", "select · mark · diff of a pending entry"),
             key("P", "provision the marked entries, or all (writes)"),
             key("R", "revert marked entries (draft-only ones are deleted)"),
+            key(
+                "I / :impact",
+                "what provisioning would change: rules, traffic",
+            ),
+            more(
+                "",
+                "loads once (pending, rulesets, 1 draft query); r reloads",
+            ),
+            more("", "covers the whole draft, marked or not"),
         ],
     },
     HelpGroup {
@@ -736,7 +746,7 @@ impl HelpContext {
             Overlay::App => return HelpContext::AppOverlay,
             Overlay::Generator => return HelpContext::Generator,
             Overlay::EventDetail { .. } => return HelpContext::EventDetail,
-            Overlay::Pending => return HelpContext::Pending,
+            Overlay::Pending | Overlay::Impact => return HelpContext::Pending,
             Overlay::Marks => return HelpContext::Marks,
             Overlay::Readiness | Overlay::Enforce => return HelpContext::Enforce,
             _ => {}

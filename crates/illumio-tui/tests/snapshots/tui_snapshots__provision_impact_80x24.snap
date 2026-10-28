@@ -1,0 +1,28 @@
+---
+source: crates/illumio-tui/tests/tui_snapshots.rs
+expression: out
+---
+ illumio-tui pce.example · org 5 ●                        api 5 calls · 20.8 KB
+╭ Provision impact ────────────────────────────────── loaded 0s ago · r reload ╮
+│Changes · 3 pending changes                                                   │
+│  ip_lists   create  1                                                        │
+│  rule_sets  create  1                                                        │
+│  sec_rules  update  1                                                        │
+│                                                                              │
+│Rules · 2 rulesets · 1 added · 0 removed · 1 changed                          │
+│  workloads matched active → draft (- not in force)                           │
+│  Global-Infra (create)                                                       │
+│    + allow all ← group:All prod envs All Services                            │
+│      providers -→- · consumers -→-                                           │
+│  Shop-Prod (update)                                                          │
+│    ~ allow role=web ← iplist:Corp 443/tcp, 8000-8099/tcp                     │
+│      was allow role=web ← role=db 443/tcp, 8000-8099/tcp                     │
+│      providers 1→1 · consumers 1→0                                           │
+│                                                                              │
+│Traffic · 1d · 4 flow records · 1 newly blocked · 1 newly allowed             │
+│  allowed → blocked      1 flow · 5 conns                                     │
+│  pot.blocked → allowed  1 flow · 12 conns                                    │
+│  unchanged              2 flows                                              │
+│                                                                              │
+╰──────────────────────────────────────────────────────────────────────────────╯
+impact · 3 pending · 1 flow newly blocked · 1 newly allowed            Esc back

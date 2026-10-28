@@ -18,6 +18,8 @@ const APP_HINTS: &str = " │ Tab panel  X dir  Enter open  w rule  r reload  Es
 const GEN_HINTS: &str = " │ ←/→ stop  </> row  R pick  r re-query  Esc back ";
 /// The where-used overlay's keys, for the same reason.
 const USED_HINTS: &str = " │ Enter open  / search  Esc back ";
+/// The impact overlay's keys, for the same reason.
+const IMPACT_HINTS: &str = " │ j/k scroll  r reload  Esc back ";
 /// The hygiene overlay's keys, for the same reason.
 const HYGIENE_HINTS: &str = " │ Enter open  W where used  / search  Esc back ";
 
@@ -33,7 +35,7 @@ pub fn render(model: &Model, f: &mut Frame, area: Rect) {
     let width = usize::from(area.width);
     let app = matches!(
         model.overlay,
-        Overlay::App | Overlay::Generator | Overlay::WhereUsed | Overlay::Hygiene
+        Overlay::App | Overlay::Generator | Overlay::WhereUsed | Overlay::Hygiene | Overlay::Impact
     );
     let mut hints = if model.overlay == Overlay::Generator {
         GEN_HINTS.to_string()
@@ -41,6 +43,8 @@ pub fn render(model: &Model, f: &mut Frame, area: Rect) {
         USED_HINTS.to_string()
     } else if model.overlay == Overlay::Hygiene {
         HYGIENE_HINTS.to_string()
+    } else if model.overlay == Overlay::Impact {
+        IMPACT_HINTS.to_string()
     } else if app {
         APP_HINTS.to_string()
     } else {

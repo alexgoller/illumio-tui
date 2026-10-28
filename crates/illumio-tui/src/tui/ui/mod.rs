@@ -76,6 +76,7 @@ pub fn view(model: &Model, f: &mut Frame) {
         Overlay::WhereUsed => screens::objects::render_where_used(model, f, area),
         Overlay::Hygiene => screens::objects::render_hygiene(model, f, area),
         Overlay::Pending => widgets::overlay::render_pending(model, f, area),
+        Overlay::Impact => widgets::overlay::render_impact(model, f, area),
         Overlay::Error(text) => widgets::overlay::render_error(model, text, f, area),
         Overlay::EventsEditor(e) => widgets::overlay::render_events_editor(model, e, f, area),
         Overlay::EventTypes { selected, actors } => {

@@ -3928,3 +3928,109 @@ async fn workloads_compare_reads_the_snapshot_files_only() {
     assert_eq!(c.show, illumio_tui::tui::model::ShowChanges::New);
     server.verify().await;
 }
+
+/// #86: `:impact` loads the provision impact once (the pending list, then
+/// one draft traffic query; no ruleset is pending, so no ruleset, list or
+/// workload read), and reopening it costs nothing.
+#[tokio::test]
+async fn impact_loads_once_and_reopening_costs_nothing() {
+    use illumio_tui::tui::msg::Msg;
+    const Q: &str = "/orgs/5/traffic_flows/async_queries/q-1";
+    let server = MockServer::start().await;
+    mount_objects(&server).await;
+    let get = |p: &str, body: String, n: u64| {
+        Mock::given(method("GET"))
+            .and(path(format!("/api/v2{p}")))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_string(body)
+                    .insert_header("Content-Type", "application/json"),
+            )
+            .expect(n)
+    };
+    get(
+        "/orgs/5/sec_policy/pending",
+        r#"[{"href":"/orgs/5/sec_policy/draft/ip_lists/21","change_type":"create","name":"Corp"}]"#
+            .into(),
+        1,
+    )
+    .mount(&server)
+    .await;
+    for p in [
+        "/orgs/5/sec_policy/draft/rule_sets",
+        "/orgs/5/sec_policy/active/rule_sets",
+        "/orgs/5/workloads",
+    ] {
+        get(p, "[]".into(), 0).mount(&server).await;
+    }
+    Mock::given(method("POST"))
+        .and(path("/api/v2/orgs/5/traffic_flows/async_queries"))
+        .respond_with(
+            ResponseTemplate::new(202).set_body_json(json!({"href": Q, "status": "queued"})),
+        )
+        .expect(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path(format!("/api/v2{Q}")))
+        .respond_with(Ticking::new(json!({
+            "status": "completed", "rules": "completed", "flows_count": 4,
+            "result": {"href": format!("{Q}/download")}
+        })))
+        .mount(&server)
+        .await;
+    Mock::given(method("PUT"))
+        .and(path(format!("/api/v2{Q}/update_rules")))
+        .respond_with(ResponseTemplate::new(204))
+        .expect(1)
+        .mount(&server)
+        .await;
+    let mut flows: Vec<serde_json::Value> =
+        serde_json::from_str(include_str!("../../../fixtures/traffic_flows.json")).unwrap();
+    for f in &mut flows {
+        f["draft_policy_decision"] = json!("blocked");
+    }
+    get(
+        &format!("{Q}/download"),
+        serde_json::to_string(&flows).unwrap(),
+        1,
+    )
+    .mount(&server)
+    .await;
+    let pce = pce_for(&server);
+    let mut m = model();
+    m.connection = Connection::Connected {
+        index: Some(pce.name_index(pce::CacheMode::Use).await.unwrap()),
+        index_age_secs: 0,
+    };
+    let (mut rt, tx) = Runtime::new(pce, m);
+    tx.send(Msg::Command(
+        illumio_tui::tui::commands::parse("impact").unwrap(),
+    ))
+    .unwrap();
+    let mut keys = vec![(1500u64, KeyCode::Esc), (50, KeyCode::Char(':'))];
+    keys.extend("impact".chars().map(|c| (10, KeyCode::Char(c))));
+    keys.extend([
+        (10, KeyCode::Enter),
+        (300, KeyCode::Esc),
+        (50, KeyCode::Char('q')),
+    ]);
+    let events = stream::iter(keys).then(|(ms, code)| async move {
+        tokio::time::sleep(Duration::from_millis(ms)).await;
+        Event::Key(KeyEvent::new(code, KeyModifiers::NONE))
+    });
+    let model = run_loop(&mut rt, Box::pin(events), &mut |_| {}).await;
+    let report = model
+        .policy
+        .impact
+        .report
+        .as_ref()
+        .unwrap_or_else(|| panic!("not loaded: {:?}", model.policy.impact.error));
+    assert_eq!(report.pending, 1);
+    assert!(report.rulesets.is_empty());
+    let t = report.traffic.as_ref().unwrap();
+    assert_eq!(t.flows, 4);
+    assert_eq!(t.transitions.newly_blocked, 2, "the two allowed flows");
+    assert!(!model.policy.impact.loading);
+    assert_eq!(model.busy, 0);
+}

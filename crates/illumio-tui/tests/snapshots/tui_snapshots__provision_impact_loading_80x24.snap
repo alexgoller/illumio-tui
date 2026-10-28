@@ -1,0 +1,28 @@
+---
+source: crates/illumio-tui/tests/tui_snapshots.rs
+expression: loading
+---
+ illumio-tui pce.example · org 5 ●                        api 5 calls · 20.8 KB
+  1 Traffic  │  2 Policy  │  3 Objects  │  4 Workloads  │  5 Events
+╭ Rulesets ──────────────────────────────────────────────────── draft · 5s ago ╮
+│  ruleset                on  scopes                              rules pending│
+│▸ Shop-Prod              ✓   app=shop & env=prod                     4        │
+│  Global-Infra           ✗   All                                     1 create │
+│                                                                              │
+│                                                                              │
+╰──────────────────────────────────────────────────────────────────────────────╯
+╭ Rul╭ Provision impact ──────────────────────────────────────── loading… ╮tra ╮
+│  ki│loading: the pending list, the rulesets and one draft traffic query…│    │
+│▸ ov│                                                                    │   -│
+│  al│                                                                    │   -│
+│  al╰────────────────────────────────────────────────────────────────────╯   -│
+│  deny          ✓         ipl:Any (0.0. All workload 23/tcp                  -│
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+╰──────────────────────────────────────────────────────────────────────────────╯
+impact · loading the pending list, the ruleset │ j/k scroll  r reload  Esc back

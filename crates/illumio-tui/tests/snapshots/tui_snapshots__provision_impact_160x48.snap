@@ -1,0 +1,52 @@
+---
+source: crates/illumio-tui/tests/tui_snapshots.rs
+expression: wide
+---
+ illumio-tui pce.example · org 5 ●                                                                                                        api 5 calls · 20.8 KB
+  1 Traffic  │  2 Policy  │  3 Objects  │  4 Workloads  │  5 Events
+╭ Rulesets ──────────────────────────────────────────── draft · 5s ago ╮╭ Rules · app=shop, env=prod ─────────────────────────────────────── 1 intra · 1 extra ╮
+│  ruleset                on  scopes                      rules pending││  kind          on  scope consumers       providers        services        P/C        │
+│▸ Shop-Prod              ✓   app=shop & env=prod             4        ││▸ override_deny ✓         All workloads   role=db          22/tcp                    -│
+│  Global-Infra           ✗   All                             1 create ││  allow         ✓   intra role=web        role=db          PostgreSQL                -│
+│                                                                      ││  allow         ✓   extra ipl:Corp        role=web         443/tcp, 8000-8           -│
+│                                                                      ││  deny          ✓         ipl:Any (0.0.0. All workloads    23/tcp                    -│
+│           ╭ Provision impact ────────────────────────────────────────────────────────────────────────────────────────── loaded 0s ago · r reload ╮           │
+│           │Changes · 3 pending changes                                                                                                           │           │
+│           │  ip_lists   create  1                                                                                                                │           │
+│           │  rule_sets  create  1                                                                                                                │           │
+│           │  sec_rules  update  1                                                                                                                │           │
+│           │                                                                                                                                      │           │
+│           │Rules · 2 rulesets · 1 added · 0 removed · 1 changed                                                                                  │           │
+│           │  workloads matched active → draft (- not in force)                                                                                   │           │
+│           │  Global-Infra (create)                                                                                                               │           │
+│           │    + allow all ← group:All prod envs All Services                                                                                    │           │
+│           │      providers -→- · consumers -→-                                                                                                   │           │
+│           │  Shop-Prod (update)                                                                                                                  │           │
+│           │    ~ allow role=web ← iplist:Corp 443/tcp, 8000-8099/tcp                                                                             │           │
+│           │      was allow role=web ← role=db 443/tcp, 8000-8099/tcp                                                                             │           │
+│           │      providers 1→1 · consumers 1→0                                                                                                   │           │
+│           │                                                                                                                                      │           │
+│           │Traffic · 1d · 4 flow records · 1 newly blocked · 1 newly allowed                                                                     │           │
+│           │  allowed → blocked      1 flow · 5 conns                                                                                             │           │
+│           │  pot.blocked → allowed  1 flow · 12 conns                                                                                            │           │
+│           │  unchanged              2 flows                                                                                                      │           │
+│           │                                                                                                                                      │           │
+│           │Newly blocked or potentially blocked · 1 pair                                                                                         │           │
+│           │  shop/prod → fqdn-1.example/-  443/tcp  1 flow                                                                                       │           │
+│           │                                                                                                                                      │           │
+│           │Newly allowed · 1 pair                                                                                                                │           │
+│           │  ipl:Corp/- → shop/prod  8443/tcp  1 flow                                                                                            │           │
+│           │                                                                                                                                      │           │
+│           │Not counted                                                                                                                           │           │
+│           │  workload enforcement modes and labels: not pending, never provisioned                                                               │           │
+│           │  rule coverage: virtual services, virtual servers and enforcement boundaries are not counted (the traffic section shows their effect)│           │
+│           │  a partial provision: the PCE evaluates the whole draft                                                                              │           │
+│           ╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯           │
+│                                                                      ││                                                                                      │
+│                                                                      ││                                                                                      │
+│                                                                      ││                                                                                      │
+│                                                                      ││                                                                                      │
+│                                                                      ││                                                                                      │
+│                                                                      ││                                                                                      │
+╰──────────────────────────────────────────────────────────────────────╯╰──────────────────────────────────────────────────────────────────────────────────────╯
+impact · 3 pending · 1 flow newly blocked · 1 newly allowed                                                                    │ j/k scroll  r reload  Esc back

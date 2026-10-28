@@ -473,7 +473,7 @@ impl ProvisionImpact {
 }
 
 /// What [`load`] needs besides the PCE.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct LoadSpec {
     /// The traffic query (window, cap), checked by the caller.
     pub query: TrafficQuery,
@@ -492,6 +492,21 @@ pub struct Loaded {
     pub cache_hit: bool,
     /// A ruleset list or the workload list was cut short.
     pub rules_truncated: bool,
+}
+
+/// The query over the last `window` at `cap`; an error for a window that
+/// does not parse or needs confirming (> 7d), before any request.
+pub fn impact_query(window: &str, cap: u32) -> Result<TrafficQuery, String> {
+    let w = pce::traffic::parse_window(window).map_err(|e| format!("window: {e}"))?;
+    let q = pce::traffic::TrafficQueryBuilder::last(w)
+        .and_then(|b| b.max_results(cap).build())
+        .map_err(|e| e.to_string())?;
+    match q.needs_confirmation() {
+        Some(reason) => Err(format!(
+            "expensive query: {reason}; policy impact --window W --yes runs it"
+        )),
+        None => Ok(q),
+    }
 }
 
 /// The summary from the PCE: the pending list (cached); nothing more when

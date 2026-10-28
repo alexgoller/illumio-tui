@@ -20,7 +20,7 @@ expression: out
 │    │                                                                    │    │
 │    │                                                                    │    │
 │    │                                                                    │    │
-│    │j/k select · Space mark · Enter diff · P provision · R revert · Esc │    │
+│    │Space mark · Enter diff · I impact · P provision · R revert · Esc   │    │
 │    ╰────────────────────────────────────────────────────────────────────╯    │
 │                                                                              │
 │                                                                              │
