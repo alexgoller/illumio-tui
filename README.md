@@ -334,7 +334,7 @@ Output is a table at a terminal and JSON (`{"data": ..., "meta": ...}`) when pip
 | 4 | PCE error (a failed request, an incomplete write) |
 | 5 | rate limited |
 | 6 | write refused (writes not enabled; `enforce` on an app that is not ready) |
-| 7 | flows blocked since an enforcement (`enforce --watch`) |
+| 7 | flows blocked since an enforcement (`enforce --watch`), or flows the draft would newly block (`policy impact --fail-on-blocked`) |
 | 8 | a risky service exposed (`exposure --fail-on-exposed`) |
 | 9 | snapshots differ (`snapshot diff --fail-on-change`) |
 
@@ -439,7 +439,7 @@ Five screens: `1` Traffic, `2` Policy, `3` Objects, `4` Workloads, `5` Events. T
 takes `:traffic`, `:policy`, `:objects`, `:workloads`, `:events`, `:iplists` (Objects on its
 IP lists tab), `:filter <expr>`, `:window <dur>`, `:profile <name>`, `:writes [on|off]`,
 `:export <path>`, `:draft`, `:active`, `:unicast`, `:focus [app]`, `:app [app]`, `:gen [app]`,
-`:readiness`, `:enforce [app]`, `:exposure` (also `9`), `:used` (where the selected object is used, as `W`), `:hygiene` (unused objects, workloads missing labels), `:batch`, `:snapshot [label]` (see [Snapshots](#snapshots)), `:save <name>`, `:filters` (`:fl`), `:load <name>`,
+`:readiness`, `:enforce [app]`, `:exposure` (also `9`), `:used` (where the selected object is used, as `W`), `:hygiene` (unused objects, workloads missing labels), `:impact` (what provisioning the draft would change, see [Provision impact](#provision-impact)), `:batch`, `:snapshot [label]` (see [Snapshots](#snapshots)), `:save <name>`, `:filters` (`:fl`), `:load <name>`,
 `:default <name>|off`, `:help` and `:q` (each described below; saved filters under [Saved filters](#saved-filters)). `:export <path>` writes the table on
 screen as CSV (the rows shown, with the search and filters applied and in sort order; every
 column, whatever the terminal width, each cell whole; `~/` is the home directory), the same
@@ -777,7 +777,14 @@ the full tab row (69 columns) the tabs read `Traf`, `Pol`, `Obj`, `Wl`, `Ev`.
   counted in the pane's title bar, `3 intra · 1 extra`). With writes on, `n` / `e` / `x` create, edit and delete rulesets and rules
   in draft (`N` a deny rule), `t` enables or disables the selected rule (allow or deny) or
   ruleset (a draft change; disabled ones show dimmed with `✗`), and the pending overlay marks
-  with `Space`, provisions with `P` and reverts the marked changes with `R`.
+  with `Space`, provisions with `P` and reverts the marked changes with `R`. `I` in the
+  pending overlay (or `:impact` anywhere) shows what provisioning the draft would change: the
+  pending objects, each pending ruleset's rules added, removed and changed with the workloads
+  they match active → draft, and one traffic query re-evaluated against the draft (the flows
+  that would become blocked, then allowed, per app pair). It loads once when asked (the pending
+  list, the rulesets and lists when a ruleset is pending, one draft query, through the cache);
+  reopening it shows the summary with its age and sends nothing; `r` in it loads it again past
+  the cache; `j`/`k` scroll, `Esc` goes back to the pending list. See [Provision impact](#provision-impact).
   `i` reads the workload list once (unless the Workloads screen already did) for rule impact:
   the rule detail says how many workloads the rule matches (`impact      12 providers · 3
   consumers`, `≥` when the list was truncated) and the size of each IP list it names, the
@@ -1046,6 +1053,8 @@ the API call and byte counters at all times.
     illumio-tui pairing-profiles list --table      # alias: pp list
     illumio-tui policy pending
     illumio-tui policy pending --diff --table
+    illumio-tui policy impact --table
+    illumio-tui policy impact --window 7d --fail-on-blocked --json
     illumio-tui events --since 1h --severity err
     illumio-tui events --type sec_rule --diff
     illumio-tui events --exclude-type =user.login --exclude-type 'agent.*' --severity warning+
@@ -1123,7 +1132,8 @@ with `--yes`; without it the run stops at 10000 and stderr names the next cap.
 Errors go to stderr as JSON. Exit codes: 1 generic, 2 arguments or
 config, 3 auth, 4 PCE error, 5 rate limited, 6 write refused (by the guard, or `enforce` on an
 app that is not ready), 7 flows blocked since an enforcement (`enforce --watch`,
-`blocked_since_enforcement`), 8 a risky service exposed (`exposure --fail-on-exposed`,
+`blocked_since_enforcement`) or flows the draft would newly block (`policy impact
+--fail-on-blocked`, `would_block`), 8 a risky service exposed (`exposure --fail-on-exposed`,
 `exposed`), 9 snapshots differ (`snapshot diff --fail-on-change`, `snapshots_differ`), 141 stdout closed by its reader (`| head`; quiet, no error).
 
 `--csv` (beside `--table` and `--json`, exclusive with both) prints the same table as RFC 4180
@@ -1138,7 +1148,7 @@ a `diff` column, one diff line per line of the cell). `traffic groups --by ...` 
 counts and their names. The meta line always goes to
 stderr, so a redirect holds only CSV. `--csv` sends the same requests as the table;
 `workloads`, `labels`, `label-groups`, `services`, `iplists`, `events`, `policy rulesets`,
-`policy rules`, `policy rules impact --list`, `policy search`, `policy pending`, `traffic query`/`groups`/`mesh`, `app` (with `--section`),
+`policy rules`, `policy rules impact --list`, `policy search`, `policy pending`, `policy impact` (the pair rows), `traffic query`/`groups`/`mesh`, `app` (with `--section`),
 `gen` and `profile list` take it.
 
 `workloads` shows the effective enforcement: `unmanaged` for a workload without a VEN, which
@@ -1760,6 +1770,90 @@ complete), for CI and cron:
     illumio-tui exposure --service rdp --fail-on-exposed --json > rdp.json
     case $? in 0) ;; 8) echo "RDP exposed" ;; *) echo "no complete answer" ;; esac
 
+### Provision impact
+
+`illumio-tui policy impact [--window W] [--limit N] [--fail-on-blocked] [--yes]` says what
+provisioning the draft would change, before anyone provisions it. Read-only. The PCE evaluates
+against the whole draft, so the summary always covers everything pending. Three sections:
+
+- **Changes**: the pending objects counted by object type and change type (`create`,
+  `update`, `delete`), from the pending list.
+- **Rules**: per pending ruleset (a pending rule counts through its ruleset), its rules added,
+  removed and changed, draft against active, matched by href as `policy pending --diff`
+  matches them. Each carries its workload coverage active → draft (`providers 12→40 ·
+  consumers 3→3`): the active side through the active label groups and IP lists, the draft side
+  through the draft ones, over one workload list. `-` means not in force on that side (absent,
+  or it or its ruleset disabled); `≥` a workload list cut short. A rule is changed when its
+  text, its state or its coverage differs (`was:` under it gives the active text when it
+  differs; none means only its coverage moved: the ruleset's scopes or a label group). A
+  ruleset pending deletion counts its rules as removed. Deny rules a ruleset list does not
+  carry (an older PCE keeps them apart) are not compared, and `not counted` says so.
+- **Traffic**: one Explorer query over `--window` (the profile's, 24h by default; over 7d needs
+  `--yes`) at the profile's cap, run and re-evaluated against the draft (`update_rules`; no
+  policy change) in its own cache slot: every flow record reported → draft (each changed cell,
+  the rest as one `unchanged` count), then the app/env group pairs (the profile's scope keys)
+  whose flows become blocked or potentially blocked (allowed now, newly blocked first), then
+  those that become allowed, busiest first, with their services. The table shows 20 pairs per
+  direction (`--limit N`); `--json` and `--csv` carry all of them unless `--limit` is given
+  (`blocked_pairs_total`, `allowed_pairs_total` count them).
+
+With nothing pending it says so, exits 0 and sends no query (one pending read). Requests: the
+pending list; the object lists (labels, label groups, IP lists, services); when a ruleset is
+pending, the draft and active rulesets, the active label groups and IP lists and one workloads
+read (all cached); then one POST, status polls, one PUT `update_rules`, polls and one download.
+`meta.cost` says it in words, `meta.api_calls` counts them, `meta.draft` has the newly blocked
+and fixed counts. Not counted: workload enforcement modes and labels (never pending, never
+provisioned), virtual services, virtual servers and enforcement boundaries in rule coverage (the
+traffic section shows their effect), the rules of rulesets with no pending change whose label
+groups or IP lists are pending, and a partial provision (the PCE cannot evaluate one).
+`--csv` prints the pair rows (`direction,src,dst,services,flows,connections,transitions`);
+`illumio-tui schema policy impact` prints the JSON shape.
+
+<!-- real output: illumio-tui policy impact --window 24h --table -->
+
+    $ illumio-tui policy impact --window 24h --table     # illustrative: shapes as printed, numbers made up
+    changes · 3 pending changes
+    object_type  change_type  count
+    ───────────────────────────────
+    ip_lists     create       1
+    rule_sets    create       1
+    sec_rules    update       1
+
+    rules · 2 pending rulesets · 1 added · 0 removed · 1 changed
+    providers, consumers: workloads matched, active → draft (- not in force)
+    ruleset       change   kind   rule                                                 providers  consumers
+    ───────────────────────────────────────────────────────────────────────────────────────────────────────
+    Global-Infra  added    allow  allow all ← group:All prod envs All Services         -→12       -→40
+    Shop-Prod     changed  allow  allow role=web ← iplist:Corp 443/tcp, 8000-8099/tcp  4→4        3→0
+      was: allow role=web ← role=db 443/tcp, 8000-8099/tcp
+
+    traffic · 1d · 8812 flow records · 14 newly blocked · 409 newly allowed
+    reported → draft       flows  conns
+    ───────────────────────────────────
+    allowed → blocked      14     2210
+    pot.blocked → allowed  409    51873
+    unchanged              8389
+
+    newly blocked or potentially blocked · 3 pairs
+    …
+
+`policy provision ... --impact` prints the same summary in front of the request (`--dry-run`),
+or computes it after the guard and the plan and before the send (`--yes`), as `rules add
+--impact` does, over the profile's default window; in JSON it is `data.impact`. With named
+targets the changes section marks how many of each are in the request (`in_request`), and
+`meta.warnings` says the rules and traffic sections cover the whole draft.
+
+**Check before you provision.** In a change window or a pipeline, `--fail-on-blocked` exits 7
+(`would_block`) after the report when a flow allowed today would become blocked or potentially
+blocked; a truncated or incomplete result without one is exit 4, never a silent pass:
+
+    illumio-tui policy impact --window 7d --fail-on-blocked --json > impact.json
+    case $? in
+      0) ILLUMIO_WRITES=1 illumio-tui policy provision --all --yes ;;
+      7) mail -s "the draft would block flows" alex@ryte.de < impact.json ;;
+      *) echo "no complete answer" ;;
+    esac
+
 ### Flow marks
 
 `illumio-tui marks list|add|rm|export|import` reads and writes `marks.toml` (next to
@@ -2130,6 +2224,9 @@ nothing.
 
     illumio-tui policy rules add Shop-Prod --provider role=web --consumer iplist:Corp --service 443/tcp --dry-run --impact --json
 
+`policy provision --impact` adds what provisioning would change (see
+[Provision impact](#provision-impact)).
+
 `policy provision --all` reads the pending list once and provisions every
 pending object by explicit href, grouped by type (rulesets, IP lists,
 services, label groups, virtual services, firewall settings, and so on); a
@@ -2443,7 +2540,9 @@ never changes the rule. IP lists, workloads, groups and exclusions are
 never touched. The rule detail says `intra-scope` or `extra-scope`.
 
 In the pending overlay (`p`), `Space` marks entries and `P` provisions the
-marked ones, or everything pending when none is marked. The confirm overlay
+marked ones, or everything pending when none is marked. `I` first shows what
+provisioning the draft would change (the whole draft, marked or not; see
+[Provision impact](#provision-impact)). The confirm overlay
 shows the exact `POST /orgs/N/sec_policy` body with its `change_subset`;
 `y` sends it once, the status line says `provisioned <version href>: <counts>`,
 and the pending list and the rulesets reload. `R` reverts the marked entries
