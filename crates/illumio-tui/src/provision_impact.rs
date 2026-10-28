@@ -212,6 +212,22 @@ struct Entry {
     on: bool,
 }
 
+/// The mark of an extra-scope rule's text (`unscoped_consumers`: its
+/// consumers may come from outside the ruleset's scopes, so its coverage
+/// counts them anywhere).
+const EXTRA_SCOPE: &str = " (extra-scope)";
+
+/// A deny rule carrying `unscoped_consumers` (a field the model does not
+/// name): marked, and said to be counted in scope, as deny coverage keeps
+/// consumers to the scopes; empty otherwise.
+fn deny_scope_note(d: &pce::models::DenyRule) -> &'static str {
+    if d.extra.get("unscoped_consumers") == Some(&Value::Bool(true)) {
+        " (extra-scope; coverage counts consumers in scope)"
+    } else {
+        ""
+    }
+}
+
 /// The rules of `rs` (allow, then deny when `with_deny`), those pending
 /// deletion left out.
 fn entries(rs: &RuleSet, deny: DenySide, with_deny: bool, idx: &NameIndex) -> Vec<Entry> {
@@ -230,7 +246,11 @@ fn entries(rs: &RuleSet, deny: DenySide, with_deny: bool, idx: &NameIndex) -> Ve
                 &r.ingress_services,
                 r.enabled,
                 idx,
-            ),
+            ) + if r.unscoped_consumers == Some(true) {
+                EXTRA_SCOPE
+            } else {
+                ""
+            },
             actors: RuleActors::of_rule(r),
             on: r.enabled && rs.enabled,
         })
@@ -252,7 +272,7 @@ fn entries(rs: &RuleSet, deny: DenySide, with_deny: bool, idx: &NameIndex) -> Ve
                     &d.ingress_services,
                     d.enabled,
                     idx,
-                ),
+                ) + deny_scope_note(d),
                 actors: RuleActors::of_deny(d),
                 on: d.enabled && rs.enabled,
             }
@@ -299,7 +319,10 @@ pub fn rules_section(i: &RuleInputs) -> Vec<RulesetImpact> {
         truncated: i.truncated,
     };
     let (a_in, d_in) = (side_inputs(i.active_index), side_inputs(i.draft_index));
-    let (a_inl, d_inl) = (inlines_deny(i.active), inlines_deny(i.draft));
+    // One PCE answers both lists: when either carries deny rules inline,
+    // an empty list on the other side means none there.
+    let inline = inlines_deny(i.active) || inlines_deny(i.draft);
+    let (a_inl, d_inl) = (inline, inline);
     let mut out = Vec::new();
     for href in pending_rulesets(i.pending) {
         let d = find(i.draft, &href).filter(|r| r.update_type.as_deref() != Some("delete"));
@@ -793,13 +816,13 @@ mod tests {
     }
 
     #[test]
-    fn deny_rules_a_list_does_not_carry_are_not_compared() {
+    fn deny_rules_neither_list_carries_are_not_compared() {
         let idx = index();
-        let mut a = active();
-        for rs in &mut a {
+        let (mut a, mut d) = (active(), draft());
+        for rs in a.iter_mut().chain(d.iter_mut()) {
             rs.deny_rules.clear();
         }
-        let (d, w, p) = (draft(), workloads(), pending());
+        let (w, p) = (workloads(), pending());
         let s = rules_section(&RuleInputs {
             pending: &p,
             draft: &d,
@@ -813,6 +836,60 @@ mod tests {
         assert!(!shop.deny_compared);
         assert!(shop.rules.iter().all(|r| r.kind == RuleKind::Allow));
         assert_eq!(coverage_text(&shop.rules[0], |i| i.providers), "≥1→≥1");
+    }
+
+    /// The PCE inlines deny rules but has none active: the first draft
+    /// deny rule is still compared (and added), not skipped as "kept
+    /// apart".
+    #[test]
+    fn a_first_deny_rule_is_added_when_the_active_list_holds_none() {
+        let idx = index();
+        let mut a = active();
+        for rs in &mut a {
+            rs.deny_rules.clear();
+        }
+        let (d, w, p) = (draft(), workloads(), pending());
+        let s = rules_section(&RuleInputs {
+            pending: &p,
+            draft: &d,
+            active: &a,
+            draft_index: &idx,
+            active_index: &idx,
+            workloads: &w,
+            truncated: false,
+        });
+        let shop = s.iter().find(|r| r.name == "Shop-Prod").unwrap();
+        assert!(shop.deny_compared);
+        let added: Vec<RuleKind> = shop
+            .rules
+            .iter()
+            .filter(|r| r.change == RuleChangeKind::Added)
+            .map(|r| r.kind)
+            .collect();
+        assert_eq!(added, [RuleKind::Deny, RuleKind::OverrideDeny]);
+    }
+
+    /// Rule 2 of Shop-Prod is extra-scope (`unscoped_consumers`): its text
+    /// says so, rule 1's (intra-scope) does not.
+    #[test]
+    fn extra_scope_rules_say_so_in_their_text() {
+        let s = section();
+        let shop = s.iter().find(|r| r.name == "Shop-Prod").unwrap();
+        let r2 = shop.rules.iter().find(|r| r.href.ends_with("/2")).unwrap();
+        assert!(r2.rule.ends_with(" (extra-scope)"), "{}", r2.rule);
+        assert!(r2.was.as_deref().unwrap().ends_with(" (extra-scope)"));
+        let r4 = shop.rules.iter().find(|r| r.href.ends_with("/4")).unwrap();
+        assert!(!r4.rule.contains("extra-scope"), "{}", r4.rule);
+        // A deny rule carrying the flag: marked, and said to be counted in
+        // scope (deny coverage keeps consumers to the scopes).
+        let mut d: pce::models::DenyRule = serde_json::from_value(json!({
+            "href": "/orgs/5/sec_policy/draft/rule_sets/100/deny_rules/9", "enabled": true,
+            "providers": [], "consumers": [], "ingress_services": [], "unscoped_consumers": true
+        }))
+        .unwrap();
+        assert!(deny_scope_note(&d).contains("extra-scope"));
+        d.extra.clear();
+        assert_eq!(deny_scope_note(&d), "");
     }
 
     #[test]

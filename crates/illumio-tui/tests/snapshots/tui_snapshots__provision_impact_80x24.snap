@@ -15,8 +15,8 @@ expression: out
 │    + allow all ← group:All prod envs All Services                            │
 │      providers -→- · consumers -→-                                           │
 │  Shop-Prod (update)                                                          │
-│    ~ allow role=web ← iplist:Corp 443/tcp, 8000-8099/tcp                     │
-│      was allow role=web ← role=db 443/tcp, 8000-8099/tcp                     │
+│    ~ allow role=web ← iplist:Corp 443/tcp, 8000-8099/tcp (extra-scope)       │
+│      was allow role=web ← role=db 443/tcp, 8000-8099/tcp (extra-scope)       │
 │      providers 1→1 · consumers 1→0                                           │
 │                                                                              │
 │Traffic · 1d · 4 flow records · 1 newly blocked · 1 newly allowed             │
