@@ -35,8 +35,8 @@
 //!
 //! `disabled`: the rule or its ruleset is off; `enabled`: both are on.
 //! `deny`: a deny or override deny rule; `allow`: an allow rule. `intra`,
-//! `extra`: an allow rule whose consumers are inside its ruleset's scope,
-//! or anywhere (`unscoped_consumers`); a deny rule is neither. A leading
+//! `extra`: a rule (allow or deny) whose consumers are inside its
+//! ruleset's scope, or anywhere (`unscoped_consumers`). A leading
 //! `-` keeps the rules a term does not match (`-deny`, `-scope:env=dev`,
 //! `-svc:443/tcp`): `-`, not `!`, which names an exclusion actor. A name
 //! with spaces is quoted (`ipl:"Any (0.0.0.0/0 and ::/0)"`). Pure: the
@@ -397,7 +397,7 @@ pub struct RuleRef<'a> {
     pub kind: RuleKind,
     pub enabled: bool,
     pub ruleset_enabled: bool,
-    /// Extra-scope (`unscoped_consumers`); never on a deny rule.
+    /// Extra-scope (`unscoped_consumers`), on an allow or a deny rule.
     pub unscoped_consumers: bool,
     pub scopes: &'a [Vec<Actor>],
     pub providers: &'a [Actor],
@@ -430,7 +430,7 @@ impl<'a> RuleRef<'a> {
             },
             enabled: d.enabled,
             ruleset_enabled: rs.enabled,
-            unscoped_consumers: false,
+            unscoped_consumers: d.unscoped_consumers.unwrap_or(false),
             scopes: &rs.scopes,
             providers: &d.providers,
             consumers: &d.consumers,
@@ -575,8 +575,8 @@ fn term_matches(t: &RuleTerm, r: &RuleRef, idx: &NameIndex, workloads: &[Workloa
         RuleTerm::Enabled => r.enabled && r.ruleset_enabled,
         RuleTerm::Deny => !allow,
         RuleTerm::Allow => allow,
-        RuleTerm::Intra => allow && !r.unscoped_consumers,
-        RuleTerm::Extra => allow && r.unscoped_consumers,
+        RuleTerm::Intra => !r.unscoped_consumers,
+        RuleTerm::Extra => r.unscoped_consumers,
         RuleTerm::Href(h) => r.href.contains(h.as_str()),
         RuleTerm::Label(term) => r.actors().any(|a| label_hit(a, term, idx)),
         RuleTerm::IpList(name) => r.actors().any(|a| ip_list_hit(a, name, idx)),
@@ -1217,10 +1217,8 @@ mod tests {
         assert_eq!(found("-disabled"), found("enabled"));
         assert_eq!(found("-allow"), found("deny"));
         assert_eq!(found("-src:all"), found("-href:deny_rules/8"));
-        assert_eq!(
-            found("-intra"),
-            ["deny_rules/8", "sec_rules/2", "deny_rules/7"]
-        );
+        // Not intra: the extra-scope rule only (the deny rules are intra).
+        assert_eq!(found("-intra"), ["sec_rules/2"]);
         // Terms AND, negated or not: app=shop rules, no deny, not intra.
         assert_eq!(found("app=shop -deny -intra"), ["sec_rules/2"]);
         let idx = index();
@@ -1239,21 +1237,24 @@ mod tests {
     #[test]
     fn rule_properties_intra_extra_enabled_allow() {
         // Rule 2 is extra-scope; 1, 3 and 4 intra (3 leaves the flag out).
-        assert_eq!(found("extra"), ["sec_rules/2"]);
+        assert_eq!(found("allow extra"), ["sec_rules/2"]);
         assert_eq!(
-            found("intra"),
+            found("allow intra"),
             ["sec_rules/1", "sec_rules/3", "sec_rules/4"]
         );
-        // Deny rules are neither.
+        // Deny rules are intra- or extra-scope as allow rules are: the
+        // fixture's carry no flag, so intra.
         assert!(found("deny extra").is_empty());
-        assert!(found("deny intra").is_empty());
-        // Even one that came with the flag set.
-        let sets = rule_sets();
-        let mut d = RuleRef::of_deny(&sets[0].deny_rules[0], &sets[0]);
-        d.unscoped_consumers = true;
-        for t in ["intra", "extra", "allow"] {
-            assert!(
-                !RuleFilter::parse(t).unwrap().matches(&d, &index(), &[]),
+        assert_eq!(found("deny intra").len(), 2);
+        // One that comes with the flag set is extra-scope.
+        let mut sets = rule_sets();
+        sets[0].deny_rules[0].unscoped_consumers = Some(true);
+        let d = RuleRef::of_deny(&sets[0].deny_rules[0], &sets[0]);
+        assert!(d.unscoped_consumers);
+        for (t, hit) in [("intra", false), ("extra", true), ("allow", false)] {
+            assert_eq!(
+                RuleFilter::parse(t).unwrap().matches(&d, &index(), &[]),
+                hit,
                 "{t}"
             );
         }

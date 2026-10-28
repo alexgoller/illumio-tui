@@ -127,6 +127,11 @@ pub struct DenyRule {
     pub ingress_services: Vec<IngressService>,
     #[serde(rename = "override", default)]
     pub override_: bool,
+    /// Extra-scope: the consumers may come from outside the ruleset's
+    /// scopes, as on an allow rule. Absent means intra-scope (`false`); kept
+    /// absent through a round trip, so nothing sent before changes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub unscoped_consumers: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub update_type: Option<String>,
 
@@ -237,6 +242,34 @@ pub fn parse_pending(v: Value) -> Vec<PendingChange> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A deny rule's `unscoped_consumers` is read; absent stays absent
+    /// through a round trip (nothing sent before changes), set stays set.
+    #[test]
+    fn deny_rule_extra_scope_round_trips() {
+        let with: DenyRule = serde_json::from_value(serde_json::json!({
+            "href": "/orgs/5/sec_policy/draft/rule_sets/1/deny_rules/2",
+            "unscoped_consumers": true, "override": false
+        }))
+        .unwrap();
+        assert_eq!(with.unscoped_consumers, Some(true));
+        assert!(!with.extra.contains_key("unscoped_consumers"));
+        assert_eq!(
+            serde_json::to_value(&with).unwrap()["unscoped_consumers"],
+            true
+        );
+        let without: DenyRule = serde_json::from_value(serde_json::json!({
+            "href": "/orgs/5/sec_policy/draft/rule_sets/1/deny_rules/3"
+        }))
+        .unwrap();
+        assert_eq!(without.unscoped_consumers, None);
+        assert!(
+            serde_json::to_value(&without)
+                .unwrap()
+                .get("unscoped_consumers")
+                .is_none()
+        );
+    }
 
     #[test]
     fn rule_sets_fixture_parses() {

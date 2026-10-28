@@ -554,7 +554,7 @@ impl RuleView {
                 .iter()
                 .map(|s| ResolvedService::from_ingress_service(s, idx))
                 .collect(),
-            unscoped_consumers: false,
+            unscoped_consumers: d.unscoped_consumers.unwrap_or(false),
             update_type: d.update_type.clone(),
         }
     }

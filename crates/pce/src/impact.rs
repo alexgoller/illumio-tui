@@ -197,12 +197,14 @@ impl RuleActors {
         }
     }
 
-    /// A deny rule's consumers are always scoped, and both sides resolve as
-    /// workloads.
+    /// A deny rule's sides: its consumers inside the scopes unless it is
+    /// extra-scope (`unscoped_consumers`, as an allow rule's); both sides
+    /// resolve as workloads.
     pub fn of_deny(d: &DenyRule) -> Self {
         Self {
             providers: d.providers.clone(),
             consumers: d.consumers.clone(),
+            unscoped_consumers: d.unscoped_consumers.unwrap_or(false),
             ..Self::default()
         }
     }
@@ -823,8 +825,14 @@ mod tests {
         assert_eq!(
             at(RuleActors::of_deny(&shop.deny_rules[1]), &shop.scopes),
             (1, 2),
-            "a deny rule's consumers stay inside the scope"
+            "an intra-scope deny rule's consumers stay inside the scope"
         );
+        // Extra-scope (`unscoped_consumers`), as an allow rule: its
+        // consumers anywhere, all four workloads.
+        let mut extra = shop.deny_rules[1].clone();
+        extra.unscoped_consumers = Some(true);
+        assert!(RuleActors::of_deny(&extra).unscoped_consumers);
+        assert_eq!(at(RuleActors::of_deny(&extra), &shop.scopes), (1, 4));
         let infra = &sets[1];
         assert_eq!(
             at(RuleActors::of_rule(&infra.rules[0]), &infra.scopes),

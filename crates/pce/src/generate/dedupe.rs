@@ -201,11 +201,7 @@ pub(crate) fn override_denied(
     let mut by = BTreeSet::new();
     for (f, count) in seen {
         let hit = denies.iter().find(|(rs, d)| {
-            let unscoped = d
-                .extra
-                .get("unscoped_consumers")
-                .and_then(serde_json::Value::as_bool)
-                .unwrap_or(false);
+            let unscoped = d.unscoped_consumers.unwrap_or(false);
             deny_service_matches(&d.ingress_services, &f.spec, idx)
                 && endpoint_in(&d.providers, &f.dst, in_scope(rs, &f.dst, idx), idx)
                 && endpoint_in(

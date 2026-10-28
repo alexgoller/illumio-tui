@@ -525,7 +525,7 @@ pub fn where_used(target: &Target, inputs: &Inputs) -> WhereUsed {
                 } else {
                     RuleKind::Deny
                 },
-                unscoped: false,
+                unscoped: d.unscoped_consumers.unwrap_or(false),
                 href: &d.href,
                 enabled: d.enabled,
                 pending: update(&d.update_type),
