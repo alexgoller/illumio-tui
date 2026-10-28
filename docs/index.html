@@ -857,17 +857,32 @@ workloads  removed         host-9.example</code></pre>
 
 <span class="p">$ </span>illumio-tui workloads --baseline-snapshot 2026-10-20 --health offline --changes changed --table
 <span class="p">$ </span>illumio-tui readiness --trend --table</code></pre>
-      <!-- real output: illumio-tui workloads --baseline-snapshot 2026-10-20 --health offline --changes changed --table -->
-      <!-- real output: illumio-tui readiness --trend --table -->
-      <p>Illustrative (made-up rows, not from the demo PCE):</p>
-<pre><code><span class="p">$ </span>illumio-tui readiness --trend --table
-readiness · 7d · 3 apps
-app                    workloads  enforcement     flows  conns in  conns out  would block  coverage  pending  verdict          warnings  trend
-──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-shop/Production        12         visibility 12   418    90211     12004      0            100.0%    2        needs provision            █▆▄▂▁▁
-crm/Production         6          visibility 6    233    40211     8801       1203         97.5%     0        needs rules                ▅▆█▅▄▄
-infra-mgmt/Production  2          selective 2     27     230341    32         0            100.0%    0        ready                      █▄▂▁▁▁
-demo · 25 api calls · 2301.4 KB · cache miss · 43120 ms</code></pre>
+      <p><code>--max-results</code> caps the one unfiltered read of the whole fleet, before any filter; a list cut by the cap judges nothing gone (<code>gone not judged: list cut at N</code>, <code>meta.compare.counts.gone</code> null), as a workload past the cap would read as gone.</p>
+      <p>On the demo PCE, right after a snapshot with readiness (so each app has two points, both the same, and nothing changed yet; trimmed to five apps):</p>
+<pre><code><span class="p">$ </span>illumio-tui workloads --baseline-snapshot latest --table
+(no rows)
+demo · 1 api call · 619.0 KB · cache miss · 746 ms · vs snapshot 10-28 00:33 · 0 new · 0 changed · 0 gone
+
+<span class="p">$ </span>illumio-tui readiness --trend --table
+readiness · 7d · 23 apps
+flows: unicast flow records · conns: their lifetime counts · coverage: draft-allowed or accepted conns
+app                     workloads  enforcement                flows  conns in  conns out  would block  coverage  pending  verdict      warnings     trend
+─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+ad/Production           4          selective 4                615    8635043   0          1669888      80.6%     3        needs rules               ██
+exchange/Production     6          selective 4 · unmanaged 2  97     1270093   983433     2050744      8.9%      3        needs rules  2 unmanaged  ██
+infra-mgmt/Production   2          selective 2                27     781563    0          73819        90.5%     2        needs rules               ██
+pos/PCI                 14         selective 14               498    6571528   2501786    2980293      67.1%     7        needs rules               ██
+soc/Production          2          selective 2                306    3066502   329004     372992       89.0%     3        needs rules               ██
+&hellip;
+demo · 24 api calls · 16302.5 KB · cache miss · 41724 ms · covers 7d</code></pre>
+      <p>A week with changes reads like this (<strong>illustrative</strong>: made-up rows; the demo PCE had none to show):</p>
+<pre><code><span class="p">$ </span>illumio-tui workloads --baseline-snapshot 2026-10-20 --changes new,changed --table
+hostname          name  ip            labels                                enforcement  online  agent   sync     heartbeat  health   href                             change   was
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+pay-web01                10.4.1.11     app=payment env=Production role=web   selective    true    active  applied  1m         healthy  /orgs/1/workloads/0b6c&hellip;   changed  app: crm→payment
+pay-db02                 10.4.1.22     app=payment env=Production role=db    selective    true    active  applied  1m         healthy  /orgs/1/workloads/7d21&hellip;   changed  mode: visibility→selective
+pay-api03                10.4.1.33     app=payment env=Production role=api   visibility   true    active  applied  2m         healthy  /orgs/1/workloads/a90e&hellip;   new
+demo · 1 api call · 619.0 KB · cache miss · 702 ms · vs snapshot 10-20 02:30 · 1 new · 2 changed · 0 gone</code></pre>
     </article>
 
     <article class="recipe" aria-labelledby="r-why-h">

@@ -1183,8 +1183,12 @@ other); a gone row carries the snapshot's values. `--changes` picks the rows pri
 both sides, as the app does: gone means no longer on the PCE, and a workload that moved out of
 the filter (`app=shop` then, `app=crm` now, with `--label app=shop`) is in neither side, not
 gone (with `--label app=crm` it is changed, `app: shop→crm`). A snapshot keeps no interfaces,
-so with `--ip` no row is gone. `meta.compare` names the snapshot (`snapshot`,
-`taken_at`, `label`, `changes`, `counts` of the rows the filters keep, `truncated`); the table
+so with `--ip` no row is gone. `--max-results` caps that one unfiltered read of the whole
+fleet, before any filter: a list cut by the cap judges nothing gone (a workload past the cap
+would read as gone), so no row is `gone`, `meta.compare.counts.gone` is `null`, and the meta
+line says `gone not judged: list cut at N` (the TUI's header too). `meta.compare` names the snapshot (`snapshot`,
+`taken_at`, `label`, `changes`, `counts` of the rows the filters keep, `truncated` (the
+snapshot's workloads were capped: new over-reports), `list_cut_at`); the table
 and CSV add `change` and `was` columns. A snapshot of another profile, PCE or org is refused
 (exit 2) before any request.
 
