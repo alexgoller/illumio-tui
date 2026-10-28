@@ -951,6 +951,22 @@ the full tab row (69 columns) the tabs read `Traf`, `Pol`, `Obj`, `Wl`, `Ev`.
   Marks survive filters, search, sort and `x`. With writes on, `L` sets labels and `M` the
   enforcement of the marked workloads, else of the group under the cursor (on its header),
   else of the row: see [Bulk labels and enforcement](#bulk-labels-and-enforcement).
+  **Compare with a snapshot.** `b` (`c` clears the filters here) picks a [snapshot](#snapshots)
+  of the profile that holds workloads, one at a time on the bottom line (newest first,
+  `latest` shown first; `←`/`→` older and newer, `Enter` compares, `Esc` leaves things as they
+  were), and compares the loaded list with it: no request, the file only. Each row gains a `Δ`
+  column, `NEW` (not in the snapshot), `CHG` or blank (the same), and a `was→now` column
+  naming what changed on a `CHG` row (`app: shop→cart · mode: visibility→selective · ven:
+  active→stopped · ven 23.2→23.5 · health: healthy→offline`; the detail pane has it in
+  full); a workload gone since is a dim `GONE` row with the snapshot's values (its health then).
+  The header reads `vs snapshot 10-20 06:00 · 3 new · 5 changed · 1 gone`, the counts of
+  the rows the filters keep; `n` shows only new, changed, gone, then all again, `C` leaves.
+  Every filter applies to both sides (a gone row by its values then), so `v` on offline with
+  `n` on changed lists the VENs newly offline; grouped, each header counts its changes
+  (`12 wl · 2 new 1 chg`). The VEN strip stays the fleet loaded now; `r` reloads the list and
+  compares it again. While comparing, `n` is the change filter (it creates a workload
+  otherwise); a gone row cannot be marked, edited or sent to Traffic. A snapshot of another
+  profile, PCE or org is refused, as `snapshot diff` refuses it.
 - **Events**: severity-coloured audit events, `f` edit severity / type / actor / window, `S` sort by
   severity. The Type field takes comma-separated terms, any of which keeps an event
   (`sec_policy, rule_set`); `!term` hides (`!user.login, !agent.update`), applied after the
@@ -1059,6 +1075,8 @@ the API call and byte counters at all times.
     illumio-tui snapshot save --label "before the Q4 change"
     illumio-tui snapshot diff --table
     illumio-tui snapshot diff latest now --section rulesets,workloads
+    illumio-tui workloads --baseline-snapshot latest --changes new,changed,gone --table
+    illumio-tui readiness --trend --table
     illumio-tui traffic mesh --window 1h --no-user --json
     illumio-tui traffic query --window 30d --dry-run
     illumio-tui traffic query --window 24h --backfill --json
@@ -1152,6 +1170,22 @@ newest, behind, no_version, enforcement, messages}` in `data`; CSV is one row pe
 
     illumio-tui workloads --health warning,error,offline --label env=prod
     illumio-tui workloads ven-summary --label env=prod --table
+
+`--baseline-snapshot latest|previous|TIMESTAMP` compares the listed workloads with a
+[snapshot](#snapshots)'s (among the profile's snapshots that hold workloads; a time's prefix is
+enough): the one list read as always, then the file, no other request. Rows gain `change`
+(`new`, `changed`, `gone`, `same`) and `was` (a changed row's transitions, `app: shop→cart ·
+mode: visibility→selective · ven: active→stopped · health: healthy→offline`; `null` on any
+other); a gone row carries the snapshot's values. `--changes` picks the rows printed, any of
+`new,changed,gone,same` (default `new,changed,gone`). The filters apply to both sides: the
+snapshot's workloads are checked against the same flags (a snapshot keeps no interfaces, so
+with `--ip` no row is gone); a workload the request's filters leave out now but the snapshot's
+had reads as gone from that selection. `meta.compare` names the snapshot (`snapshot`,
+`taken_at`, `label`, `changes`, `counts` of the rows the filters keep, `truncated`); the table
+and CSV add `change` and `was` columns. A snapshot of another profile, PCE or org is refused
+(exit 2) before any request.
+
+    illumio-tui workloads --baseline-snapshot latest --health offline --changes changed --table
 
 `--label` takes the app's label filter grammar, one term per flag (flags AND): `app=shop,crm`
 is any of the values. The plain terms go into the one list request as the PCE's `labels`
@@ -1538,6 +1572,13 @@ group and service, largest first), and its pending changes. `--table` prints the
 (and with `--app` the gaps and pending tables); `--csv` prints the apps table with full
 columns.
 
+`--trend` adds each app's road to enforcement: `trend: [{taken_at, verdict, gaps}]`, its
+verdict and gap count in the newest 14 of the profile's [snapshots](#snapshots) that kept
+readiness (`snapshot save --with-readiness`), oldest first, then the live result as the last
+point. It reads the files only (no request beyond readiness's own); snapshots of another PCE
+are skipped with a warning. The table adds a `trend` column, a sparkline of the gaps (two
+points at least); CSV the points (`2026-10-20T06:00:00Z needs_rules 12; …`).
+
 ### Snapshots
 
 The PCE keeps no history of its object lists. `illumio-tui snapshot save` keeps one locally, so
@@ -1617,6 +1658,15 @@ sends no mail. On the demo PCE a save is eight GETs and half a megabyte:
 `cache miss` is expected: the cache lives in memory for one run, so a CLI command reads each list
 once (the TUI's `:snapshot` reuses what its screens loaded). The full recipe, with an
 illustrative diff: https://alexgoller.github.io/illumio-tui/#recipes
+
+Snapshots are also the baseline of the screens without a time window: `workloads
+--baseline-snapshot latest` (and `b` on Workloads) compares the workloads and their VENs with
+a snapshot's, and `readiness --trend` (the `trend` column of `:readiness`) shows each app's
+gaps and verdict over the snapshots saved with `--with-readiness`. Save those nightly to have a
+trend:
+
+    30 2 * * * illumio-tui snapshot save --with-readiness --label nightly >/dev/null 2>>/var/tmp/snapshot.log
+    illumio-tui readiness --trend --table
 
 ### Exposure
 
@@ -2329,7 +2379,12 @@ be updated opens loudly with the record to keep). 5 Watch: `r` runs the blocked-
 a record already rolled back is refused. Opening either overlay sends nothing when the
 workloads, pending changes and draft rulesets are loaded (else one cached read each, counted
 in the header); after a write the steps re-evaluate from the reloaded data, and nothing
-refreshes by itself.
+refreshes by itself. With [snapshots](#snapshots) that kept readiness (`snapshot save
+--with-readiness`), `:readiness` adds a `trend` column: each app's gap count over the newest
+14 of them as a sparkline (`█▅▁▁`), each block in the colour of that snapshot's verdict
+(needs rules red, needs provision yellow, ready and enforced green); read from the files once,
+the first time the list opens, no request; nothing shows with fewer than two such snapshots.
+Snapshots of another PCE are skipped (the status line says so).
 
 ### Policy editing in the TUI
 
