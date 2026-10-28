@@ -1,0 +1,4 @@
+{
+  "description": "policy impact: what provisioning the draft would change (pending objects, rules and their coverage, traffic re-evaluated against the draft)",
+  "$ref": "#/$defs/provision_impact"
+}

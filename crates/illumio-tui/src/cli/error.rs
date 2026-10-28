@@ -1,6 +1,7 @@
 //! CLI errors and their exit codes: 1 generic, 2 arguments/config, 3 auth,
 //! 4 PCE error, 5 rate limited, 6 write refused, 7 blocked since an
-//! enforcement (`enforce --watch`), 8 a risky service exposed (`exposure
+//! enforcement (`enforce --watch`) or by the draft once provisioned
+//! (`policy impact --fail-on-blocked`), 8 a risky service exposed (`exposure
 //! --fail-on-exposed`), 9 snapshots differ (`snapshot diff
 //! --fail-on-change`); 141 stdout closed by its reader (quiet).
 use crate::config::ConfigError;
@@ -42,6 +43,10 @@ pub enum CliError {
     /// after the report.
     #[error("{0}")]
     Blocked(String),
+    /// `policy impact --fail-on-blocked` found flows the draft would newly
+    /// block: exit 7, after the report.
+    #[error("{0}")]
+    WouldBlock(String),
     /// `exposure --fail-on-exposed` found an exposed row: exit 8, after
     /// the report.
     #[error("{0}")]
@@ -77,7 +82,7 @@ impl CliError {
             CliError::Pce(_) | CliError::Incomplete(_) => 4,
             CliError::Bulk { code, .. } => *code,
             CliError::Refused(_) => 6,
-            CliError::Blocked(_) => 7,
+            CliError::Blocked(_) | CliError::WouldBlock(_) => 7,
             CliError::Exposed(_) => 8,
             CliError::Changed(_) => 9,
             CliError::Write(e) => write_exit_code(e),
@@ -103,6 +108,7 @@ impl CliError {
             CliError::Bulk { kind, .. } => (*kind).into(),
             CliError::Refused(_) => "write_refused".into(),
             CliError::Blocked(_) => "blocked_since_enforcement".into(),
+            CliError::WouldBlock(_) => "would_block".into(),
             CliError::Exposed(_) => "exposed".into(),
             CliError::Changed(_) => "snapshots_differ".into(),
             CliError::Marks(e) => match e {
@@ -183,6 +189,8 @@ mod tests {
             (b.exit_code(), b.kind().as_str()),
             (7, "blocked_since_enforcement")
         );
+        let w = CliError::WouldBlock("3 flows".into());
+        assert_eq!((w.exit_code(), w.kind().as_str()), (7, "would_block"));
         let e = CliError::Exposed("1 exposed".into());
         assert_eq!((e.exit_code(), e.kind().as_str()), (8, "exposed"));
         let c = CliError::Changed("3 changes".into());

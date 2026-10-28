@@ -20,6 +20,7 @@ pub mod objects;
 pub mod output;
 pub mod pairing_profiles;
 pub mod policy;
+pub mod policy_impact;
 pub mod profile;
 pub mod readiness;
 pub mod schema;

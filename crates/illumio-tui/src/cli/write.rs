@@ -5,6 +5,7 @@
 use super::context::Context;
 use super::error::CliError;
 use super::output::{TableRows, WriteMeta};
+use crate::provision_impact::ProvisionImpact;
 use crate::tokens::with_exclusion;
 pub use crate::tokens::{ActorToken, ServiceToken, is_href};
 pub(crate) use crate::tokens::{similar, with_similar};
@@ -88,12 +89,18 @@ pub enum WriteOutput {
         #[serde(flatten)]
         request: WriteRequest,
         counts: BTreeMap<String, usize>,
+        /// `--impact`: what provisioning the draft would change.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        impact: Option<Box<ProvisionImpact>>,
     },
     /// `policy provision --yes`: the new policy version and the counts.
     Provisioned {
         #[serde(flatten)]
         written: Written,
         counts: BTreeMap<String, usize>,
+        /// `--impact`: the summary computed before the request was sent.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        impact: Option<Box<ProvisionImpact>>,
     },
     /// `policy revert --yes`: the PCE's answer and the counts.
     Reverted {
@@ -178,12 +185,16 @@ impl TableRows for WriteOutput {
                 row("href", href.clone()),
                 row("reason", reason.clone()),
             ],
-            WriteOutput::ProvisionDryRun { request, counts } => {
+            WriteOutput::ProvisionDryRun {
+                request, counts, ..
+            } => {
                 let mut rows = request_rows(request);
                 rows.push(row("counts", counts_text(counts)));
                 rows
             }
-            WriteOutput::Provisioned { written, counts } => {
+            WriteOutput::Provisioned {
+                written, counts, ..
+            } => {
                 let mut rows = vec![
                     row("provisioned", written.href.clone()),
                     row("counts", counts_text(counts)),
@@ -210,12 +221,22 @@ impl TableRows for WriteOutput {
     }
 }
 
+/// `policy provision --impact`: the summary, computed after the guard and
+/// the plan and before anything is sent, and what its reads add to `meta`.
+pub struct ImpactOut {
+    pub report: ProvisionImpact,
+    /// A read behind it was cut short.
+    pub truncated: bool,
+    /// `meta.warnings` (printed to stderr as they were made).
+    pub warnings: Option<Vec<String>>,
+}
+
 /// What a write's output carries besides the request or the result.
 enum Extra {
     None,
     /// `policy provision` and `policy revert`: object counts from
-    /// `change_subset`.
-    Counts,
+    /// `change_subset`; with `--impact` the summary.
+    Counts(Option<Box<ImpactOut>>),
     /// `--impact` on a rule write, and whether its reads were truncated.
     Impact(Impact, bool),
 }
@@ -233,14 +254,16 @@ pub async fn run_plan(
 
 /// [`run_plan`] for `policy provision` and `policy revert`: the dry run
 /// and the result carry `counts` (object type to number of hrefs in
-/// `change_subset`).
+/// `change_subset`) and, from `policy provision --impact`, the summary
+/// (printed in front of the request in a table).
 pub async fn run_provision_plan(
     ctx: &Context,
     flags: &WriteFlags,
     guard: &WriteGuard,
     plan: Plan,
+    impact: Option<ImpactOut>,
 ) -> Result<(), CliError> {
-    send(ctx, flags, guard, plan, Extra::Counts).await
+    send(ctx, flags, guard, plan, Extra::Counts(impact.map(Box::new))).await
 }
 
 /// [`run_plan`] for a rule or deny-rule write: with an `impact` (from
@@ -267,7 +290,21 @@ async fn send(
     plan: Plan,
     extra: Extra,
 ) -> Result<(), CliError> {
-    let truncated = matches!(extra, Extra::Impact(_, true));
+    let mut truncated = matches!(extra, Extra::Impact(_, true));
+    let mut warnings = None;
+    let (extra, impact) = match extra {
+        Extra::Counts(Some(i)) => {
+            let ImpactOut {
+                report,
+                truncated: cut,
+                warnings: w,
+            } = *i;
+            truncated |= cut;
+            warnings = w;
+            (Extra::Counts(None), Some(Box::new(report)))
+        }
+        e => (e, None),
+    };
     let (request, kind) = match plan {
         Plan::Noop {
             existing_href,
@@ -285,15 +322,29 @@ async fn send(
         }
         Plan::Send { request, kind } => (request, kind),
     };
-    let counts = matches!(extra, Extra::Counts)
+    let counts = matches!(extra, Extra::Counts(_))
         .then(|| provision_counts(request.body.as_ref().unwrap_or(&serde_json::Value::Null)));
+    // The summary in front of the request (or the result) in a table.
+    if let (Some(report), super::output::OutputFormat::Table) = (&impact, ctx.format) {
+        let mut out = std::io::stdout().lock();
+        super::policy_impact::write_tables(
+            &mut out,
+            report,
+            crate::provision_impact::DEFAULT_PAIRS,
+        )?;
+        std::io::Write::write_all(&mut out, b"\n")?;
+    }
     if flags.dry_run {
         let out = match (extra, counts) {
             (Extra::Impact(impact, _), _) => WriteOutput::DryRunImpact { request, impact },
-            (_, Some(counts)) => WriteOutput::ProvisionDryRun { request, counts },
+            (_, Some(counts)) => WriteOutput::ProvisionDryRun {
+                request,
+                counts,
+                impact,
+            },
             _ => WriteOutput::DryRun(request),
         };
-        return ctx.emit_write_with(&out, None, truncated);
+        return ctx.emit_write_meta(&out, None, truncated, warnings);
     }
     let method = request.method;
     let path = request.path.clone();
@@ -315,10 +366,14 @@ async fn send(
                 (_, Some(counts)) if kind == ObjectKind::Revert => {
                     WriteOutput::Reverted { written: w, counts }
                 }
-                (_, Some(counts)) => WriteOutput::Provisioned { written: w, counts },
+                (_, Some(counts)) => WriteOutput::Provisioned {
+                    written: w,
+                    counts,
+                    impact,
+                },
                 _ => WriteOutput::Written(w),
             };
-            ctx.emit_write_with(&out, Some(meta), truncated)
+            ctx.emit_write_meta(&out, Some(meta), truncated, warnings)
         }
         Outcome::Skipped {
             existing_href,

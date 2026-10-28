@@ -50,6 +50,7 @@
           "additionalProperties": {"type": "integer"},
           "description": "changes per object type"
         },
+        "impact": {"$ref": "#/$defs/provision_impact", "description": "policy provision --impact: what provisioning the draft would change"},
         "body": {"$comment": "the request body as sent: any JSON"},
         "objects": {"type": "array", "items": {"type": "string"}}
       },
@@ -70,7 +71,8 @@
           "type": "object",
           "additionalProperties": {"type": "integer"},
           "description": "changes per object type"
-        }
+        },
+        "impact": {"$ref": "#/$defs/provision_impact", "description": "policy provision --impact: computed before the request was sent"}
       },
       "required": ["href", "pending", "status", "object", "dropped_fields", "warnings", "counts"],
       "additionalProperties": false,

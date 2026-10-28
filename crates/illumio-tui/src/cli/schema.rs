@@ -88,6 +88,7 @@ pub const COMMANDS: &[(&str, &str)] = &[
     ("policy search", "policy-search"),
     ("policy search --save-filter", "saved-filter"),
     ("policy pending", "policy-pending"),
+    ("policy impact", "policy-impact"),
     ("policy provision", "write"),
     ("policy revert", "write"),
     ("pairing-profiles list", "pairing-profiles"),
@@ -196,6 +197,10 @@ const FILES: &[(&str, &str)] = &[
     ("marks-list", include_str!("../../schemas/marks-list.json")),
     ("marks-rm", include_str!("../../schemas/marks-rm.json")),
     ("meta", include_str!("../../schemas/meta.json")),
+    (
+        "policy-impact",
+        include_str!("../../schemas/policy-impact.json"),
+    ),
     (
         "policy-pending",
         include_str!("../../schemas/policy-pending.json"),
@@ -598,6 +603,7 @@ pub fn schema_of(command: &Command) -> Option<&'static str> {
             P::DenyRules(_) | P::Provision(_) | P::Revert(_) => "write",
             P::Search(_) => "policy-search",
             P::Pending(_) => "policy-pending",
+            P::Impact(_) => "policy-impact",
         },
         Command::WhereUsed(_) => "where-used",
         Command::Hygiene(_) => "hygiene",

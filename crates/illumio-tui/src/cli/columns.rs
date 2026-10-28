@@ -218,6 +218,7 @@ pub fn csv_columns(command: &Command) -> Vec<&'static str> {
                 "href",
             ],
             P::Pending(_) => vec!["object_type", "change_type", "name", "href", "diff"],
+            P::Impact(_) => super::policy_impact::CSV_COLUMNS.to_vec(),
             P::Rulesets(_) | P::DenyRules(_) | P::Provision(_) | P::Revert(_) => Vec::new(),
         },
         Command::WhereUsed(_) => super::where_used::HEADERS.to_vec(),

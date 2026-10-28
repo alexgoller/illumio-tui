@@ -39,6 +39,23 @@ pub enum PolicyCmd {
     Search(SearchArgs),
     /// List changes waiting to be provisioned
     Pending(PendingArgs),
+    /// What provisioning the draft would change: pending objects, rules and their coverage,
+    /// traffic that would become blocked or allowed (read-only)
+    ///
+    /// Three sections. Changes: the pending objects by type and change type. Rules: per
+    /// pending ruleset its rules added, removed and changed (draft against active, by href),
+    /// each with the workloads it matches active → draft (providers 12→40 · consumers 3→3;
+    /// the active side through the active label groups and IP lists; - where not in force).
+    /// Traffic: one Explorer query over --window re-evaluated against the draft
+    /// (update_rules; it changes no policy): flow records reported → draft, and the app/env
+    /// group pairs that become blocked or potentially blocked (first), then allowed. The PCE
+    /// evaluates the whole draft, so this always covers everything pending. Requests: the
+    /// pending list; nothing else when nothing is pending; else the object lists, the draft
+    /// and active rulesets, active label groups and IP lists and one workloads read (all
+    /// cached; the rulesets, groups, lists and workloads only when a ruleset is pending), then
+    /// 1 POST, status polls, 1 PUT update_rules, polls, 1 download. --csv: the pair rows.
+    /// --fail-on-blocked: exit 7 when a flow would become blocked or potentially blocked
+    Impact(super::policy_impact::ImpactArgs),
     /// Provision pending changes (needs writes = true in the profile)
     Provision(ProvisionArgs),
     /// Revert pending changes to their active version; draft-only objects are deleted (needs writes = true in the profile)
@@ -418,6 +435,11 @@ pub struct ProvisionArgs {
     /// Description recorded with the new policy version
     #[arg(long)]
     pub description: Option<String>,
+    /// Also report what provisioning the draft would change (policy impact over the
+    /// profile's default window), computed after the plan and before anything is sent; in a
+    /// table it is printed in front of the request. It covers the whole draft, targets or not
+    #[arg(long)]
+    pub impact: bool,
     #[command(flatten)]
     pub write: WriteFlags,
 }
@@ -521,7 +543,7 @@ fn names<'a>(it: impl Iterator<Item = &'a str>) -> String {
 }
 
 /// `allow`, `deny`, `override_deny`, as in JSON.
-fn kind_text(kind: RuleKind) -> String {
+pub(crate) fn kind_text(kind: RuleKind) -> String {
     serde_json::to_value(kind)
         .ok()
         .and_then(|v| v.as_str().map(str::to_string))
@@ -667,6 +689,7 @@ pub async fn run(ctx: &Context, cmd: &PolicyCmd) -> Result<(), CliError> {
         },
         PolicyCmd::Search(a) => search(ctx, a).await,
         PolicyCmd::Pending(a) => pending(ctx, a).await,
+        PolicyCmd::Impact(a) => super::policy_impact::run(ctx, a).await,
         PolicyCmd::Provision(a) => provision(ctx, a).await,
         PolicyCmd::Revert(a) => revert(ctx, a).await,
     }
@@ -2013,7 +2036,36 @@ async fn provision(ctx: &Context, a: &ProvisionArgs) -> Result<(), CliError> {
         .plan_provision(&req)
         .await
         .map_err(|e| with_typed(e, &typed))?;
-    write::run_provision_plan(ctx, &a.write, &guard, plan).await
+    let impact = match plan.request() {
+        Some(req) if a.impact => Some(provision_impact(ctx, req, !a.all).await?),
+        _ => None,
+    };
+    write::run_provision_plan(ctx, &a.write, &guard, plan, impact).await
+}
+
+/// `policy provision --impact`: the summary over the profile's default
+/// window (the cost guard first), after the plan and before the send; with
+/// targets the request's hrefs mark the changes, and a warning says it
+/// covers the whole draft.
+async fn provision_impact(
+    ctx: &Context,
+    req: &pce::write::WriteRequest,
+    targets: bool,
+) -> Result<write::ImpactOut, CliError> {
+    use super::policy_impact::{fetch, impact_meta, impact_spec};
+    let requested = targets.then(|| {
+        crate::provision_impact::request_hrefs(
+            req.body.as_ref().unwrap_or(&serde_json::Value::Null),
+        )
+    });
+    let spec = impact_spec(ctx, None, false, requested)?;
+    let loaded = fetch(ctx, &spec).await?;
+    let meta = impact_meta(ctx, &loaded, &spec, targets);
+    Ok(write::ImpactOut {
+        report: loaded.report,
+        truncated: meta.truncated,
+        warnings: meta.warnings,
+    })
 }
 
 async fn revert(ctx: &Context, a: &RevertArgs) -> Result<(), CliError> {
@@ -2033,7 +2085,7 @@ async fn revert(ctx: &Context, a: &RevertArgs) -> Result<(), CliError> {
         .plan_revert(&req)
         .await
         .map_err(|e| with_typed(e, &typed))?;
-    write::run_provision_plan(ctx, &a.write, &guard, plan).await
+    write::run_provision_plan(ctx, &a.write, &guard, plan, None).await
 }
 
 #[cfg(test)]

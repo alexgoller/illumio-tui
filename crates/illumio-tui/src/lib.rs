@@ -5,6 +5,7 @@ pub mod config;
 pub mod filters;
 pub mod marks;
 pub mod names;
+pub mod provision_impact;
 pub mod rule_scope;
 pub mod snapshot;
 pub mod tokens;

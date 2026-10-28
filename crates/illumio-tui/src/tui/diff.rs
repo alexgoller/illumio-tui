@@ -221,7 +221,7 @@ pub fn diff_service(active: Option<&Service>, draft: Option<&Service>) -> Vec<Di
 
 /// The same object in both scopes: active hrefs differ from draft hrefs only
 /// by the `sec_policy/<scope>` segment.
-fn draft_href(href: &str) -> String {
+pub(crate) fn draft_href(href: &str) -> String {
     href.replacen("/sec_policy/active/", "/sec_policy/draft/", 1)
 }
 
@@ -332,7 +332,7 @@ fn yes_no(on: bool) -> &'static str {
 /// `allow role=web ← iplist:Corp 443/tcp`: kind, providers ← consumers,
 /// services, in the form's token grammar; ` (disabled)` when it is off.
 /// Unknown objects show their href, compared in draft form.
-fn rule_summary(
+pub(crate) fn rule_summary(
     kind: RuleKind,
     providers: &[Actor],
     consumers: &[Actor],
