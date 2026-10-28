@@ -328,6 +328,9 @@ pub(super) fn on_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
         Overlay::EventsEditor(e) => events_editor_key(model, e, k),
         Overlay::EventTypes { selected, actors } => event_types_key(model, selected, actors, k),
         Overlay::Ven { selected } => ven_key(model, selected, k),
+        Overlay::SnapshotPicker { items, selected } => {
+            wl_compare::picker_key(model, items, selected, k)
+        }
         Overlay::EventDetail { event, scroll, raw } => {
             // The renderer clamps to the last page; here only the top is a hard stop.
             let last = event_detail_lines(model, &event, raw).saturating_sub(1);

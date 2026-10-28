@@ -82,6 +82,9 @@ pub fn view(model: &Model, f: &mut Frame) {
             widgets::overlay::render_event_types(model, *selected, *actors, f, area)
         }
         Overlay::Ven { selected } => widgets::overlay::render_ven(model, *selected, f, area),
+        Overlay::SnapshotPicker { items, selected } => {
+            widgets::overlay::render_snapshot_picker(model, items, *selected, f, area)
+        }
         Overlay::EventDetail { event, scroll, raw } => {
             widgets::overlay::render_event_detail(model, event, *scroll, *raw, f, area)
         }

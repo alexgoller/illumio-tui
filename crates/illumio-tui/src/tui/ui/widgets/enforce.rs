@@ -1,6 +1,7 @@
 //! `:readiness` and the enforcement overlay, btop style. The readiness
 //! list is one table of apps; the enforcement overlay has its five steps
 //! down the left and the selected step's detail on the right.
+use crate::snapshot::baseline::{TrendPoint, sparkline};
 use crate::tui::enforce::{EnforceView, Missing, Step, Watch};
 use crate::tui::model::Model;
 use crate::tui::ui::theme::Theme;
@@ -129,7 +130,14 @@ pub fn render_readiness(model: &Model, f: &mut Frame, area: Rect) {
     };
     let longest = v.rows.iter().map(|r| Span::raw(&r.app).width()).max();
     let app_w = (longest.unwrap_or(3) + 2).clamp(10, 28);
-    let warn_w = w.saturating_sub(app_w + cols.width());
+    // The trend (#85): two snapshots with readiness at least; a block per
+    // snapshot and a gap, where it fits.
+    let trend = v.trend.as_ref().filter(|t| t.snapshots >= 2);
+    let trend_w = trend.map_or(0, |t| {
+        (t.snapshots.clamp(5, crate::snapshot::baseline::TREND_MAX) + 2)
+            .min(w.saturating_sub(app_w + cols.width()))
+    });
+    let warn_w = w.saturating_sub(app_w + cols.width() + trend_w);
     let mut header = format!(
         "{}{}{}",
         fit("app", app_w),
@@ -147,6 +155,9 @@ pub fn render_readiness(model: &Model, f: &mut Frame, area: Rect) {
         right("pend", 5),
         fit("  verdict", 16)
     ));
+    if trend_w > 0 {
+        header.push_str(&fit("trend", trend_w));
+    }
     if cols.mix {
         header.push_str(&fit("enforcement", 25));
     }
@@ -169,7 +180,8 @@ pub fn render_readiness(model: &Model, f: &mut Frame, area: Rect) {
     }
     let first = v.cursor.saturating_sub(height.saturating_sub(1));
     for (i, r) in shown.iter().enumerate().skip(first).take(height) {
-        let mut line = readiness_row(r, app_w, warn_w, cols, t);
+        let points = trend.and_then(|tr| tr.of(&r.app)).unwrap_or_default();
+        let mut line = readiness_row(r, app_w, warn_w, cols, (points, trend_w), t);
         if i == v.cursor {
             line = line.patch_style(Style::new().add_modifier(Modifier::REVERSED));
         }
@@ -187,6 +199,21 @@ pub fn render_readiness(model: &Model, f: &mut Frame, area: Rect) {
         )),
         rows[1],
     );
+}
+
+/// An app's trend in `w` cells: a block per snapshot (its gaps, scaled),
+/// in its verdict's colour, the newest last; cut from the oldest; padded.
+fn trend_spans<'a>(points: &[TrendPoint], w: usize, t: &Theme) -> Vec<Span<'a>> {
+    let room = w.saturating_sub(2);
+    let points = &points[points.len().saturating_sub(room)..];
+    let blocks = sparkline(&points.iter().map(|p| p.gaps).collect::<Vec<_>>());
+    let mut out: Vec<Span<'a>> = blocks
+        .into_iter()
+        .zip(points)
+        .map(|(b, p)| Span::styled(b.to_string(), verdict_style(p.verdict, t)))
+        .collect();
+    out.push(Span::raw(" ".repeat(w - points.len())));
+    out
 }
 
 /// The readiness table's optional columns.
@@ -210,6 +237,7 @@ fn readiness_row<'a>(
     app_w: usize,
     warn_w: usize,
     cols: Cols,
+    (points, trend_w): (&[TrendPoint], usize),
     t: &Theme,
 ) -> Line<'a> {
     let c = &r.coverage;
@@ -239,6 +267,9 @@ fn readiness_row<'a>(
             verdict_style(r.verdict, t),
         ),
     ];
+    if trend_w > 0 {
+        spans.extend(trend_spans(points, trend_w, t));
+    }
     if cols.mix {
         spans.push(Span::styled(
             fit(&r.workloads.enforcement.text(), 25),

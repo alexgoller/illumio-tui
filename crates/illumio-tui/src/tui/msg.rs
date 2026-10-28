@@ -15,6 +15,18 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio_util::sync::CancellationToken;
 
+/// A snapshot's workloads as the Workloads baseline (#85).
+#[derive(Debug, Clone, PartialEq)]
+pub struct WlBaseline {
+    /// The snapshot's id: its UTC time.
+    pub id: String,
+    pub taken_at: jiff::Timestamp,
+    pub label: Option<String>,
+    pub workloads: Vec<Workload>,
+    /// Its workloads read hit the row cap.
+    pub truncated: bool,
+}
+
 #[derive(Debug)]
 pub struct QueryOutcome {
     pub flows: Vec<ResolvedFlow>,
@@ -264,6 +276,14 @@ pub enum Msg {
     Exported(Result<String, String>),
     /// `:snapshot`'s file written (the status line text) or why not.
     SnapshotSaved(Result<String, String>),
+    /// `b` on Workloads (`Cmd::ListBaselines`): the profile's snapshots
+    /// that hold workloads, oldest first, or why they cannot be listed.
+    BaselinesListed(Result<Vec<crate::snapshot::SnapshotMeta>, String>),
+    /// The snapshot picked (`Cmd::LoadWlBaseline`): its workloads, or why
+    /// it cannot be the baseline (unreadable, another PCE's).
+    WlBaselineLoaded(Result<WlBaseline, String>),
+    /// `:readiness`'s trend (`Cmd::LoadTrend`): the snapshots' readiness.
+    TrendLoaded(Result<crate::snapshot::baseline::Trend, String>),
     /// A move from the enforcement overlay (`Cmd::EnforceApp`): the bulk
     /// report and its change record. Always arrives.
     EnforceDone(Box<crate::tui::enforce::EnforceOutcome>),
@@ -400,6 +420,22 @@ pub enum Cmd {
         /// The profile; the runtime adds its PCE's host, port and org.
         profile: String,
         label: Option<String>,
+    },
+    /// `b` on Workloads: the snapshots in `dir` that hold workloads.
+    /// Local only, never the PCE; answered with `Msg::BaselinesListed`.
+    ListBaselines {
+        dir: std::path::PathBuf,
+    },
+    /// The picked snapshot's workloads, checked to be of the profile's PCE.
+    /// Local only; answered with `Msg::WlBaselineLoaded`.
+    LoadWlBaseline {
+        path: std::path::PathBuf,
+        id: String,
+    },
+    /// `:readiness`: the readiness sections of the snapshots in `dir`.
+    /// Local only; answered with `Msg::TrendLoaded`.
+    LoadTrend {
+        dir: std::path::PathBuf,
     },
     /// Plan a write (one GET for IP lists, services and workloads; none for
     /// labels) and show it in the confirm overlay. Never sends a write.
@@ -709,6 +745,12 @@ impl PartialEq for Cmd {
                     fallback_deny: fb,
                 },
             ) => ca == cb && ka == kb && fa == fb,
+            (Cmd::ListBaselines { dir: a }, Cmd::ListBaselines { dir: b })
+            | (Cmd::LoadTrend { dir: a }, Cmd::LoadTrend { dir: b }) => a == b,
+            (
+                Cmd::LoadWlBaseline { path: pa, id: ia },
+                Cmd::LoadWlBaseline { path: pb, id: ib },
+            ) => pa == pb && ia == ib,
             _ => false,
         }
     }

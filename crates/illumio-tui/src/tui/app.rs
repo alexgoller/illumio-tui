@@ -743,6 +743,23 @@ impl Runtime {
                 let result = crate::tui::export::write(&path, force, &headers, &rows);
                 self.apply(Msg::Exported(result));
             }
+            // Synchronous and local: the snapshot files, never the PCE.
+            Cmd::ListBaselines { dir } => {
+                let result = crate::snapshot::list(&dir)
+                    .map(|all| crate::snapshot::baseline::with_workloads(&all))
+                    .map_err(|e| format!("{}: {e}", dir.display()));
+                self.apply(Msg::BaselinesListed(result));
+            }
+            Cmd::LoadWlBaseline { path, id } => {
+                let me = crate::snapshot::Identity::of(&self.model.profile.name, self.pce.client());
+                let result = wl_baseline(&path, &id, &me);
+                self.apply(Msg::WlBaselineLoaded(result));
+            }
+            Cmd::LoadTrend { dir } => {
+                let me = crate::snapshot::Identity::of(&self.model.profile.name, self.pce.client());
+                let result = crate::snapshot::baseline::load_trend(&dir, &me);
+                self.apply(Msg::TrendLoaded(result));
+            }
             Cmd::SaveSnapshot {
                 dir,
                 profile,
@@ -1734,6 +1751,29 @@ pub async fn run(global: GlobalArgs) -> Result<(), CliError> {
     ratatui::restore();
     let _ = result;
     Ok(())
+}
+
+/// The snapshot at `path` as the Workloads baseline: readable, of `me`'s
+/// PCE, with workloads. A file read, never a request.
+fn wl_baseline(
+    path: &std::path::Path,
+    id: &str,
+    me: &crate::snapshot::Identity,
+) -> Result<crate::tui::msg::WlBaseline, String> {
+    let s = crate::snapshot::load(path)?;
+    crate::snapshot::baseline::check_baseline(&s, id, me)?;
+    let truncated = s.truncated.iter().any(|t| t == "workloads");
+    let workloads = s
+        .sections
+        .workloads
+        .ok_or_else(|| format!("snapshot {id} has no workloads section: nothing to compare"))?;
+    Ok(crate::tui::msg::WlBaseline {
+        id: id.to_string(),
+        taken_at: s.taken_at,
+        label: s.label,
+        workloads,
+        truncated,
+    })
 }
 
 /// `:snapshot`'s task: the reads (cached), then the file; the status

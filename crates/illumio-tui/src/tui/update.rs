@@ -59,6 +59,7 @@ mod traffic;
 mod where_used;
 #[cfg(test)]
 mod where_used_tests;
+mod wl_compare;
 mod workloads;
 mod writes;
 
@@ -876,6 +877,18 @@ fn on_msg(model: &mut Model, msg: Msg) -> Vec<Cmd> {
             };
             Vec::new()
         }
+        Msg::BaselinesListed(result) => {
+            wl_compare::baselines_listed(model, result);
+            Vec::new()
+        }
+        Msg::WlBaselineLoaded(result) => {
+            wl_compare::baseline_loaded(model, result);
+            Vec::new()
+        }
+        Msg::TrendLoaded(result) => {
+            enforce::trend_loaded(model, result);
+            Vec::new()
+        }
         Msg::Exported(result) => {
             model.status = match result {
                 Ok(done) => StatusLine::info(done),
@@ -1298,5 +1311,7 @@ mod toggle_tests;
 mod ven_tests;
 #[cfg(test)]
 mod window_step_tests;
+#[cfg(test)]
+mod wl_compare_tests;
 #[cfg(test)]
 mod workload_group_tests;

@@ -6,7 +6,9 @@ use crate::tui::ui::theme::Theme;
 use crate::tui::ui::widgets::bars::age_text;
 use crate::tui::ui::widgets::panel::panel;
 use crate::tui::ui::widgets::table::{header_meta, render, render_spanning_spans};
-use crate::tui::wl_groups::{WlGroup, WlGroupRow, bar_counts, enforcement_text, health_text};
+use crate::tui::wl_groups::{
+    WlGroup, WlGroupRow, bar_counts, changes_text, enforcement_text, health_text,
+};
 use pce::models::{VenHealth, Workload};
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Rect};
@@ -129,6 +131,15 @@ fn render_table(model: &Model, f: &mut Frame, area: Rect) {
     if !sort_meta.is_empty() {
         meta = format!("{sort_meta} · {meta}");
     }
+    // Compare mode first: what the rows are against; narrow, with the
+    // row count only.
+    if let Some(c) = w.compare_meta() {
+        meta = if area.width < 100 {
+            format!("{c} · {shown}")
+        } else {
+            format!("{c} · {meta}")
+        };
+    }
     if w.filtered() && w.table.is_empty() && w.table.search_text().is_empty() {
         let note = if w.filters.is_empty() {
             "no unhealthy VENs · h shows all workloads"
@@ -178,8 +189,12 @@ fn render_table(model: &Model, f: &mut Frame, area: Rect) {
     });
 }
 
-/// A workload row's colour: its VEN health (idle enforcement as bad).
+/// A workload row's colour: its VEN health (idle enforcement as bad); a
+/// gone one (compare mode) dim.
 fn row_style(r: &WorkloadRowView, theme: &Theme) -> Style {
+    if crate::tui::model::wl_gone(r) {
+        return theme.dim_style();
+    }
     match r.health {
         VenHealth::Error | VenHealth::Offline => Style::new().fg(theme.bad),
         VenHealth::Warning => Style::new().fg(theme.warn),
@@ -235,8 +250,14 @@ fn name_text(g: &WlGroup, folded: bool) -> String {
     format!("{} {}", if folded { "▹" } else { "▾" }, g.title)
 }
 
+/// `12 wl`, and in compare mode its changes: `12 wl · 2 new 1 chg`.
 fn count_text(g: &WlGroup) -> String {
-    format!("{} wl", g.count())
+    let changes = changes_text(g);
+    if changes.is_empty() {
+        format!("{} wl", g.count())
+    } else {
+        format!("{} wl · {changes}", g.count())
+    }
 }
 
 /// A section header in `width` cells: `▾ shop | prod   12 wl  ███▒  10 ok
@@ -362,12 +383,22 @@ pub(crate) fn plain(s: &str) -> String {
 fn detail_lines(r: &WorkloadRowView) -> Vec<DetailLine> {
     let w = &r.workload;
     let a = w.agent_status_view();
-    let mut out = vec![
+    let mut out = Vec::new();
+    // Compare mode: the change in full (`was→now` is cut in the table).
+    if let Some(c) = &r.change {
+        let text = match c.change {
+            pce::traffic::Change::Changed => format!("changed · {}", c.was_text()),
+            pce::traffic::Change::Gone => "gone · only in the snapshot: its values".into(),
+            other => other.as_str().to_string(),
+        };
+        out.push((Some("change"), text));
+    }
+    out.extend([
         (Some("href"), w.href.clone()),
         (Some("os"), w.os_id.clone().unwrap_or_else(|| "-".into())),
         (Some("ven"), ven_detail(w, a.as_ref())),
         (Some("health"), health_detail(r)),
-    ];
+    ]);
     if let Some(a) = &a {
         let sync = a.sync_state.as_deref().unwrap_or("-");
         out.push((
@@ -579,6 +610,7 @@ mod tests {
             title: title.into(),
             health,
             enforcement: [members, 0, 0, 0],
+            changes: Default::default(),
             members: (0..members).map(|_| Arc::new(row(0, "full"))).collect(),
         })
     }

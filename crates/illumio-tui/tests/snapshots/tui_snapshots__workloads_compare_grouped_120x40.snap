@@ -1,0 +1,44 @@
+---
+source: crates/illumio-tui/tests/tui_snapshots.rs
+expression: out
+---
+ illumio-tui pce.example · org 5 ●                                                                api 5 calls · 20.8 KB
+  1 Traffic  │  2 Policy  │  3 Objects  │  4 Workloads  │  5 Events
+VEN 3 · healthy 1 · warning 1 · error 0 · offline 1 · unmanaged 1  ████████████████████████
+╭ Workloads by app | e vs snapshot 10-10 07:59 · 1 new · 2 changed · 2 gone · by size ↓ · 3 groups · 6 · cached 5s ago ╮
+│  Δ    was→now                             hostname               name     ip       labels   enforcement     health   │
+│  ▾ shop | prod           3 wl · 2 chg 1 gone  ██████████  2 ok · 1 offline          full 1 vis 2                     │
+│▸ CHG  app: crm→shop · mode: visibility→f… host-1.example         web01    10.0.1.1 role=web full            healthy  │
+│  CHG  ven: active→stopped · health: heal… host-2.example                  10.0.2.2 role=db  visibility_only offline  │
+│  GONE                                     gone-1.example         web01    10.0.1.1          visibility_only healthy  │
+│  ▾ (no app) | (no env)   2 wl · 1 new         ██████████  1 warning · 1 unmanaged   sel 1                            │
+│                                                                  unmanage 10.0.3.3          unmanaged       unmanaged│
+│  NEW                                      host-4.example         batch04  10.0.4.4          selective       warning  │
+│  ▾ crm | prod            1 wl · 1 gone        ██████████  1 ok                      vis 1                            │
+│  GONE                                     gone-2.example         web01    10.0.1.1          visibility_only healthy  │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+grouped: app,env                                            t/T traffic  x group  f labels  Enter detail  : cmd  ? help

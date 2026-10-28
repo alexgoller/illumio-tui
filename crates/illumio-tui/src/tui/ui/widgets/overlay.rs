@@ -175,6 +175,55 @@ pub fn render_baseline_prompt(model: &Model, input: &str, f: &mut Frame, area: R
     draw_length_prompt(model, "compare, baseline length: ", input, f, area);
 }
 
+/// `b` on Workloads: the snapshot shown of the profile's, on the bottom
+/// line: `compare with snapshot ◂ 10-27 03:15 before Q4 ▸ 1/3 · …`.
+pub fn render_snapshot_picker(
+    model: &Model,
+    items: &[crate::snapshot::SnapshotMeta],
+    selected: usize,
+    f: &mut Frame,
+    area: Rect,
+) {
+    let t = &model.theme;
+    let r = Rect::new(
+        area.x,
+        area.y + area.height.saturating_sub(1),
+        area.width,
+        1,
+    );
+    f.render_widget(Clear, r);
+    let Some(m) = items.get(selected) else {
+        return;
+    };
+    let when = m
+        .taken_at
+        .map(crate::snapshot::baseline::short_when)
+        .unwrap_or_else(|| m.id.clone());
+    let mut shown = when;
+    if selected == 0 {
+        shown.push_str(" (latest)");
+    }
+    if let Some(l) = &m.label {
+        shown.push_str(&format!(
+            " · {}",
+            crate::tui::ui::screens::workloads::plain(l)
+        ));
+    }
+    let line = Line::from(vec![
+        Span::styled("compare with snapshot ", t.header_style()),
+        Span::styled(format!("◂ {shown} ▸"), t.base()),
+        Span::styled(
+            format!(
+                "  {}/{} · ←/→ older/newer · Enter compare · Esc",
+                selected + 1,
+                items.len()
+            ),
+            t.dim_style(),
+        ),
+    ]);
+    f.render_widget(Paragraph::new(line).style(t.base()), r);
+}
+
 /// `N` in the generator: the same prompt, for "new since" (#81).
 pub fn render_gen_baseline_prompt(model: &Model, input: &str, f: &mut Frame, area: Rect) {
     draw_length_prompt(model, "new since, baseline length: ", input, f, area);

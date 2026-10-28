@@ -46,6 +46,7 @@ mod flows;
 mod objects;
 mod policy;
 mod traffic;
+mod wl_compare;
 mod workloads;
 
 pub use compare::*;
@@ -54,6 +55,7 @@ pub use flows::*;
 pub use objects::*;
 pub use policy::*;
 pub use traffic::*;
+pub use wl_compare::*;
 pub use workloads::*;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -259,6 +261,13 @@ pub enum Overlay {
     Ven {
         selected: usize,
     },
+    /// `b` on Workloads: the profile's snapshots that hold workloads,
+    /// newest first, one at a time on the bottom line; `selected` is the
+    /// one shown (`latest` first).
+    SnapshotPicker {
+        items: Vec<crate::snapshot::SnapshotMeta>,
+        selected: usize,
+    },
     /// The selected audit event as a change diff, or as pretty JSON when
     /// `raw` (`J` toggles); `scroll` is the first shown line.
     EventDetail {
@@ -405,6 +414,16 @@ impl PartialEq for Overlay {
                 },
             ) => a == b && x == y,
             (Overlay::Ven { selected: a }, Overlay::Ven { selected: b }) => a == b,
+            (
+                Overlay::SnapshotPicker {
+                    items: a,
+                    selected: sa,
+                },
+                Overlay::SnapshotPicker {
+                    items: b,
+                    selected: sb,
+                },
+            ) => a == b && sa == sb,
             (
                 Overlay::EventDetail {
                     event: a,

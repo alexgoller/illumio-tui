@@ -284,6 +284,10 @@ pub const HELP_GROUPS: &[HelpGroup] = &[
                 ":readiness",
                 "every app of the result: verdict, coverage, gaps",
             ),
+            more(
+                "",
+                "trend: gaps per snapshot with readiness, verdict colour",
+            ),
             key(
                 "Enter s / D",
                 "the app's steps · sort · search · draft decision",
@@ -480,6 +484,15 @@ pub const HELP_GROUPS: &[HelpGroup] = &[
                 "grouped: size ↓ · name A→Z · unhealthy ↓ · narrow",
             ),
             more("", "Enter on a header sets the label filter to its group"),
+            key(
+                "b / n / C",
+                "compare with a snapshot · all/new/changed/gone · off",
+            ),
+            more("", "Δ NEW CHG GONE, was→now; the snapshot file, no request"),
+            more(
+                "",
+                "filters apply to both sides; n creates when not comparing",
+            ),
         ],
     },
     HelpGroup {

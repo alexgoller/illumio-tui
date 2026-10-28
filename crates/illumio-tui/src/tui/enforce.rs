@@ -231,6 +231,9 @@ pub struct ReadinessView {
     pub cursor: usize,
     /// Requests this overlay sent (loads, `D`).
     pub requests: u32,
+    /// The readiness of the profile's snapshots (#85): read once, from the
+    /// files, the first time the list opens; `None` until then.
+    pub trend: Option<crate::snapshot::baseline::Trend>,
 }
 
 impl ReadinessView {

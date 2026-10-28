@@ -4,7 +4,7 @@
 //! unless folded. Built from the flat table's rows as shown (filters,
 //! label filter, search and sort applied), so the order within a section
 //! is the flat table's sort. Pure and local: never a request.
-use crate::tui::model::{WlRow, workload_columns};
+use crate::tui::model::{DELTA_COLUMN, TRANSITION_COLUMN, WlRow, wl_transition, workload_columns};
 use crate::tui::table::{Column, SortKey};
 use pce::label_filter::{group_title, value_of};
 use std::collections::{BTreeSet, HashMap};
@@ -64,6 +64,8 @@ pub struct WlGroup {
     pub health: [usize; 5],
     /// Workloads per [`ENFORCEMENT`] mode.
     pub enforcement: [usize; 4],
+    /// In compare mode: its rows per change against the snapshot.
+    pub changes: pce::traffic::CompareCounts,
     pub members: Vec<WlRow>,
 }
 
@@ -128,12 +130,16 @@ pub fn build_groups<'a>(
                     key: owned,
                     health: [0; 5],
                     enforcement: [0; 4],
+                    changes: Default::default(),
                     members: Vec::new(),
                 });
                 groups.len() - 1
             }
         };
         let g = &mut groups[i];
+        if let Some(c) = &r.change {
+            g.changes.add(c.change);
+        }
         g.health[usize::from(r.health.rank())] += 1;
         if let Some(e) = r.workload.enforcement()
             && let Some(j) = ENFORCEMENT.iter().position(|(m, _)| *m == e)
@@ -250,25 +256,77 @@ fn member_labels(r: &WlGroupRow) -> String {
 /// is left out (a test keeps them in step: `member_columns_read_the_member_cells`).
 pub fn member_columns(src: &[Column<WlRow>]) -> Vec<Column<WlGroupRow>> {
     src.iter()
-        .enumerate()
-        .take(CELLS.len())
-        .map(|(i, c)| Column {
-            title: c.title,
-            width: c.width,
-            cell: if c.title == "labels" {
-                member_labels
-            } else {
-                CELLS[i]
-            },
-            key: KEYS[i],
-            right: c.right,
-            hide_below: c.hide_below,
-            narrow: c.narrow.map(|_| NARROW[i]),
-            narrow_width: c.narrow_width,
-            full: c.full.map(|_| FULL[i]),
-            full_title: c.full_title,
+        .filter_map(|c| {
+            // Compare mode's columns (first) read the member's change.
+            let compare = |cell: Cell, key: Key, full: Option<Cell>| Column {
+                title: c.title,
+                width: c.width,
+                cell,
+                key,
+                right: c.right,
+                hide_below: c.hide_below,
+                narrow: None,
+                narrow_width: c.narrow_width,
+                full,
+                full_title: c.full_title,
+            };
+            match c.title {
+                DELTA_COLUMN => {
+                    return Some(compare(
+                        member_delta,
+                        |r| SortKey::Text(member_delta_full(r)),
+                        Some(member_delta_full),
+                    ));
+                }
+                TRANSITION_COLUMN => {
+                    return Some(compare(
+                        member_transition,
+                        |r| SortKey::Text(member_transition(r)),
+                        None,
+                    ));
+                }
+                _ => {}
+            }
+            let i = WL_COLUMNS
+                .iter()
+                .position(|w| w.title == c.title)
+                .filter(|&i| i < CELLS.len())?;
+            Some(Column {
+                title: c.title,
+                width: c.width,
+                cell: if c.title == "labels" {
+                    member_labels
+                } else {
+                    CELLS[i]
+                },
+                key: KEYS[i],
+                right: c.right,
+                hide_below: c.hide_below,
+                narrow: c.narrow.map(|_| NARROW[i]),
+                narrow_width: c.narrow_width,
+                full: c.full.map(|_| FULL[i]),
+                full_title: c.full_title,
+            })
         })
         .collect()
+}
+
+fn member_delta(r: &WlGroupRow) -> String {
+    r.member()
+        .and_then(|w| w.change.as_ref())
+        .map(|c| c.change.tag().to_string())
+        .unwrap_or_default()
+}
+
+fn member_delta_full(r: &WlGroupRow) -> String {
+    r.member()
+        .and_then(|w| w.change.as_ref())
+        .map(|c| c.change.as_str().to_string())
+        .unwrap_or_default()
+}
+
+fn member_transition(r: &WlGroupRow) -> String {
+    r.member().map(wl_transition).unwrap_or_default()
 }
 
 /// A header's VEN health in the order the bar draws it: ok, warning,
@@ -288,6 +346,18 @@ pub fn health_text(g: &WlGroup) -> String {
         .map(|(n, name)| format!("{n} {name}"))
         .collect::<Vec<_>>()
         .join(" · ")
+}
+
+/// In compare mode, `2 new 1 chg 1 gone`: the changes with rows (empty
+/// when none, or not comparing).
+pub fn changes_text(g: &WlGroup) -> String {
+    let c = &g.changes;
+    [(c.new, "new"), (c.changed, "chg"), (c.gone, "gone")]
+        .into_iter()
+        .filter(|(n, _)| *n > 0)
+        .map(|(n, w)| format!("{n} {w}"))
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 /// `full 8 vis 3 idle 1`: the modes with workloads.

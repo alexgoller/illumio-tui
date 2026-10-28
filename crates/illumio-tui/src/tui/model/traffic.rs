@@ -1174,7 +1174,7 @@ impl TrafficState {
             (delta_flow_column(), transition_flow_column()),
             cmp,
         );
-        fit_columns(&mut self.flows, cols, FLOW_TAKERS, flow_change);
+        fit_columns(&mut self.flows, cols, FLOW_TAKERS, flow_transition);
     }
 
     fn sync_flows_grouped_columns(&mut self) {
@@ -1193,7 +1193,12 @@ impl TrafficState {
             (delta_section_column(), transition_section_column()),
             cmp,
         );
-        fit_columns(&mut self.flows_grouped, cols, FLOW_TAKERS, section_change);
+        fit_columns(
+            &mut self.flows_grouped,
+            cols,
+            FLOW_TAKERS,
+            section_transition,
+        );
     }
 
     fn sync_pairs_columns(&mut self) {
@@ -1212,8 +1217,8 @@ impl TrafficState {
         let narrow: fn(&FlowGroup) -> String = |g| flows_cell_narrow(g.flows, g.marks.as_ref());
         marks_flows_column(&mut groups, on, narrow);
         marks_flows_column(&mut services, on, narrow);
-        fit_columns(&mut self.groups, groups, PAIR_TAKERS, group_change);
-        fit_columns(&mut self.services, services, PAIR_TAKERS, group_change);
+        fit_columns(&mut self.groups, groups, PAIR_TAKERS, group_transition);
+        fit_columns(&mut self.services, services, PAIR_TAKERS, group_transition);
     }
 
     fn sync_mesh_columns(&mut self) {
@@ -1223,7 +1228,7 @@ impl TrafficState {
             (delta_mesh_column(), transition_mesh_column()),
             cmp,
         );
-        fit_columns(&mut self.mesh, cols, MESH_TAKERS, mesh_change);
+        fit_columns(&mut self.mesh, cols, MESH_TAKERS, mesh_transition);
     }
 
     fn sync_apps_columns(&mut self) {
@@ -1234,7 +1239,7 @@ impl TrafficState {
             cmp,
         );
         marks_flows_column(&mut cols, on, section_flows_narrow);
-        fit_columns(&mut self.apps, cols, &[], section_change);
+        fit_columns(&mut self.apps, cols, &[], section_transition);
     }
 
     fn sync_blocked_columns(&mut self) {
@@ -1245,7 +1250,7 @@ impl TrafficState {
             cmp,
         );
         marks_flows_column(&mut cols, on, section_flows_narrow);
-        fit_columns(&mut self.blocked, cols, &[], section_change);
+        fit_columns(&mut self.blocked, cols, &[], section_transition);
     }
 
     /// App-to-app's pairs, and by service while `o` is on (none while off),

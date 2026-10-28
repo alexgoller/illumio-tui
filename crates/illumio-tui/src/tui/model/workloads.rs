@@ -46,6 +46,8 @@ pub struct WorkloadRowView {
     pub missing: Vec<String>,
     /// Marked for a bulk change.
     pub marked: MarkFlag,
+    /// In compare mode (`b`): the change against the snapshot.
+    pub change: Option<crate::snapshot::baseline::WlChange>,
 }
 
 impl WorkloadRowView {
@@ -68,6 +70,7 @@ impl WorkloadRowView {
             label_list: join_list(workload.label_entries(order)),
             missing: workload.missing_label_keys(order.first()),
             marked: MarkFlag::default(),
+            change: None,
             health,
             workload,
         }
@@ -452,6 +455,8 @@ pub struct WorkloadsState {
     pub keep_status: bool,
     /// `Esc` with many marks asked once (`Esc again clears N marks`).
     pub esc_armed: bool,
+    /// Compare mode (`b`): the snapshot the rows are compared with.
+    pub compare: Option<WlCompare>,
 }
 
 /// What `L` and `M` change: the marked workloads, else the group under
@@ -473,8 +478,11 @@ impl WorkloadsState {
     pub fn new(min_refresh: u64) -> Self {
         let columns = workload_columns();
         Self {
-            sections: TableView::new(member_columns(&columns)),
-            table: TableView::new(columns).with_matcher(workload_matches),
+            sections: TableView::new(member_columns(&columns))
+                .with_warn_cell(TRANSITION_COLUMN, |r| r.member().is_some_and(wl_changed)),
+            table: TableView::new(columns)
+                .with_matcher(workload_matches)
+                .with_warn_cell(TRANSITION_COLUMN, wl_changed),
             raw: Vec::new(),
             truncated: false,
             error: None,
@@ -500,6 +508,7 @@ impl WorkloadsState {
             marked: BTreeSet::new(),
             keep_status: false,
             esc_armed: false,
+            compare: None,
         }
     }
 
@@ -537,13 +546,21 @@ impl WorkloadsState {
                 .groups
                 .iter()
                 .find(|g| Some(&g.key) == key.as_ref())
-                .map(|g| g.members.iter().map(|m| m.workload.href.clone()).collect())
+                .map(|g| {
+                    g.members
+                        .iter()
+                        .filter(|m| !wl_gone(m))
+                        .map(|m| m.workload.href.clone())
+                        .collect()
+                })
                 .unwrap_or_default();
         }
+        // A gone row (compare mode) is no workload to change.
         let rows = self.table.rows();
         self.table
             .visible()
             .iter()
+            .filter(|&&i| !wl_gone(&rows[i]))
             .map(|&i| rows[i].workload.href.clone())
             .collect()
     }
@@ -601,7 +618,13 @@ impl WorkloadsState {
             return (ws, what, BulkSource::Marked);
         }
         if let Some(g) = self.selected_group() {
-            let ws = g.members.iter().map(|m| &m.workload).collect();
+            // A gone row (compare mode) is no workload to change.
+            let ws = g
+                .members
+                .iter()
+                .filter(|m| !wl_gone(m))
+                .map(|m| &m.workload)
+                .collect();
             return (ws, format!("group {}", g.title), BulkSource::Group);
         }
         match self.selected_row() {
@@ -625,7 +648,7 @@ impl WorkloadsState {
     /// `order`, and the sections from them while grouped.
     pub fn rebuild(&mut self, order: &KeyOrder) {
         let now = self.now.unwrap_or_else(jiff::Timestamp::now);
-        let views: Vec<WorkloadRowView> = self
+        let mut views: Vec<WorkloadRowView> = self
             .raw
             .iter()
             .cloned()
@@ -635,28 +658,89 @@ impl WorkloadsState {
         for v in &views {
             tally.add(&v.workload, v.health);
         }
+        // The strip is the fleet loaded now; the gone rows are the snapshot's.
         self.ven = tally.finish(self.truncated);
+        if let Some(c) = &self.compare {
+            let cmp = crate::snapshot::baseline::compare_workloads(
+                &self.raw,
+                now,
+                &c.workloads,
+                c.taken_at,
+            );
+            for v in &mut views {
+                v.change = cmp.of(&v.workload.href).cloned();
+            }
+            // Gone: the snapshot's values, its health then.
+            views.extend(cmp.gone.into_iter().map(|w| {
+                let mut v = WorkloadRowView::new(w, c.taken_at, order);
+                v.change = Some(crate::snapshot::baseline::WlChange::of(
+                    pce::traffic::Change::Gone,
+                ));
+                v
+            }));
+        }
         let unhealthy = |h: VenHealth| {
             matches!(
                 h,
                 VenHealth::Warning | VenHealth::Error | VenHealth::Offline
             )
         };
-        let rows = views
+        let rows: Vec<WlRow> = views
             .into_iter()
             .filter(|v| !self.unhealthy_only || unhealthy(v.health))
             .filter(|v| self.filters.keeps(v))
             .filter(|v| self.labels.keeps(&v.workload))
             .map(Arc::new)
             .collect();
+        // Compare mode: the counts are of the rows the filters keep; `n`
+        // then narrows to one change.
+        let rows = match self.compare.as_mut() {
+            Some(c) => {
+                let mut counts = pce::traffic::CompareCounts::default();
+                for r in &rows {
+                    if let Some(ch) = &r.change {
+                        counts.add(ch.change);
+                    }
+                }
+                c.counts = counts;
+                let c = &*c;
+                rows.into_iter().filter(|r| c.shows(wl_change(r))).collect()
+            }
+            None => rows,
+        };
         self.model_keys = order.first().to_vec();
-        let unlabeled = self.filters.unlabeled;
-        if (self.table.columns[MISSING_COL].hide_below == 0) != unlabeled {
-            let columns = workload_columns_for(unlabeled);
-            self.sections.set_columns(member_columns(&columns));
-            self.table.set_columns(columns);
-        }
         self.table.set_rows(rows);
+        let mut base = workload_columns_for(self.filters.unlabeled);
+        if self.comparing() {
+            // `Δ` and `was→now` take the room of the VEN's detail columns
+            // (the health stays): the heartbeat below 140, online, agent
+            // and sync below 180.
+            for c in &mut base {
+                let below = match c.title {
+                    "heartbeat" => 140,
+                    "online" | "agent" | "sync" => 180,
+                    _ => continue,
+                };
+                c.hide_below = c.hide_below.max(below);
+            }
+        }
+        let cols = with_delta(
+            base,
+            (wl_delta_column(), wl_transition_column()),
+            self.comparing(),
+        );
+        fit_columns(&mut self.table, cols, WL_TAKERS, wl_transition);
+        let member = member_columns(&self.table.columns);
+        let same = self.sections.columns.len() == member.len()
+            && self.sections.columns.iter().zip(&member).all(|(a, b)| {
+                a.title == b.title
+                    && a.width == b.width
+                    && a.narrow_width == b.narrow_width
+                    && a.hide_below == b.hide_below
+            });
+        if !same {
+            self.sections.set_columns(member);
+        }
         self.sync_marks();
         self.regroup();
     }
@@ -936,8 +1020,15 @@ impl WorkloadsState {
 
     /// `H`: worst health first; pressing it again flips the direction.
     pub fn sort_by_health(&mut self) {
-        let desc = self.table.sort() != Some((HEALTH_COL, true));
-        self.table.sort_by(HEALTH_COL, desc);
+        // By title: compare mode's columns come first.
+        let col = self
+            .table
+            .columns
+            .iter()
+            .position(|c| c.title == "health")
+            .unwrap_or(HEALTH_COL);
+        let desc = self.table.sort() != Some((col, true));
+        self.table.sort_by(col, desc);
         self.regroup();
     }
 }

@@ -207,7 +207,7 @@ pub(super) fn open_readiness(model: &mut Model) -> Vec<Cmd> {
         ..v
     });
     model.overlay = Overlay::Readiness;
-    let cmds = ensure_loads(model);
+    let mut cmds = ensure_loads(model);
     refresh(model);
     if let Some(v) = &model.readiness_view {
         model.status = StatusLine::info(format!(
@@ -216,7 +216,44 @@ pub(super) fn open_readiness(model: &mut Model) -> Vec<Cmd> {
             cmds.len()
         ));
     }
+    // The trend: the snapshot files, once (no request, not counted).
+    let unread = model
+        .readiness_view
+        .as_ref()
+        .is_some_and(|v| v.trend.is_none());
+    if unread && let Some(root) = &model.snapshots_root {
+        let dir = crate::snapshot::profile_dir(root, &model.profile.name);
+        cmds.push(Cmd::LoadTrend { dir });
+    }
     cmds
+}
+
+/// The snapshots' readiness read: the trend column (with two snapshots at
+/// least). A failure is said once; the list works without it.
+pub(super) fn trend_loaded(
+    model: &mut Model,
+    result: Result<crate::snapshot::baseline::Trend, String>,
+) {
+    let Some(v) = model.readiness_view.as_mut() else {
+        return;
+    };
+    match result {
+        Ok(t) => {
+            if !t.skipped.is_empty() {
+                model.status = StatusLine::warn(format!(
+                    "trend: {} snapshot{} skipped: {}",
+                    t.skipped.len(),
+                    if t.skipped.len() == 1 { "" } else { "s" },
+                    t.skipped[0]
+                ));
+            }
+            v.trend = Some(t);
+        }
+        Err(e) => {
+            v.trend = Some(Default::default());
+            model.status = StatusLine::warn(format!("trend: {e}"));
+        }
+    }
 }
 
 /// `:enforce <app>`: an app of the loaded result or one the labels know;

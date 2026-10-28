@@ -117,7 +117,7 @@ fn delta_full(c: Option<&RowChange>) -> String {
 pub const TRANSITION_COLUMN: &str = "was→now";
 
 /// The transition column's width at least: its title.
-const TRANSITION_MIN: u16 = 7;
+pub(super) const TRANSITION_MIN: u16 = 7;
 
 /// Whether a row is `CHG`: its transition cell is filled, in the warning
 /// colour.
@@ -265,13 +265,13 @@ pub(super) fn fit_columns<T>(
     table: &mut TableView<T>,
     mut cols: Vec<Column<T>>,
     takers: &[&str],
-    change: fn(&T) -> Option<&RowChange>,
+    transition: fn(&T) -> String,
 ) {
     if cols.iter().any(|c| c.title == TRANSITION_COLUMN) {
         let longest = table
             .rows()
             .iter()
-            .map(|r| transition_text(change(r)).chars().count())
+            .map(|r| transition(r).chars().count())
             .max()
             .unwrap_or(0)
             .min(u16::MAX as usize) as u16;
@@ -290,11 +290,28 @@ pub(super) fn fit_columns<T>(
             a.title == b.title
                 && a.width == b.width
                 && a.narrow_width == b.narrow_width
+                && a.hide_below == b.hide_below
                 && a.narrow.is_some() == b.narrow.is_some()
         });
     if !same {
         table.set_columns(cols);
     }
+}
+
+pub(super) fn flow_transition(r: &FlowRow) -> String {
+    transition_text(flow_change(r))
+}
+
+pub(super) fn section_transition(r: &SectionRow) -> String {
+    transition_text(section_change(r))
+}
+
+pub(super) fn group_transition(g: &FlowGroup) -> String {
+    transition_text(group_change(g))
+}
+
+pub(super) fn mesh_transition(r: &MeshRow) -> String {
+    transition_text(mesh_change(r))
 }
 
 pub(super) fn flow_change(r: &FlowRow) -> Option<&RowChange> {

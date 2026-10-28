@@ -84,7 +84,21 @@ pub(super) fn workload_filter_ref(
 pub(super) fn workloads_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
     let page = workloads_page(model);
     if !model.workloads.table.is_searching() {
+        if wl_compare::refuse_gone(model, k) {
+            return Vec::new();
+        }
         match k.code {
+            // Compare mode (#85): `c` clears the filters here, so `b` picks
+            // the snapshot; `n` and `C` as on Traffic.
+            KeyCode::Char('b') => return wl_compare::baseline_key(model),
+            KeyCode::Char('n') if model.workloads.comparing() => {
+                wl_compare::cycle_changes(model);
+                return Vec::new();
+            }
+            KeyCode::Char('C') => {
+                wl_compare::leave_compare(model);
+                return Vec::new();
+            }
             KeyCode::Char('r') => {
                 if model.index().is_none() {
                     if model.workloads.index_failed {
@@ -230,7 +244,10 @@ pub(super) fn workloads_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
 
 /// Changes the local filters with `change` and rebuilds the rows: the
 /// cursor stays on its workload while it is shown. No request.
-fn refilter(model: &mut Model, change: impl FnOnce(&mut crate::tui::model::WorkloadsState)) {
+pub(super) fn refilter(
+    model: &mut Model,
+    change: impl FnOnce(&mut crate::tui::model::WorkloadsState),
+) {
     let order = model.limits.key_order();
     let w = &mut model.workloads;
     let href = w.selected_row().map(|r| r.workload.href.clone());

@@ -261,6 +261,65 @@ pub fn model_with_workloads() -> Model {
     m
 }
 
+fn wl_label(k: &str, v: &str) -> pce::models::WorkloadLabel {
+    pce::models::WorkloadLabel {
+        href: format!("/orgs/5/labels/{k}-{v}"),
+        key: Some(k.into()),
+        value: Some(v.into()),
+    }
+}
+
+/// A Workloads baseline for `model_with_workloads` (#85), at 07:59 (the
+/// fixtures' clock is 08:00): host-1 then in crm and visibility_only,
+/// host-2's VEN active and healthy then, host-4 not there yet, and two
+/// workloads gone since (one in shop, one in crm).
+pub fn workloads_baseline() -> crate::tui::msg::WlBaseline {
+    let mut ws: Vec<pce::models::Workload> =
+        serde_json::from_str(include_str!("../../../../fixtures/workloads.json")).unwrap();
+    ws.pop();
+    for l in &mut ws[0].labels {
+        if l.key.as_deref() == Some("app") {
+            *l = wl_label("app", "crm");
+        }
+    }
+    ws[0].enforcement_mode = Some("visibility_only".into());
+    // host-2's VEN was active and healthy then (stopped and offline now).
+    ws[1].online = Some(true);
+    ws[1].agent = Some(serde_json::json!({"status": {
+        "status": "active",
+        "agent_version": "22.5.10-1",
+        "last_heartbeat_on": "2026-10-10T07:58:00Z",
+        "security_policy_sync_state": "applied",
+        "agent_health_errors": {"errors": [], "warnings": []}
+    }}));
+    for (i, app) in [(1, "shop"), (2, "crm")] {
+        let mut g = ws[0].clone();
+        g.href = format!("/orgs/5/workloads/gone-{i}");
+        g.hostname = Some(format!("gone-{i}.example"));
+        g.labels = vec![wl_label("app", app), wl_label("env", "prod")];
+        ws.push(g);
+    }
+    crate::tui::msg::WlBaseline {
+        id: "2026-10-10T075900Z".into(),
+        taken_at: "2026-10-10T07:59:00Z".parse().unwrap(),
+        label: Some("before".into()),
+        workloads: ws,
+        truncated: false,
+    }
+}
+
+/// `model_with_workloads` on Workloads, compared with
+/// [`workloads_baseline`] (#85): 1 new, 2 changed, 2 gone, 1 same.
+pub fn model_comparing_workloads() -> Model {
+    let mut m = model_with_workloads();
+    m.screen = Screen::Workloads;
+    crate::tui::update(
+        &mut m,
+        crate::tui::msg::Msg::WlBaselineLoaded(Ok(workloads_baseline())),
+    );
+    m
+}
+
 /// `model_with_workloads` and ten more labelled ones (copies of the two
 /// fixture VENs, healthy and offline) in `crm | prod`, `crm | dev`, `shop
 /// | dev` and `pay | prod`: enough groups for the grouped view (`x`).

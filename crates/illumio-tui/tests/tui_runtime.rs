@@ -3865,3 +3865,66 @@ async fn snapshot_reads_each_list_once_and_reports_the_file() {
     );
     assert_eq!(s.sections.workloads.unwrap().len(), 4);
 }
+
+/// #85: `b` on Workloads compares the loaded list with a snapshot: the
+/// files are read, never the PCE (health, the index's four lists and the
+/// one workloads read only). Another PCE's snapshot is refused; the one
+/// before it is compared.
+#[tokio::test]
+async fn workloads_compare_reads_the_snapshot_files_only() {
+    use illumio_tui::snapshot::{self, Sections, Snapshot, VERSION};
+    let server = MockServer::start().await;
+    mount_objects(&server).await;
+    mount_workloads(&server, 1).await;
+    let root = tempfile::tempdir().unwrap();
+    let dir = root.path().join("t");
+    let url = url::Url::parse(&server.uri()).unwrap();
+    let mut ws: Vec<pce::models::Workload> =
+        serde_json::from_str(include_str!("../../../fixtures/workloads.json")).unwrap();
+    ws.pop();
+    ws[0].enforcement_mode = Some("idle".into());
+    let ours = Snapshot {
+        version: VERSION,
+        profile: "t".into(),
+        pce: format!("{}:{}", url.host_str().unwrap(), url.port().unwrap()),
+        org: 5,
+        taken_at: jiff::Timestamp::now() - jiff::SignedDuration::from_hours(2),
+        label: None,
+        truncated: Vec::new(),
+        sections: Sections {
+            workloads: Some(ws.into_iter().map(snapshot::trim_workload).collect()),
+            ..Sections::default()
+        },
+    };
+    snapshot::save(&dir, &ours).unwrap();
+    let other = Snapshot {
+        pce: "other.example:8443".into(),
+        taken_at: jiff::Timestamp::now() - jiff::SignedDuration::from_hours(1),
+        ..ours.clone()
+    };
+    snapshot::save(&dir, &other).unwrap();
+    let mut m = model();
+    m.snapshots_root = Some(root.path().to_path_buf());
+    let keys = vec![
+        (400, ch('4')),
+        (400, ch('b')),
+        // `latest`: the other PCE's, refused.
+        (50, KeyCode::Enter),
+        (50, ch('b')),
+        (50, KeyCode::Left),
+        (50, KeyCode::Enter),
+        (50, ch('n')),
+        (200, ch('q')),
+    ];
+    let m = key_session(&server, m, None, keys).await;
+    assert_eq!(m.stats.calls, 1 + 4 + 1, "health, the index, the workloads");
+    let c = m.workloads.compare.as_ref().expect("compare mode on");
+    assert_eq!(c.id, snapshot::id_for(ours.taken_at));
+    assert_eq!(
+        (c.counts.new, c.counts.changed, c.counts.gone),
+        (1, 1, 0),
+        "host-4 new, host-1 idle then"
+    );
+    assert_eq!(c.show, illumio_tui::tui::model::ShowChanges::New);
+    server.verify().await;
+}

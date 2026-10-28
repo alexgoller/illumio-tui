@@ -3739,3 +3739,139 @@ fn hygiene_overlay_120x40_80x24_and_loading() {
     }
     insta::assert_snapshot!("hygiene_overlay_warnings_120x40", out);
 }
+
+/// #85: Workloads compared with a snapshot: `Δ` and `was→now` first, the
+/// header names the snapshot and the counts, gone rows dim.
+#[test]
+fn workloads_compare_80x24_and_160x48() {
+    use illumio_tui::tui::test_support as ts;
+    let m = ts::model_comparing_workloads();
+    let out = render_to_string(&m, 80, 24);
+    for s in [
+        "vs snapshot 10-10 07:59 · 1 new · 2 changed · 2 gone",
+        "Δ",
+        "was→now",
+        "CHG",
+        "NEW",
+        "GONE",
+    ] {
+        assert!(out.contains(s), "missing {s:?}:\n{out}");
+    }
+    insta::assert_snapshot!("workloads_compare_80x24", out);
+    // Wide: the transitions as far as they fit; the detail has them all.
+    let mut m = m;
+    gen_key(&mut m, 'j');
+    illumio_tui::tui::update(
+        &mut m,
+        illumio_tui::tui::msg::Msg::Key(crossterm::event::KeyEvent::new(
+            crossterm::event::KeyCode::Enter,
+            crossterm::event::KeyModifiers::NONE,
+        )),
+    );
+    let wide = render_to_string(&m, 160, 48);
+    assert!(wide.contains("app: crm→shop · mode: visibility"), "{wide}");
+    assert!(
+        wide.contains("change  changed · ven: active→stopped · health: healthy→offline"),
+        "{wide}"
+    );
+    insta::assert_snapshot!("workloads_compare_160x48", wide);
+    insta::assert_snapshot!("workloads_compare_styled_80x24", render_styled(&m, 80, 24));
+}
+
+/// #85: grouped, each header counts its changes; `n` narrows (`· gone
+/// only`).
+#[test]
+fn workloads_compare_grouped_120x40_and_gone_only_80x24() {
+    use illumio_tui::tui::test_support as ts;
+    let mut m = ts::model_comparing_workloads();
+    gen_key(&mut m, 'x');
+    let out = render_to_string(&m, 120, 40);
+    assert!(out.contains("wl · 2 chg 1 gone"), "{out}");
+    insta::assert_snapshot!("workloads_compare_grouped_120x40", out);
+    gen_key(&mut m, 'x');
+    for _ in 0..3 {
+        gen_key(&mut m, 'n');
+    }
+    let out = render_to_string(&m, 80, 24);
+    assert!(out.contains("· gone only"), "{out}");
+    insta::assert_snapshot!("workloads_compare_gone_only_80x24", out);
+}
+
+/// #85: `b`'s picker, one snapshot at a time on the bottom line.
+#[test]
+fn workloads_snapshot_picker_80x24() {
+    use illumio_tui::snapshot::SnapshotMeta;
+    use illumio_tui::tui::model::Overlay;
+    let mut m = model_with_workloads();
+    m.screen = Screen::Workloads;
+    let meta = |id: &str, at: &str, label: Option<&str>| SnapshotMeta {
+        id: id.into(),
+        path: format!("/data/{id}.json").into(),
+        bytes: 1,
+        version: Some(1),
+        taken_at: Some(at.parse().unwrap()),
+        label: label.map(str::to_string),
+        sections: vec!["workloads"],
+        problem: None,
+    };
+    m.overlay = Overlay::SnapshotPicker {
+        items: vec![
+            meta(
+                "2026-10-27T031500Z",
+                "2026-10-27T03:15:00Z",
+                Some("before Q4"),
+            ),
+            meta("2026-10-20T031500Z", "2026-10-20T03:15:00Z", None),
+        ],
+        selected: 0,
+    };
+    let out = render_to_string(&m, 80, 24);
+    assert!(
+        out.contains("compare with snapshot ◂ 10-27 03:15 (latest) · before Q4 ▸"),
+        "{out}"
+    );
+    insta::assert_snapshot!("workloads_snapshot_picker_80x24", out);
+}
+
+/// #85: `:readiness` with the snapshots' trend: a sparkline of the gaps
+/// per app, coloured by verdict; nothing with fewer than two snapshots.
+#[test]
+fn readiness_trend_120x40_and_80x24() {
+    use illumio_tui::snapshot::baseline::{Trend, TrendPoint};
+    use illumio_tui::tui::commands::Command;
+    use pce::readiness::Verdict;
+    let mut m = enforce_model();
+    command(&mut m, Command::Readiness);
+    let point = |day: u32, verdict, gaps| TrendPoint {
+        taken_at: format!("2026-10-{day:02}T03:00:00Z").parse().unwrap(),
+        verdict,
+        gaps,
+    };
+    let mut t = Trend {
+        snapshots: 1,
+        ..Trend::default()
+    };
+    t.apps
+        .insert("shop/prod".into(), vec![point(20, Verdict::NeedsRules, 12)]);
+    m.readiness_view.as_mut().unwrap().trend = Some(t.clone());
+    let one = render_to_string(&m, 120, 40);
+    assert!(!one.contains("trend"), "one snapshot: no trend\n{one}");
+    t.snapshots = 4;
+    t.apps.insert(
+        "shop/prod".into(),
+        vec![
+            point(6, Verdict::NeedsRules, 12),
+            point(13, Verdict::NeedsRules, 6),
+            point(20, Verdict::NeedsProvision, 0),
+            point(27, Verdict::Ready, 0),
+        ],
+    );
+    m.readiness_view.as_mut().unwrap().trend = Some(t);
+    let wide = render_to_string(&m, 120, 40);
+    assert!(wide.contains("trend"), "{wide}");
+    assert!(wide.contains("█▅▁▁"), "{wide}");
+    insta::assert_snapshot!("readiness_trend_120x40", wide);
+    let narrow = render_to_string(&m, 80, 24);
+    insta::assert_snapshot!("readiness_trend_80x24", narrow);
+    insta::assert_snapshot!("readiness_trend_styled_80x24", render_styled(&m, 80, 24));
+}
