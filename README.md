@@ -962,8 +962,9 @@ the full tab row (69 columns) the tabs read `Traf`, `Pol`, `Obj`, `Wl`, `Ev`.
   The header reads `vs snapshot 10-20 06:00 · 3 new · 5 changed · 1 gone`, the counts of
   the rows the filters keep; `n` shows only new, changed, gone, then all again, `C` leaves.
   Every filter applies to both sides (a gone row by its values then), so `v` on offline with
-  `n` on changed lists the VENs newly offline; grouped, each header counts its changes
-  (`12 wl · 2 new 1 chg`). The VEN strip stays the fleet loaded now; `r` reloads the list and
+  `n` on changed lists the VENs newly offline; grouped, each header counts the workloads
+  there now and their changes, the gone ones apart (`12 wl · 2 new 1 chg · 1 gone`; health
+  and enforcement are of what is there now). The VEN strip stays the fleet loaded now; `r` reloads the list and
   compares it again. While comparing, `n` is the change filter (it creates a workload
   otherwise); a gone row cannot be marked, edited or sent to Traffic. A snapshot of another
   profile, PCE or org is refused, as `snapshot diff` refuses it.
@@ -1173,14 +1174,16 @@ newest, behind, no_version, enforcement, messages}` in `data`; CSV is one row pe
 
 `--baseline-snapshot latest|previous|TIMESTAMP` compares the listed workloads with a
 [snapshot](#snapshots)'s (among the profile's snapshots that hold workloads; a time's prefix is
-enough): the one list read as always, then the file, no other request. Rows gain `change`
+enough): one unfiltered list read (the read `snapshot save` makes), then the file, no other
+request. Rows gain `change`
 (`new`, `changed`, `gone`, `same`) and `was` (a changed row's transitions, `app: shop→cart ·
 mode: visibility→selective · ven: active→stopped · health: healthy→offline`; `null` on any
 other); a gone row carries the snapshot's values. `--changes` picks the rows printed, any of
-`new,changed,gone,same` (default `new,changed,gone`). The filters apply to both sides: the
-snapshot's workloads are checked against the same flags (a snapshot keeps no interfaces, so
-with `--ip` no row is gone); a workload the request's filters leave out now but the snapshot's
-had reads as gone from that selection. `meta.compare` names the snapshot (`snapshot`,
+`new,changed,gone,same` (default `new,changed,gone`). Every filter is applied locally, to
+both sides, as the app does: gone means no longer on the PCE, and a workload that moved out of
+the filter (`app=shop` then, `app=crm` now, with `--label app=shop`) is in neither side, not
+gone (with `--label app=crm` it is changed, `app: shop→crm`). A snapshot keeps no interfaces,
+so with `--ip` no row is gone. `meta.compare` names the snapshot (`snapshot`,
 `taken_at`, `label`, `changes`, `counts` of the rows the filters keep, `truncated`); the table
 and CSV add `change` and `was` columns. A snapshot of another profile, PCE or org is refused
 (exit 2) before any request.
@@ -1574,8 +1577,10 @@ columns.
 
 `--trend` adds each app's road to enforcement: `trend: [{taken_at, verdict, gaps}]`, its
 verdict and gap count in the newest 14 of the profile's [snapshots](#snapshots) that kept
-readiness (`snapshot save --with-readiness`), oldest first, then the live result as the last
-point. It reads the files only (no request beyond readiness's own); snapshots of another PCE
+readiness (`snapshot save --with-readiness`), oldest first (an unreadable one or another
+PCE's is skipped and an older one taken), then the live result as the last point when it is
+judged on the same basis (7d, the draft; with `--window 24h` it is left out, a warning says
+`live point left out: window 1d differs from the snapshots' 7d`). It reads the files only (no request beyond readiness's own); snapshots of another PCE
 are skipped with a warning. The table adds a `trend` column, a sparkline of the gaps (two
 points at least); CSV the points (`2026-10-20T06:00:00Z needs_rules 12; …`).
 
@@ -2382,8 +2387,9 @@ in the header); after a write the steps re-evaluate from the reloaded data, and 
 refreshes by itself. With [snapshots](#snapshots) that kept readiness (`snapshot save
 --with-readiness`), `:readiness` adds a `trend` column: each app's gap count over the newest
 14 of them as a sparkline (`█▅▁▁`), each block in the colour of that snapshot's verdict
-(needs rules red, needs provision yellow, ready and enforced green); read from the files once,
-the first time the list opens, no request; nothing shows with fewer than two such snapshots.
+(needs rules red, needs provision yellow, ready and enforced green); read from the files each
+time the list opens (a local listing, no request); nothing shows with fewer than two such
+snapshots, nor for an app with fewer than two points.
 Snapshots of another PCE are skipped (the status line says so).
 
 ### Policy editing in the TUI
