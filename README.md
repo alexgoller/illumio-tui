@@ -774,7 +774,8 @@ the full tab row (69 columns) the tabs read `Traf`, `Pol`, `Obj`, `Wl`, `Ev`.
 - **Policy**: `d` toggle draft / active, `p` pending changes (`Enter` on one shows its diff against active), `Tab` switch panes, `Enter` rule
   detail, or on a ruleset load its deny rules. Rules are listed in evaluation order: override
   deny, allow, deny; the allow rules intra-scope first, then extra-scope (the `scope` column,
-  counted in the pane's title bar, `3 intra · 1 extra`). With writes on, `n` / `e` / `x` create, edit and delete rulesets and rules
+  for deny rules too, which can be extra-scope as well; counted in the pane's title bar,
+  `3 intra · 1 extra`). With writes on, `n` / `e` / `x` create, edit and delete rulesets and rules
   in draft (`N` a deny rule), `t` enables or disables the selected rule (allow or deny) or
   ruleset (a draft change; disabled ones show dimmed with `✗`), and the pending overlay marks
   with `Space`, provisions with `P` and reverts the marked changes with `R`. `I` in the
@@ -805,8 +806,8 @@ the full tab row (69 columns) the tabs read `Traf`, `Pol`, `Obj`, `Wl`, `Ev`.
   and service objects that hold it, protocol-only entries such as all TCP ports included),
   `svc:tcp` / `svc:udp` / `svc:icmp` / `svc:icmpv6` (any entry of that protocol), `wl:web01` (a
   workload actor, named from the cached workloads: press `i` first), `href:sec_rules/9`,
-  `disabled`, `enabled`, `deny`, `allow`, `intra` / `extra` (an allow rule's consumers inside
-  its ruleset's scope or anywhere; deny rules are neither). A label term without a prefix looks
+  `disabled`, `enabled`, `deny`, `allow`, `intra` / `extra` (a rule's consumers, allow or deny,
+  inside its ruleset's scope or anywhere: `unscoped_consumers`). A label term without a prefix looks
   anywhere; `scope:` looks in the ruleset's scopes only (`scope:global`: a scope without
   labels), `src:` (or `consumer:`) in the consumers, `dst:` (or `provider:`) in the providers,
   and those two also take `ipl:NAME`, `wl:NAME` and `all` (All Workloads); a deny rule's scope
