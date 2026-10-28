@@ -178,19 +178,26 @@ fn the_trend_reads_the_newest_readiness_sections_per_app() {
     other.sections.readiness = Some(readiness(&[("shop/prod", "ready", 0)]));
     save(dir.path(), &other).unwrap();
     let t = load_trend(dir.path(), &me()).unwrap();
-    // The newest 14 holding readiness: the other PCE's was one of them.
-    assert_eq!(t.snapshots, TREND_MAX - 1);
+    // The newest 14 usable: the other PCE's is skipped, an older one
+    // takes its place.
+    assert_eq!(t.snapshots, TREND_MAX);
     assert_eq!(t.skipped.len(), 1, "{:?}", t.skipped);
     let shop = t.of("shop/prod").unwrap();
-    assert_eq!(shop.len(), 13);
-    assert_eq!(shop[0].taken_at.to_string(), "2026-10-04T00:00:00Z");
-    assert_eq!(shop[12].gaps, 4);
-    assert_eq!(spark_text(shop).chars().count(), 13);
+    assert_eq!(shop.len(), 14);
+    assert_eq!(shop[0].taken_at.to_string(), "2026-10-03T00:00:00Z");
+    assert_eq!(shop[13].gaps, 4);
+    assert_eq!(spark_text(shop).chars().count(), 14);
     assert!(spark_text(shop).starts_with('█'));
     assert!(spark_text(shop).ends_with('▃'), "{}", spark_text(shop));
     let crm = t.of("crm/prod").unwrap();
     assert_eq!(crm.last().unwrap().verdict, Verdict::Ready);
-    assert_eq!(spark_text(crm), "▁".repeat(13));
+    assert_eq!(spark_text(crm), "▁".repeat(14));
+    assert_eq!(t.bases.len(), 1);
+    assert_eq!(t.live_mismatch("7d", true), None);
+    assert_eq!(
+        t.live_mismatch("24h", true).unwrap(),
+        "live point left out: window 24h differs from the snapshots' 7d"
+    );
     assert!(t.of("nope").is_none());
 }
 
@@ -201,8 +208,12 @@ fn fewer_than_two_snapshots_show_no_trend() {
     let t = trend_of(std::slice::from_ref(&s));
     assert_eq!(t.snapshots, 1);
     assert!(t.of("shop/prod").is_none());
-    let t = trend_of(&[s.clone(), s]);
+    let mut other = s.clone();
+    other.sections.readiness = Some(readiness(&[("crm/prod", "ready", 0)]));
+    let t = trend_of(&[s.clone(), s, other]);
     assert_eq!(t.of("shop/prod").unwrap().len(), 2);
+    // An app in one snapshot only: no trend for it.
+    assert!(t.of("crm/prod").is_none());
 }
 
 #[test]

@@ -10,7 +10,7 @@ use pce::models::Workload;
 use pce::readiness::Verdict;
 use pce::traffic::{Change, CompareCounts};
 use serde::Serialize;
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::path::Path;
 
 /// A workload's change against the baseline.
@@ -202,16 +202,52 @@ pub struct Trend {
     pub apps: BTreeMap<String, Vec<TrendPoint>>,
     /// The snapshots left out, and why (unreadable, another PCE).
     pub skipped: Vec<String>,
+    /// The bases the snapshots' readiness was judged on: `(window,
+    /// draft)` (`7d`, true for `snapshot save --with-readiness`).
+    pub bases: BTreeSet<(String, bool)>,
 }
 
 impl Trend {
-    /// An app's points, when the trend has at least two snapshots (fewer
-    /// show nothing).
+    /// An app's points, when the trend has at least two snapshots and the
+    /// app two points (fewer show nothing).
     pub fn of(&self, app: &str) -> Option<&[TrendPoint]> {
         if self.snapshots < 2 {
             return None;
         }
-        self.apps.get(app).map(Vec::as_slice)
+        self.apps
+            .get(app)
+            .filter(|p| p.len() >= 2)
+            .map(Vec::as_slice)
+    }
+
+    /// Why a live result judged over `window` (with the draft or not) is
+    /// not a point of this trend: its basis differs from the snapshots'
+    /// (`live point left out: window 24h differs from the snapshots' 7d`);
+    /// `None` when it matches (or there are no snapshots).
+    pub fn live_mismatch(&self, window: &str, draft: bool) -> Option<String> {
+        if self.bases.is_empty() || self.bases.iter().all(|(w, d)| w == window && *d == draft) {
+            return None;
+        }
+        let theirs: Vec<String> = self
+            .bases
+            .iter()
+            .map(|(w, d)| {
+                if *d {
+                    w.clone()
+                } else {
+                    format!("{w} without the draft")
+                }
+            })
+            .collect();
+        let ours = if draft {
+            window.to_string()
+        } else {
+            format!("{window} without the draft")
+        };
+        Some(format!(
+            "live point left out: window {ours} differs from the snapshots' {}",
+            theirs.join(", ")
+        ))
     }
 }
 
@@ -257,6 +293,17 @@ pub fn trend_of(snaps: &[Snapshot]) -> Trend {
     let mut t = Trend::default();
     for s in snaps.iter().filter(|s| s.sections.readiness.is_some()) {
         t.snapshots += 1;
+        let r = s.sections.readiness.as_ref();
+        let window = r
+            .and_then(|r| r.get("window"))
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or_default()
+            .to_string();
+        let draft = r
+            .and_then(|r| r.get("draft"))
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(true);
+        t.bases.insert((window, draft));
         for (app, p) in points_of(s) {
             t.apps.entry(app).or_default().push(p);
         }
@@ -265,22 +312,27 @@ pub fn trend_of(snaps: &[Snapshot]) -> Trend {
 }
 
 /// The trend of the newest [`TREND_MAX`] snapshots in `dir` that hold
-/// readiness; one of another profile, PCE or org than `me`, or one that
-/// cannot be read, is skipped and named.
+/// readiness and can be used: walked newest first, one of another
+/// profile, PCE or org than `me`, or one that cannot be read, is skipped
+/// and named, and an older one takes its place.
 pub fn load_trend(dir: &Path, me: &Identity) -> Result<Trend, String> {
     let all = list(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
-    let with: Vec<&SnapshotMeta> = usable(&all)
-        .into_iter()
-        .filter(|m| m.sections.contains(&"readiness"))
-        .collect();
     let mut snaps = Vec::new();
     let mut skipped = Vec::new();
-    for m in &with[with.len().saturating_sub(TREND_MAX)..] {
+    let with = usable(&all)
+        .into_iter()
+        .rev()
+        .filter(|m| m.sections.contains(&"readiness"));
+    for m in with {
+        if snaps.len() == TREND_MAX {
+            break;
+        }
         match load(&m.path).and_then(|s| check_baseline(&s, &m.id, me).map(|()| s)) {
             Ok(s) => snaps.push(s),
             Err(e) => skipped.push(e),
         }
     }
+    snaps.reverse();
     Ok(Trend {
         skipped,
         ..trend_of(&snaps)
