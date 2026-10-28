@@ -561,3 +561,35 @@ async fn the_window_is_echoed_as_given() {
         .success();
     assert_eq!(envelope(&a)["data"]["traffic"]["window"], "12h");
 }
+
+/// Potentially blocked → blocked is newly blocked (stricter): the gate
+/// exits 7 for it and its pair is listed, while `meta.draft` keeps
+/// counting as `traffic --draft` does (allowed → not allowed only).
+#[tokio::test(flavor = "multi_thread")]
+async fn potentially_blocked_to_blocked_trips_the_gate() {
+    let server = MockServer::start().await;
+    let mut flows: Vec<Value> = serde_json::from_str(&draft_flows()).unwrap();
+    for f in &mut flows {
+        if f["policy_decision"] == "potentially_blocked" {
+            f["draft_policy_decision"] = json!("blocked");
+        }
+        if f["service"]["port"] == 443 {
+            f["draft_policy_decision"] = json!("allowed");
+        }
+    }
+    let body = serde_json::to_string(&flows).unwrap();
+    mount_flows(&server, pending_body(false), 1, 0, 1, &body).await;
+    let home = tempfile::tempdir().unwrap();
+    let a = cmd(&server, home.path())
+        .args(["--json", "policy", "impact", "--fail-on-blocked"])
+        .assert()
+        .code(7);
+    let v = envelope(&a);
+    let t = &v["data"]["traffic"];
+    assert_eq!(t["transitions"]["newly_blocked"], 1);
+    assert_eq!(
+        t["blocked_pairs"][0]["transitions"][0]["reported"],
+        "potentially_blocked"
+    );
+    assert_eq!(v["meta"]["draft"]["newly_blocked"], 0, "{}", v["meta"]);
+}

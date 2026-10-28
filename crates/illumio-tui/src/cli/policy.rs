@@ -48,7 +48,8 @@ pub enum PolicyCmd {
     /// the active side through the active label groups and IP lists; - where not in force).
     /// Traffic: one Explorer query over --window re-evaluated against the draft
     /// (update_rules; it changes no policy): flow records reported → draft, and the app/env
-    /// group pairs that become blocked or potentially blocked (first), then allowed. The PCE
+    /// group pairs whose decision gets stricter (allowed → potentially blocked or blocked,
+    /// potentially blocked → blocked; first), then looser. The PCE
     /// evaluates the whole draft, so this always covers everything pending. Requests: the
     /// pending list; nothing else when nothing is pending; else the object lists, the draft
     /// and active rulesets, active label groups and IP lists and one workloads read (all

@@ -11,9 +11,7 @@ use crate::provision_impact::{
     load, unsupported,
 };
 use clap::Args;
-use pce::traffic::{
-    DraftPair, DraftSummary, TrafficQueryBuilder, TransitionCell, Transitions, parse_window,
-};
+use pce::traffic::{DraftPair, TrafficQueryBuilder, TransitionCell, Transitions, parse_window};
 use std::collections::BTreeSet;
 use std::io::Write;
 use tokio_util::sync::CancellationToken;
@@ -28,9 +26,10 @@ pub struct ImpactArgs {
     /// table, all with --json and --csv
     #[arg(long)]
     pub limit: Option<usize>,
-    /// Exit 7 (would_block) when any flow would become blocked or potentially blocked, after
-    /// the report: a change-window or CI gate. A truncated or incomplete result without such a
-    /// flow is exit 4
+    /// Exit 7 (would_block) when any flow's draft decision is stricter than today's (allowed →
+    /// potentially blocked or blocked, potentially blocked → blocked), after the report: a
+    /// change-window or CI gate. Without such a flow, a result that is truncated, incomplete or
+    /// has flows the draft did not re-evaluate is exit 4
     #[arg(long)]
     pub fail_on_blocked: bool,
     /// Confirm an expensive query (window > 7d)
@@ -101,11 +100,7 @@ pub fn impact_meta(ctx: &Context, loaded: &Loaded, spec: &LoadSpec, targets: boo
     if let Some(t) = &r.traffic {
         meta.cap = Some(spec.query.max_results);
         meta.incomplete = Some(t.incomplete);
-        meta.draft = Some(DraftSummary {
-            evaluated: t.transitions.evaluated > 0,
-            fixed: t.transitions.newly_allowed,
-            newly_blocked: t.transitions.newly_blocked,
-        });
+        meta.draft = loaded.draft;
     }
     if targets && r.pending > 0 {
         warn(

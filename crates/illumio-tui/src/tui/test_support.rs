@@ -815,6 +815,7 @@ pub fn impact_answer(m: &Model) -> crate::tui::msg::Msg {
             report: impact_fixture(),
             cache_hit: false,
             rules_truncated: false,
+            draft: None,
         }),
     }
 }

@@ -474,9 +474,9 @@ impl ProvisionImpact {
         }
     }
 
-    /// Flow records the draft would newly block (allowed now, blocked or
-    /// potentially blocked under the draft): what `--fail-on-blocked`
-    /// gates on.
+    /// Flow records the draft would newly block (its decision stricter than
+    /// the reported one: allowed → potentially blocked or blocked,
+    /// potentially blocked → blocked): what `--fail-on-blocked` gates on.
     pub fn newly_blocked(&self) -> u64 {
         self.traffic
             .as_ref()
@@ -514,6 +514,11 @@ pub struct Loaded {
     pub cache_hit: bool,
     /// A ruleset list or the workload list was cut short.
     pub rules_truncated: bool,
+    /// The traffic section's flows as `traffic --draft` counts them
+    /// (`meta.draft`: fixed = blocked or potentially blocked now and allowed
+    /// in draft; newly_blocked = allowed now and not in draft), unchanged by
+    /// the by-rank counts of `Transitions`; `None` with nothing pending.
+    pub draft: Option<pce::traffic::DraftSummary>,
 }
 
 /// The query over the last `window` at `cap`; an error for a window that
@@ -549,6 +554,7 @@ pub async fn load(pce: &Pce, spec: &LoadSpec, cancel: &CancellationToken) -> pce
             report: ProvisionImpact::nothing_pending(),
             cache_hit,
             rules_truncated: false,
+            draft: None,
         });
     }
     let idx = pce.name_index(mode).await?;
@@ -621,6 +627,7 @@ pub async fn load(pce: &Pce, spec: &LoadSpec, cancel: &CancellationToken) -> pce
         },
         cache_hit,
         rules_truncated,
+        draft: Some(pce::traffic::DraftSummary::of(&flows)),
     })
 }
 
