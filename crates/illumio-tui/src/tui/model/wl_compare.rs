@@ -154,13 +154,4 @@ impl WorkloadsState {
         };
         Some(format!("{side} truncated: new/gone over-report"))
     }
-
-    /// `C`: compare mode off; whether it was on.
-    pub fn end_compare(&mut self, order: &KeyOrder) -> bool {
-        if self.compare.take().is_none() {
-            return false;
-        }
-        self.rebuild(order);
-        true
-    }
 }
