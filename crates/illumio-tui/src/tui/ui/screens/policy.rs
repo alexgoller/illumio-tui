@@ -125,11 +125,11 @@ pub fn render_screen(model: &Model, f: &mut Frame, body: Rect) {
     );
 }
 
-/// The allow rules by scope, `3 intra · 1 extra`; empty without any.
+/// The rules (allow and deny) by scope, `3 intra · 1 extra`; empty without
+/// any.
 pub fn scope_counts(rows: &[RuleRow]) -> String {
-    let allow = rows.iter().filter(|r| r.kind == RuleKind::Allow);
-    let extra = allow.clone().filter(|r| r.unscoped_consumers).count();
-    let intra = allow.count() - extra;
+    let extra = rows.iter().filter(|r| r.unscoped_consumers).count();
+    let intra = rows.len() - extra;
     if intra + extra == 0 {
         String::new()
     } else {

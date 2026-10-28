@@ -20,17 +20,17 @@ expression: "render_styled(&l, 80, 24)"
     @0:Rgb(0, 102, 204)/Rgb(250, 250, 247) @1:Rgb(40, 42, 48)/Rgb(250, 250, 247) @79:Rgb(0, 102, 204)/Rgb(250, 250, 247)
 ╰──────────────────────────────────────────────────────────────────────────────╯
     @0:Rgb(0, 102, 204)/Rgb(250, 250, 247)
-╭ Rules · app=shop, env=prod ─────────────────────────────── 1 intra · 1 extra ╮
+╭ Rules · app=shop, env=prod ─────────────────────────────── 3 intra · 1 extra ╮
     @0:Rgb(180, 184, 196)/Rgb(250, 250, 247) @2:Rgb(150, 50, 180)/Rgb(250, 250, 247) @28:Rgb(180, 184, 196)/Rgb(250, 250, 247) @61:Rgb(120, 124, 136)/Rgb(250, 250, 247) @78:Rgb(180, 184, 196)/Rgb(250, 250, 247)
 │  kind          on  scope consumers     providers    services      P/C        │
     @0:Rgb(180, 184, 196)/Rgb(250, 250, 247) @1:Rgb(0, 120, 140)/Rgb(250, 250, 247) @79:Rgb(180, 184, 196)/Rgb(250, 250, 247)
-│▸ override_deny ✓         All workloads role=db      22/tcp                1/2│
+│▸ override_deny ✓   intra All workloads role=db      22/tcp                1/2│
     @0:Rgb(180, 184, 196)/Rgb(250, 250, 247) @1:Rgb(200, 40, 50)/Rgb(222, 230, 245) @79:Rgb(180, 184, 196)/Rgb(250, 250, 247)
 │  allow         ✓   intra role=web      role=db      PostgreSQL            1/1│
     @0:Rgb(180, 184, 196)/Rgb(250, 250, 247) @1:Rgb(40, 42, 48)/Rgb(250, 250, 247) @79:Rgb(180, 184, 196)/Rgb(250, 250, 247)
 │  allow         ✓   extra ipl:Corp      role=web     443/tcp, 8000         1/0│
     @0:Rgb(180, 184, 196)/Rgb(250, 250, 247) @1:Rgb(40, 42, 48)/Rgb(250, 250, 247) @79:Rgb(180, 184, 196)/Rgb(250, 250, 247)
-│  deny          ✓         ipl:Any (0.0. All workload 23/tcp                2/0│
+│  deny          ✓   intra ipl:Any (0.0. All workload 23/tcp                2/0│
     @0:Rgb(180, 184, 196)/Rgb(250, 250, 247) @1:Rgb(176, 120, 0)/Rgb(250, 250, 247) @79:Rgb(180, 184, 196)/Rgb(250, 250, 247)
 │                                                                              │
     @0:Rgb(180, 184, 196)/Rgb(250, 250, 247) @1:Rgb(40, 42, 48)/Rgb(250, 250, 247) @79:Rgb(180, 184, 196)/Rgb(250, 250, 247)

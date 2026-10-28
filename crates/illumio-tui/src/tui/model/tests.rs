@@ -771,7 +771,7 @@ fn the_rules_pane_lists_intra_then_extra_and_keeps_the_cursor_on_a_moved_rule() 
             .map(|r| crate::tui::model::scope_cell(r).to_string())
             .collect()
     };
-    assert_eq!(scopes(&m), ["", "intra", "extra", ""]);
+    assert_eq!(scopes(&m), ["intra", "intra", "extra", "intra"]);
     let corp = m.policy.raw[0].rules[1].href.clone();
     m.policy.rules.select_where(|r| r.href == corp);
     assert_eq!(m.policy.rules.selected_pos(), 2);
@@ -779,10 +779,14 @@ fn the_rules_pane_lists_intra_then_extra_and_keeps_the_cursor_on_a_moved_rule() 
     m.policy.raw[0].rules[1].unscoped_consumers = Some(false);
     m.policy.raw[0].rules[0].unscoped_consumers = Some(true);
     m.rebuild_rules();
-    assert_eq!(scopes(&m), ["", "intra", "extra", ""]);
+    assert_eq!(scopes(&m), ["intra", "intra", "extra", "intra"]);
     assert_eq!(
         m.policy.rules.selected_item().map(|r| r.href.clone()),
         Some(corp)
     );
     assert_eq!(m.policy.rules.selected_pos(), 1);
+    // A deny rule is intra- or extra-scope too (`unscoped_consumers`).
+    m.policy.raw[0].deny_rules[0].unscoped_consumers = Some(true);
+    m.rebuild_rules();
+    assert!(scopes(&m).iter().filter(|s| *s == "extra").count() == 2);
 }

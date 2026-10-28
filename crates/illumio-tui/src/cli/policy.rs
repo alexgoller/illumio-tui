@@ -68,7 +68,7 @@ pub enum PolicyCmd {
 /// list read (cached).
 #[derive(Args, Debug)]
 pub struct SearchArgs {
-    /// Search terms as in the TUI (all must hold): app=shop,crm '!env=prod' ipl:NAME svc:NAME svc:443/tcp svc:tcp wl:NAME href:TEXT disabled enabled deny allow intra extra; scope:, src: (consumer:) or dst: (provider:) before a label (src:/dst: also ipl:NAME, wl:NAME, all; scope:global); a leading - negates a term (-deny, -scope:env=dev). Examples: `src:role=web dst:role=db extra`, `scope:app=payment -svc:443/tcp`, `'src:!env=prod'` (quote a `!` for the shell), `src:all -deny`. A -term needs no `--`; after `--` every word is a term
+    /// Search terms as in the TUI (all must hold): app=shop,crm '!env=prod' ipl:NAME svc:NAME svc:443/tcp svc:tcp wl:NAME href:TEXT disabled enabled deny allow intra extra (allow and deny rules); scope:, src: (consumer:) or dst: (provider:) before a label (src:/dst: also ipl:NAME, wl:NAME, all; scope:global); a leading - negates a term (-deny, -scope:env=dev). Examples: `src:role=web dst:role=db extra`, `scope:app=payment -svc:443/tcp`, `'src:!env=prod'` (quote a `!` for the shell), `src:all -deny`. A -term needs no `--`; after `--` every word is a term
     pub terms: Vec<String>,
     /// A label in a scope, consumer or provider (directly or in a label group; exclusions and All workloads do not count): key=value, a comma lists values any of which matches (repeatable; all must hold). For exclusions use the term !key=value
     #[arg(long = "label")]

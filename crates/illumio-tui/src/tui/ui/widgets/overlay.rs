@@ -1431,16 +1431,12 @@ pub fn render_rule_detail(model: &Model, rule: &RuleView, f: &mut Frame, area: R
         .map(|s| s.name.clone())
         .collect::<Vec<_>>()
         .join(", ");
-    // An allow rule's consumers are intra- or extra-scope; a deny rule as
-    // loaded carries no such flag.
+    // A rule's consumers, allow or deny, are intra- or extra-scope.
     let enabled = if rule.enabled { "enabled" } else { "disabled" };
-    let flags = match rule.kind {
-        pce::RuleKind::Allow => format!(
-            "{enabled} · {}",
-            crate::rule_scope::RuleScope::from_unscoped(rule.unscoped_consumers).wording()
-        ),
-        pce::RuleKind::Deny | pce::RuleKind::OverrideDeny => enabled.to_string(),
-    };
+    let flags = format!(
+        "{enabled} · {}",
+        crate::rule_scope::RuleScope::from_unscoped(rule.unscoped_consumers).wording()
+    );
     let mut lines = vec![
         labelled(
             model,

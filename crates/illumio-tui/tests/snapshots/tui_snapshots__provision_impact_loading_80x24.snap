@@ -16,7 +16,7 @@ expression: loading
 │▸ ov│                                                                    │   -│
 │  al│                                                                    │   -│
 │  al╰────────────────────────────────────────────────────────────────────╯   -│
-│  deny          ✓         ipl:Any (0.0. All workload 23/tcp                  -│
+│  deny          ✓   intra ipl:Any (0.0. All workload 23/tcp                  -│
 │                                                                              │
 │                                                                              │
 │                                                                              │

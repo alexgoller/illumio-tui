@@ -148,15 +148,10 @@ impl std::ops::Deref for RuleRow {
     }
 }
 
-/// An allow rule's scope as the rules pane shows it, `intra` or `extra`;
-/// blank for a deny rule.
+/// A rule's scope as the rules pane shows it, `intra` or `extra`: an allow
+/// or a deny rule (`unscoped_consumers` on either).
 pub fn scope_cell(r: &RuleView) -> &'static str {
-    match r.kind {
-        RuleKind::Allow => {
-            crate::rule_scope::RuleScope::from_unscoped(r.unscoped_consumers).as_str()
-        }
-        RuleKind::Deny | RuleKind::OverrideDeny => "",
-    }
+    crate::rule_scope::RuleScope::from_unscoped(r.unscoped_consumers).as_str()
 }
 
 /// The order of the rules pane: by evaluation ([`rule_rank`]), the allow

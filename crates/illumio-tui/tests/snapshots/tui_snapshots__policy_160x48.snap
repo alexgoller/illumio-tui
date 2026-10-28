@@ -4,12 +4,12 @@ expression: "render_to_string(&m, 160, 48)"
 ---
  illumio-tui pce.example · org 5 ●                                                                                                        api 5 calls · 20.8 KB
   1 Traffic  │  2 Policy  │  3 Objects  │  4 Workloads  │  5 Events
-╭ Rulesets ──────────────────────────────────────────── draft · 5s ago ╮╭ Rules · app=shop, env=prod ─────────────────────────────────────── 1 intra · 1 extra ╮
+╭ Rulesets ──────────────────────────────────────────── draft · 5s ago ╮╭ Rules · app=shop, env=prod ─────────────────────────────────────── 3 intra · 1 extra ╮
 │  ruleset                on  scopes                      rules pending││  kind          on  scope consumers       providers        services        P/C        │
-│▸ Shop-Prod              ✓   app=shop & env=prod             4        ││▸ override_deny ✓         All workloads   role=db          22/tcp                    -│
+│▸ Shop-Prod              ✓   app=shop & env=prod             4        ││▸ override_deny ✓   intra All workloads   role=db          22/tcp                    -│
 │  Global-Infra           ✗   All                             1 create ││  allow         ✓   intra role=web        role=db          PostgreSQL                -│
 │                                                                      ││  allow         ✓   extra ipl:Corp        role=web         443/tcp, 8000-8           -│
-│                                                                      ││  deny          ✓         ipl:Any (0.0.0. All workloads    23/tcp                    -│
+│                                                                      ││  deny          ✓   intra ipl:Any (0.0.0. All workloads    23/tcp                    -│
 │                                                                      ││                                                                                      │
 │                                                                      ││                                                                                      │
 │                                                                      ││                                                                                      │

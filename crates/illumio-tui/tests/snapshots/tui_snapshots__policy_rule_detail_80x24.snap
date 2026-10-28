@@ -11,7 +11,7 @@ expression: out
 │ │consumers   All workloads                                                 │ │
 │ │providers   role=db                                                       │ │
 ╰─│services    22/tcp                                                        │─╯
-╭ │flags       enabled                                                       │ ╮
+╭ │flags       enabled · intra-scope                                         │ ╮
 │ │pending     none                                                          │ │
 │▸│href        /orgs/5/sec_policy/draft/rule_sets/100/deny_rules/8           │-│
 │ │impact      press i to load workloads (1 request)                         │-│

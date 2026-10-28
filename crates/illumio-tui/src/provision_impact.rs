@@ -214,12 +214,11 @@ struct Entry {
 /// counts them anywhere).
 const EXTRA_SCOPE: &str = " (extra-scope)";
 
-/// A deny rule carrying `unscoped_consumers` (a field the model does not
-/// name): marked, and said to be counted in scope, as deny coverage keeps
-/// consumers to the scopes; empty otherwise.
-fn deny_scope_note(d: &pce::models::DenyRule) -> &'static str {
-    if d.extra.get("unscoped_consumers") == Some(&Value::Bool(true)) {
-        " (extra-scope; coverage counts consumers in scope)"
+/// [`EXTRA_SCOPE`] for a rule (allow or deny) whose `unscoped_consumers`
+/// is set, else nothing.
+fn scope_mark(unscoped: Option<bool>) -> &'static str {
+    if unscoped == Some(true) {
+        EXTRA_SCOPE
     } else {
         ""
     }
@@ -243,11 +242,7 @@ fn entries(rs: &RuleSet, deny: DenySide, with_deny: bool, idx: &NameIndex) -> Ve
                 &r.ingress_services,
                 r.enabled,
                 idx,
-            ) + if r.unscoped_consumers == Some(true) {
-                EXTRA_SCOPE
-            } else {
-                ""
-            },
+            ) + scope_mark(r.unscoped_consumers),
             actors: RuleActors::of_rule(r),
             on: r.enabled && rs.enabled,
         })
@@ -269,7 +264,7 @@ fn entries(rs: &RuleSet, deny: DenySide, with_deny: bool, idx: &NameIndex) -> Ve
                     &d.ingress_services,
                     d.enabled,
                     idx,
-                ) + deny_scope_note(d),
+                ) + scope_mark(d.unscoped_consumers),
                 actors: RuleActors::of_deny(d),
                 on: d.enabled && rs.enabled,
             }
@@ -886,16 +881,30 @@ mod tests {
         assert!(r2.was.as_deref().unwrap().ends_with(" (extra-scope)"));
         let r4 = shop.rules.iter().find(|r| r.href.ends_with("/4")).unwrap();
         assert!(!r4.rule.contains("extra-scope"), "{}", r4.rule);
-        // A deny rule carrying the flag: marked, and said to be counted in
-        // scope (deny coverage keeps consumers to the scopes).
-        let mut d: pce::models::DenyRule = serde_json::from_value(json!({
-            "href": "/orgs/5/sec_policy/draft/rule_sets/100/deny_rules/9", "enabled": true,
-            "providers": [], "consumers": [], "ingress_services": [], "unscoped_consumers": true
-        }))
-        .unwrap();
-        assert!(deny_scope_note(&d).contains("extra-scope"));
-        d.extra.clear();
-        assert_eq!(deny_scope_note(&d), "");
+        // A deny rule made extra-scope in the draft: marked, and its
+        // consumers counted anywhere (all four workloads, two in scope).
+        let idx = index();
+        let mut d = draft();
+        d[0].deny_rules[1].unscoped_consumers = Some(true);
+        let (a, w, p) = (active(), workloads(), pending());
+        let s = rules_section(&RuleInputs {
+            pending: &p,
+            draft: &d,
+            active: &a,
+            draft_index: &idx,
+            active_index: &idx,
+            workloads: &w,
+            truncated: false,
+        });
+        let shop = s.iter().find(|r| r.name == "Shop-Prod").unwrap();
+        let deny = shop
+            .rules
+            .iter()
+            .find(|r| r.href.ends_with("deny_rules/8"))
+            .unwrap();
+        assert!(deny.rule.ends_with(" (extra-scope)"), "{}", deny.rule);
+        assert!(!deny.was.as_deref().unwrap().contains("extra-scope"));
+        assert_eq!(coverage_line(deny), "providers 1→1 · consumers 2→4");
     }
 
     #[test]
