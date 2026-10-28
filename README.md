@@ -1786,14 +1786,19 @@ against the whole draft, so the summary always covers everything pending. Three 
   or it or its ruleset disabled); `≥` a workload list cut short. A rule is changed when its
   text, its state or its coverage differs (`was:` under it gives the active text when it
   differs; none means only its coverage moved: the ruleset's scopes or a label group). A
-  ruleset pending deletion counts its rules as removed. Deny rules a ruleset list does not
-  carry (an older PCE keeps them apart) are not compared, and `not counted` says so.
+  ruleset pending deletion counts its rules as removed. An extra-scope rule (consumers from
+  outside the ruleset's scopes) ends its text with `(extra-scope)`, which is why it can match
+  more consumers than an intra-scope rule of the same text. When neither the draft nor the
+  active ruleset list carries any deny rule inline (an older PCE keeps them apart), deny rules
+  are not compared, and `not counted` says so.
 - **Traffic**: one Explorer query over `--window` (the profile's, 24h by default; over 7d needs
   `--yes`) at the profile's cap, run and re-evaluated against the draft (`update_rules`; no
   policy change) in its own cache slot: every flow record reported → draft (each changed cell,
   the rest as one `unchanged` count), then the app/env group pairs (the profile's scope keys)
-  whose flows become blocked or potentially blocked (allowed now, newly blocked first), then
-  those that become allowed, busiest first, with their services. The table shows 20 pairs per
+  whose flows get a stricter decision (newly blocked: allowed → potentially blocked or blocked,
+  and potentially blocked → blocked), then those that get a looser one (newly allowed), busiest
+  first, with their services by port. Flows the draft re-evaluation did not reach are counted
+  in the heading (`· 3 not evaluated`). The table shows 20 pairs per
   direction (`--limit N`); `--json` and `--csv` carry all of them unless `--limit` is given
   (`blocked_pairs_total`, `allowed_pairs_total` count them).
 
@@ -1802,7 +1807,9 @@ pending list; the object lists (labels, label groups, IP lists, services); when 
 pending, the draft and active rulesets, the active label groups and IP lists and one workloads
 read (all cached); then one POST, status polls, one PUT `update_rules`, polls and one download.
 `meta.cost` says it in words, `meta.api_calls` counts them, `meta.draft` has the newly blocked
-and fixed counts. Not counted: workload enforcement modes and labels (never pending, never
+and fixed counts as `traffic --draft` counts them (allowed ↔ not allowed only, so a potentially
+blocked → blocked flow is in `data.traffic.transitions.newly_blocked` but not in
+`meta.draft.newly_blocked`). Not counted: workload enforcement modes and labels (never pending, never
 provisioned), virtual services, virtual servers and enforcement boundaries in rule coverage (the
 traffic section shows their effect), the rules of rulesets with no pending change whose label
 groups or IP lists are pending, and a partial provision (the PCE cannot evaluate one).
@@ -1824,10 +1831,10 @@ groups or IP lists are pending, and a partial provision (the PCE cannot evaluate
     ruleset       change   kind   rule                                                 providers  consumers
     ───────────────────────────────────────────────────────────────────────────────────────────────────────
     Global-Infra  added    allow  allow all ← group:All prod envs All Services         -→12       -→40
-    Shop-Prod     changed  allow  allow role=web ← iplist:Corp 443/tcp, 8000-8099/tcp  4→4        3→0
-      was: allow role=web ← role=db 443/tcp, 8000-8099/tcp
+    Shop-Prod     changed  allow  allow role=web ← iplist:Corp 443/tcp, 8000-8099/tcp (extra-scope)  4→4  3→0
+      was: allow role=web ← role=db 443/tcp, 8000-8099/tcp (extra-scope)
 
-    traffic · 1d · 8812 flow records · 14 newly blocked · 409 newly allowed
+    traffic · 24h · 8812 flow records · 14 newly blocked · 409 newly allowed
     reported → draft       flows  conns
     ───────────────────────────────────
     allowed → blocked      14     2210
@@ -1844,8 +1851,10 @@ targets the changes section marks how many of each are in the request (`in_reque
 `meta.warnings` says the rules and traffic sections cover the whole draft.
 
 **Check before you provision.** In a change window or a pipeline, `--fail-on-blocked` exits 7
-(`would_block`) after the report when a flow allowed today would become blocked or potentially
-blocked; a truncated or incomplete result without one is exit 4, never a silent pass:
+(`would_block`) after the report when a flow's draft decision is stricter than today's (allowed
+→ potentially blocked or blocked, potentially blocked → blocked); without one, a result that is
+truncated, incomplete, or has flows the draft re-evaluation did not reach is exit 4, never a
+silent pass:
 
     illumio-tui policy impact --window 7d --fail-on-blocked --json > impact.json
     case $? in
@@ -1853,6 +1862,11 @@ blocked; a truncated or incomplete result without one is exit 4, never a silent 
       7) mail -s "the draft would block flows" alex@ryte.de < impact.json ;;
       *) echo "no complete answer" ;;
     esac
+
+The check and the provision are two steps, not one: `provision --all` sends whatever is
+pending when it runs, draft edits made after the check included. Name the targets the check
+saw (`policy pending --json` gives their hrefs), or compare `policy pending --json` before and
+after, to provision only what was checked.
 
 ### Flow marks
 

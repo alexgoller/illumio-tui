@@ -1012,7 +1012,7 @@ summary  provision 9 rule_sets, 2 services</code></pre>
 
     <article class="recipe" aria-labelledby="r-impact-h">
       <h3 id="r-impact-h">Check before you provision</h3>
-      <p>Before the change window: what the draft would change, on real traffic. <code>policy impact</code> counts the pending objects, lists each pending ruleset&rsquo;s rules added, removed and changed with the workloads they match active &rarr; draft, and re-evaluates one traffic query against the whole draft (the PCE always evaluates all of it). <code>--fail-on-blocked</code> exits 7 when a flow allowed today would become blocked or potentially blocked, after the report; a truncated result without one is exit 4, never a silent pass. Nothing pending is exit 0 and sends no query.</p>
+      <p>Before the change window: what the draft would change, on real traffic. <code>policy impact</code> counts the pending objects, lists each pending ruleset&rsquo;s rules added, removed and changed with the workloads they match active &rarr; draft, and re-evaluates one traffic query against the whole draft (the PCE always evaluates all of it). <code>--fail-on-blocked</code> exits 7 when a flow&rsquo;s draft decision is stricter than today&rsquo;s (allowed &rarr; potentially blocked or blocked, potentially blocked &rarr; blocked), after the report; without one, a truncated or incomplete result, or flows the draft re-evaluation did not reach, is exit 4, never a silent pass. Nothing pending is exit 0 and sends no query. An extra-scope rule ends its text with <code>(extra-scope)</code>.</p>
 <!-- real output: illumio-tui policy impact --window 24h --table -->
 <pre><code><span class="c"># illustrative output; shapes as printed, numbers made up</span>
 <span class="p">$ </span>illumio-tui policy impact --window 24h --fail-on-blocked --table &gt; impact.txt; rc=$?
@@ -1029,10 +1029,10 @@ providers, consumers: workloads matched, active → draft (- not in force)
 ruleset       change   kind   rule                                                 providers  consumers
 ───────────────────────────────────────────────────────────────────────────────────────────────────────
 Global-Infra  added    allow  allow all ← group:All prod envs All Services         -→12       -→40
-Shop-Prod     changed  allow  allow role=web ← iplist:Corp 443/tcp, 8000-8099/tcp  4→4        3→0
-  was: allow role=web ← role=db 443/tcp, 8000-8099/tcp
+Shop-Prod     changed  allow  allow role=web ← iplist:Corp 443/tcp, 8000-8099/tcp (extra-scope)  4→4  3→0
+  was: allow role=web ← role=db 443/tcp, 8000-8099/tcp (extra-scope)
 
-traffic · 1d · 8812 flow records · 14 newly blocked · 409 newly allowed
+traffic · 24h · 8812 flow records · 14 newly blocked · 409 newly allowed
 reported → draft       flows  conns
 ───────────────────────────────────
 allowed → blocked      14     2210
@@ -1044,7 +1044,7 @@ newly blocked or potentially blocked · 3 pairs
 <span class="p">$ </span>echo $rc
 7
 <span class="p">$ </span>[ $rc -eq 7 ] &amp;&amp; mail -s "the draft would block flows" alex@ryte.de &lt; impact.txt</code></pre>
-      <p>The same summary sits in front of the request with <code>ILLUMIO_WRITES=1 illumio-tui policy provision --all --dry-run --impact</code> (and, computed before the send, with <code>--yes</code>). With named targets the changes section marks which objects are in the request, and a warning says the rules and traffic sections still cover the whole draft. Cost: the pending list, the object lists, the draft and active rulesets, active label groups and IP lists and one workloads read (all cached; only when a ruleset is pending), then one Explorer query re-evaluated against the draft (POST, polls, one PUT <code>update_rules</code>, one download). Not counted: workload enforcement and labels (never pending), virtual services and enforcement boundaries in rule coverage.</p>
+      <p>The same summary sits in front of the request with <code>ILLUMIO_WRITES=1 illumio-tui policy provision --all --dry-run --impact</code> (and, computed before the send, with <code>--yes</code>). With named targets the changes section marks which objects are in the request, and a warning says the rules and traffic sections still cover the whole draft. Cost: the pending list, the object lists, the draft and active rulesets, active label groups and IP lists and one workloads read (all cached; only when a ruleset is pending), then one Explorer query re-evaluated against the draft (POST, polls, one PUT <code>update_rules</code>, one download). Not counted: workload enforcement and labels (never pending), virtual services and enforcement boundaries in rule coverage. The check and the provision are two steps: <code>provision --all</code> sends what is pending when it runs, later draft edits included; name the targets the check saw to provision only those.</p>
     </article>
 
     <article class="recipe" aria-labelledby="r-comp-h">
