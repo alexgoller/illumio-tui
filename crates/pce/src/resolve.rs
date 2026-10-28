@@ -96,6 +96,30 @@ impl NameIndex {
         idx
     }
 
+    /// This index with its label groups replaced by `groups`; labels, IP
+    /// lists and services are kept. With `with_ip_lists`, the active
+    /// policy's view for rule impact (#86): the provisioned label groups
+    /// and IP lists over the same labels.
+    pub fn with_label_groups(&self, groups: &[LabelGroup]) -> Self {
+        let mut idx = Self {
+            labels: self.labels.clone(),
+            label_by_kv: self.label_by_kv.clone(),
+            keys: self.keys.clone(),
+            ip_lists: self.ip_lists.clone(),
+            ip_list_by_name: self.ip_list_by_name.clone(),
+            services: self.services.clone(),
+            order: self.order.clone(),
+            ..Self::default()
+        };
+        for g in groups {
+            idx.label_group_by_name
+                .insert(g.name.to_ascii_lowercase(), g.href.clone());
+            idx.label_groups
+                .insert(canon(&g.href).into_owned(), g.clone());
+        }
+        idx
+    }
+
     /// This index with labels shown in `order` (see [`KeyOrder`]).
     pub fn with_key_order(mut self, order: KeyOrder) -> Self {
         self.order = order;
@@ -753,6 +777,29 @@ mod tests {
         let only_new = idx.with_labels(&labels[labels.len() - 1..]);
         assert_eq!(only_new.label_href("app", "shop"), None);
         assert_eq!(only_new.label_keys(), vec!["app"]);
+    }
+
+    #[test]
+    fn with_label_groups_replaces_the_groups_and_keeps_the_rest() {
+        let idx = index();
+        let active: LabelGroup = serde_json::from_value(serde_json::json!({
+            "href": "/orgs/5/sec_policy/active/label_groups/10", "name": "Prod",
+            "key": "env", "labels": [], "sub_groups": []
+        }))
+        .unwrap();
+        let next = idx.with_label_groups(std::slice::from_ref(&active));
+        let g = next
+            .label_group("/orgs/5/sec_policy/draft/label_groups/10")
+            .unwrap();
+        assert!(g.labels.is_empty(), "the active members");
+        assert_eq!(
+            next.label_group_href("prod"),
+            Some("/orgs/5/sec_policy/active/label_groups/10")
+        );
+        assert_eq!(next.label_group_href("all prod envs"), None);
+        assert_eq!(next.labels.len(), idx.labels.len());
+        assert_eq!(next.ip_lists.len(), idx.ip_lists.len());
+        assert_eq!(next.services.len(), idx.services.len());
     }
 
     #[test]

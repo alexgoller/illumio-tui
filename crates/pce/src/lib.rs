@@ -114,6 +114,9 @@ pub const FOCUS_BASELINE_SLOT: &str = "focus-baseline";
 /// The cache slot of the exposure query (#82): it never evicts the
 /// traffic result, nor is evicted by it.
 pub const EXPOSURE_SLOT: &str = "exposure";
+/// The cache slot of the provision impact's draft query (#86): it never
+/// evicts the traffic result, nor is evicted by it.
+pub const IMPACT_SLOT: &str = "impact";
 
 /// How long a draft traffic result is reused: draft policy changes outside
 /// this tool must show soon.
