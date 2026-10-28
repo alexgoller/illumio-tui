@@ -163,16 +163,20 @@
               "properties": {
                 "new": {"type": "integer"},
                 "changed": {"type": "integer"},
-                "gone": {"type": "integer"},
+                "gone": {"type": ["integer", "null"], "description": "null: not judged, the list read was cut"},
                 "same": {"type": "integer"}
               },
               "required": ["new", "changed", "gone", "same"],
               "additionalProperties": false,
               "description": "rows per change, the filters applied, before --changes"
             },
-            "truncated": {"type": "boolean", "description": "the snapshot's workloads were capped: gone over-reports"}
+            "truncated": {"type": "boolean", "description": "the snapshot's workloads were capped: new over-reports"},
+            "list_cut_at": {
+              "type": ["integer", "null"],
+              "description": "the workloads read hit its row cap at this many: gone is not judged"
+            }
           },
-          "required": ["snapshot", "taken_at", "label", "changes", "counts", "truncated"],
+          "required": ["snapshot", "taken_at", "label", "changes", "counts", "truncated", "list_cut_at"],
           "additionalProperties": false,
           "description": "workloads with --baseline-snapshot: the snapshot and rows per change"
         }

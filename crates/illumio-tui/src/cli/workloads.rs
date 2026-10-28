@@ -2,7 +2,7 @@
 //! hrefs via the name index before querying.
 use super::context::{Context, cache_label};
 use super::error::CliError;
-use super::output::{MetaCompare, SnapshotCompareMeta, TableRows, join_list};
+use super::output::{MetaCompare, SnapshotCompareMeta, SnapshotCounts, TableRows, join_list};
 use super::write::{
     self, WriteFlags, label_in, parse_kv, resolve_labels, resolve_workload, run_plan,
 };
@@ -817,6 +817,9 @@ pub struct Selection {
     pub rows: Vec<WorkloadRow>,
     /// Against a baseline: the rows per change (the filters applied).
     pub counts: Option<CompareCounts>,
+    /// Against a baseline with the list read cut by its row cap: how many
+    /// were read. No row is then called gone (one past the cap would).
+    pub gone_withheld: Option<usize>,
     pub hit: bool,
     pub truncated: bool,
     /// No workload can match: no request was sent.
@@ -988,6 +991,9 @@ pub async fn select_against(
                 && args.online.is_none_or(|o| w.online == Some(o))
                 && managed.is_none_or(|m| m != w.is_unmanaged()))
     };
+    // A list cut by its cap cannot say what is gone.
+    let read = c.value.len();
+    let withheld = (compared.is_some() && c.truncated).then_some(read);
     let mut rows: Vec<WorkloadRow> = c
         .value
         .into_iter()
@@ -1003,6 +1009,7 @@ pub async fn select_against(
         rows.extend(
             cmp.gone
                 .into_iter()
+                .filter(|_| withheld.is_none())
                 .filter(|w| asked(w))
                 .map(|w| make(w, at))
                 .filter(|r| keep(r))
@@ -1027,6 +1034,7 @@ pub async fn select_against(
         filter,
         rows,
         counts,
+        gone_withheld: withheld,
         hit: c.hit,
         truncated: c.truncated,
         nothing,
@@ -1090,13 +1098,14 @@ pub async fn run(
     if let Some(b) = base {
         if b.snapshot.truncated.iter().any(|t| t == "workloads") {
             sel.warnings.push(format!(
-                "snapshot {}: its workloads read hit its row cap: gone over-reports",
+                "snapshot {}: its workloads read hit its row cap: new over-reports",
                 b.id
             ));
         }
-        if sel.truncated {
-            sel.warnings
-                .push("the workloads read hit its row cap: new and gone over-report".into());
+        if let Some(n) = sel.gone_withheld {
+            sel.warnings.push(format!(
+                "gone not judged: list cut at {n} (the workloads read hit its row cap; --max-results raises it)"
+            ));
         }
     }
     for w in &sel.warnings {
@@ -1118,8 +1127,17 @@ pub async fn run(
             taken_at: b.snapshot.taken_at,
             label: b.snapshot.label.clone(),
             changes: b.show.text(),
-            counts: sel.counts.unwrap_or_default(),
+            counts: {
+                let c = sel.counts.unwrap_or_default();
+                SnapshotCounts {
+                    new: c.new,
+                    changed: c.changed,
+                    gone: sel.gone_withheld.is_none().then_some(c.gone),
+                    same: c.same,
+                }
+            },
             truncated: b.snapshot.truncated.iter().any(|t| t == "workloads"),
+            list_cut_at: sel.gone_withheld,
         }));
     }
     match group {

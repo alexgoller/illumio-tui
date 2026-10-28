@@ -135,10 +135,17 @@ impl WorkloadsState {
     /// 5 changed · 1 gone` (`· gone only` while `n` narrows).
     pub fn compare_meta(&self) -> Option<String> {
         let c = self.compare.as_ref()?;
+        let n = &c.counts;
+        let gone = if self.truncated {
+            format!("gone not judged: list cut at {}", self.raw.len())
+        } else {
+            format!("{} gone", n.gone)
+        };
         let mut s = format!(
-            "vs snapshot {} · {}",
+            "vs snapshot {} · {} new · {} changed · {gone}",
             crate::snapshot::baseline::short_when(c.taken_at),
-            c.counts.text()
+            n.new,
+            n.changed
         );
         if c.show != ShowChanges::All {
             s.push_str(&format!(" · {} only", c.show.label()));
@@ -146,16 +153,12 @@ impl WorkloadsState {
         Some(s)
     }
 
-    /// `snapshot truncated: gone over-reports` (or the list, or both) while
-    /// compare mode has a capped side.
+    /// `snapshot truncated: new over-reports` while the snapshot's
+    /// workloads were capped (a cut list is in the header: gone is not
+    /// judged).
     pub fn compare_warning(&self) -> Option<String> {
         let c = self.compare.as_ref()?;
-        let side = match (self.truncated, c.truncated) {
-            (true, true) => "list and snapshot",
-            (true, false) => "list",
-            (false, true) => "snapshot",
-            (false, false) => return None,
-        };
-        Some(format!("{side} truncated: new/gone over-report"))
+        c.truncated
+            .then(|| "snapshot truncated: new over-reports".to_string())
     }
 }

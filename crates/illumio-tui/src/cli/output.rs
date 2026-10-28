@@ -212,10 +212,37 @@ pub struct SnapshotCompareMeta {
     pub label: Option<String>,
     /// The rows printed (`--changes`): `new,changed,gone`.
     pub changes: String,
-    /// Rows per change, the filters applied, before `--changes`.
-    pub counts: pce::traffic::CompareCounts,
-    /// The snapshot's workloads read hit its row cap: gone over-reports.
+    /// Rows per change, the filters applied, before `--changes`; `gone`
+    /// is `null` when the list read was cut (not judged).
+    pub counts: SnapshotCounts,
+    /// The snapshot's workloads read hit its row cap: new over-reports.
     pub truncated: bool,
+    /// The workloads read hit its row cap at this many: no workload is
+    /// called gone (one past the cap would read as gone); `null` when not.
+    pub list_cut_at: Option<usize>,
+}
+
+/// `meta.compare.counts` of `workloads --baseline-snapshot`.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
+pub struct SnapshotCounts {
+    pub new: u64,
+    pub changed: u64,
+    /// `None`: not judged (the list was cut).
+    pub gone: Option<u64>,
+    pub same: u64,
+}
+
+impl SnapshotCompareMeta {
+    /// `1 new · 2 changed · 3 gone`, or `· gone not judged: list cut at N`.
+    pub fn counts_text(&self) -> String {
+        let c = &self.counts;
+        let gone = match (c.gone, self.list_cut_at) {
+            (Some(g), _) => format!("{g} gone"),
+            (None, Some(n)) => format!("gone not judged: list cut at {n}"),
+            (None, None) => "gone not judged".into(),
+        };
+        format!("{} new · {} changed · {gone}", c.new, c.changed)
+    }
 }
 
 /// `meta.compare` of traffic with `--baseline`.
@@ -727,7 +754,7 @@ pub fn meta_line(meta: &Meta) -> String {
         Some(MetaCompare::Snapshot(c)) => s.push_str(&format!(
             " · vs snapshot {} · {}",
             crate::snapshot::baseline::short_when(c.taken_at),
-            c.counts.text()
+            c.counts_text()
         )),
         None => {}
     }

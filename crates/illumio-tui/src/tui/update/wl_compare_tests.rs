@@ -360,3 +360,16 @@ fn the_comparison_is_computed_once_per_list_and_filtered_after() {
     let c = m.workloads.compare.as_ref().unwrap();
     assert_eq!((c.counts.gone, c.counts.new), (0, 4));
 }
+
+#[test]
+fn a_cut_list_judges_no_workload_gone() {
+    let mut m = comparing();
+    let ws = m.workloads.raw.clone();
+    update(&mut m, Msg::WorkloadsLoaded(Ok((ws, 0, true))));
+    assert!(shown(&m).iter().all(|r| r.0 != "GONE"), "{:?}", shown(&m));
+    let meta = m.workloads.compare_meta().unwrap();
+    assert!(
+        meta.ends_with("1 new · 2 changed · gone not judged: list cut at 4"),
+        "{meta}"
+    );
+}

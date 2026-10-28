@@ -538,3 +538,56 @@ async fn readiness_trend_reads_the_snapshots_and_adds_the_live_point() {
         .unwrap();
     assert_eq!(shop["trend"].as_array().unwrap().len(), 2);
 }
+
+/// A live list cut by its row cap cannot say what is gone: a workload
+/// past the cap would read as gone. No gone row, `counts.gone` null, and
+/// the cut named.
+#[tokio::test]
+async fn a_cut_list_judges_no_workload_gone() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path(WORKLOADS))
+        .and(query_param_is_missing("labels"))
+        .respond_with(
+            answer(include_str!("../../../fixtures/workloads.json"))
+                .insert_header("X-Total-Count", "5000"),
+        )
+        .expect(2)
+        .mount(&server)
+        .await;
+    let env = Env::new();
+    snapshot::save(&env.dir(), &baseline(&server)).unwrap();
+    let a = env
+        .cmd(&server)
+        .args(["--json", "workloads", "--baseline-snapshot", "latest"])
+        .assert()
+        .success();
+    let v = schema_check::envelope(&a.get_output().stdout);
+    let c = &v["meta"]["compare"];
+    assert_eq!(c["counts"]["gone"], Value::Null);
+    assert_eq!(c["list_cut_at"], 4);
+    assert!(
+        v["data"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|r| r["change"] != "gone"),
+        "{v:#}"
+    );
+    assert!(
+        v["meta"]["warnings"]
+            .to_string()
+            .contains("gone not judged: list cut at 4"),
+        "{v:#}"
+    );
+    let t = env
+        .cmd(&server)
+        .args(["--table", "workloads", "--baseline-snapshot", "latest"])
+        .assert()
+        .success();
+    assert!(
+        stderr(&t).contains("1 new · 1 changed · gone not judged: list cut at 4"),
+        "{}",
+        stderr(&t)
+    );
+}

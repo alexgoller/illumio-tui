@@ -681,8 +681,15 @@ impl WorkloadsState {
             for v in &mut views {
                 v.change = cmp.of(&v.workload.href).cloned();
             }
-            // Gone: the snapshot's values, its health then.
-            views.extend(cmp.gone.iter().cloned().map(|w| {
+            // Gone: the snapshot's values, its health then; none judged
+            // when the list was cut by its cap (one past it would read as
+            // gone).
+            let gone = if self.truncated {
+                &[][..]
+            } else {
+                &cmp.gone[..]
+            };
+            views.extend(gone.iter().cloned().map(|w| {
                 let mut v = WorkloadRowView::new(w, taken_at, order);
                 v.change = Some(crate::snapshot::baseline::WlChange::of(
                     pce::traffic::Change::Gone,
