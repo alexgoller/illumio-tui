@@ -21,6 +21,9 @@ pub struct WlCompare {
     pub show: ShowChanges,
     /// The rows per change, the filters applied, before `n`.
     pub counts: CompareCounts,
+    /// The comparison of the list `(raw_gen, len)` with the snapshot:
+    /// computed once per list, filtered on every rebuild.
+    pub computed: Option<((u64, usize), crate::snapshot::baseline::WorkloadCompare)>,
 }
 
 impl WlCompare {
@@ -34,6 +37,7 @@ impl WlCompare {
             truncated: b.truncated,
             show: ShowChanges::All,
             counts: CompareCounts::default(),
+            computed: None,
         }
     }
 

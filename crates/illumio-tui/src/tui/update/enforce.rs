@@ -216,12 +216,9 @@ pub(super) fn open_readiness(model: &mut Model) -> Vec<Cmd> {
             cmds.len()
         ));
     }
-    // The trend: the snapshot files, once (no request, not counted).
-    let unread = model
-        .readiness_view
-        .as_ref()
-        .is_some_and(|v| v.trend.is_none());
-    if unread && let Some(root) = &model.snapshots_root {
+    // The trend: the snapshot files, read again at every open (a local
+    // listing, no request, not counted): a snapshot saved since shows.
+    if let Some(root) = &model.snapshots_root {
         let dir = crate::snapshot::profile_dir(root, &model.profile.name);
         cmds.push(Cmd::LoadTrend { dir });
     }

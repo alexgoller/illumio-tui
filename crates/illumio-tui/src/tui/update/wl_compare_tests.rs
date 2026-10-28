@@ -273,9 +273,12 @@ fn group_headers_count_the_changes() {
         .iter()
         .find(|g| g.title == "shop | prod")
         .unwrap();
-    // host-1 (changed into shop), host-2 (changed), gone-1.
+    // host-1 (changed into shop), host-2 (changed), gone-1: two there
+    // now, in the count and the health; the gone one apart.
     assert_eq!((shop.changes.changed, shop.changes.gone), (2, 1));
-    assert_eq!(crate::tui::wl_groups::changes_text(shop), "2 chg 1 gone");
+    assert_eq!(shop.count(), 2);
+    assert_eq!(shop.health.iter().sum::<usize>(), 2);
+    assert_eq!(crate::tui::wl_groups::changes_text(shop), "2 chg");
 }
 
 #[test]
@@ -290,7 +293,7 @@ fn a_reload_keeps_compare_mode_and_compares_the_new_list() {
 }
 
 #[test]
-fn readiness_reads_the_trend_from_the_files_once_and_counts_no_request() {
+fn readiness_reads_the_trend_from_the_files_at_each_open_and_counts_no_request() {
     use crate::tui::test_support::{model_with_window, with_draft_loaded};
     let mut m = with_draft_loaded(model_with_window("24h"));
     m.snapshots_root = Some("/data/snapshots".into());
@@ -326,14 +329,34 @@ fn readiness_reads_the_trend_from_the_files_once_and_counts_no_request() {
             .snapshots,
         2
     );
-    // Closed and opened again: read already.
+    // Closed and opened again: the files are read again (a snapshot may
+    // have been saved since), still no request.
     key(&mut m, KeyCode::Esc);
     let cmds = update(
         &mut m,
         Msg::Command(crate::tui::commands::parse("readiness").unwrap()),
     );
-    assert!(
-        !cmds.iter().any(|c| matches!(c, Cmd::LoadTrend { .. })),
-        "{cmds:?}"
+    assert_eq!(
+        cmds,
+        [Cmd::LoadTrend {
+            dir: std::path::PathBuf::from("/data/snapshots")
+                .join(crate::names::dir_name(&m.profile.name))
+        }]
     );
+}
+
+#[test]
+fn the_comparison_is_computed_once_per_list_and_filtered_after() {
+    let mut m = comparing();
+    // The baseline's workloads changed under it: the filters keep using
+    // the comparison made for this list (it is not recomputed).
+    m.workloads.compare.as_mut().unwrap().workloads.clear();
+    quiet(&mut m, KeyCode::Char('v'));
+    quiet(&mut m, KeyCode::Char('c'));
+    assert_eq!(m.workloads.compare.as_ref().unwrap().counts.gone, 2);
+    // A new list is compared again.
+    let ws = m.workloads.raw.clone();
+    update(&mut m, Msg::WorkloadsLoaded(Ok((ws, 0, false))));
+    let c = m.workloads.compare.as_ref().unwrap();
+    assert_eq!((c.counts.gone, c.counts.new), (0, 4));
 }

@@ -70,8 +70,9 @@ pub struct WlGroup {
 }
 
 impl WlGroup {
+    /// The workloads there now (gone rows, in compare mode, not counted).
     pub fn count(&self) -> usize {
-        self.members.len()
+        self.members.len() - self.changes.gone as usize
     }
 
     /// Warning, offline and error VENs.
@@ -139,6 +140,12 @@ pub fn build_groups<'a>(
         let g = &mut groups[i];
         if let Some(c) = &r.change {
             g.changes.add(c.change);
+            // Gone (compare mode): listed, counted apart, never in the
+            // health or enforcement of what is there now.
+            if c.change == pce::traffic::Change::Gone {
+                g.members.push(r.clone());
+                continue;
+            }
         }
         g.health[usize::from(r.health.rank())] += 1;
         if let Some(e) = r.workload.enforcement()
@@ -348,11 +355,11 @@ pub fn health_text(g: &WlGroup) -> String {
         .join(" · ")
 }
 
-/// In compare mode, `2 new 1 chg 1 gone`: the changes with rows (empty
-/// when none, or not comparing).
+/// In compare mode, `2 new 1 chg`: the changes of the workloads there
+/// now (empty when none, or not comparing); gone ones are counted apart.
 pub fn changes_text(g: &WlGroup) -> String {
     let c = &g.changes;
-    [(c.new, "new"), (c.changed, "chg"), (c.gone, "gone")]
+    [(c.new, "new"), (c.changed, "chg")]
         .into_iter()
         .filter(|(n, _)| *n > 0)
         .map(|(n, w)| format!("{n} {w}"))

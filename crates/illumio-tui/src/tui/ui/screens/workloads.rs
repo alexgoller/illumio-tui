@@ -250,14 +250,18 @@ fn name_text(g: &WlGroup, folded: bool) -> String {
     format!("{} {}", if folded { "▹" } else { "▾" }, g.title)
 }
 
-/// `12 wl`, and in compare mode its changes: `12 wl · 2 new 1 chg`.
+/// `12 wl`, and in compare mode its changes and the workloads gone since:
+/// `12 wl · 2 new 1 chg · 1 gone`.
 fn count_text(g: &WlGroup) -> String {
+    let mut s = format!("{} wl", g.count());
     let changes = changes_text(g);
-    if changes.is_empty() {
-        format!("{} wl", g.count())
-    } else {
-        format!("{} wl · {changes}", g.count())
+    if !changes.is_empty() {
+        s.push_str(&format!(" · {changes}"));
     }
+    if g.changes.gone > 0 {
+        s.push_str(&format!(" · {} gone", g.changes.gone));
+    }
+    s
 }
 
 /// A section header in `width` cells: `▾ shop | prod   12 wl  ███▒  10 ok

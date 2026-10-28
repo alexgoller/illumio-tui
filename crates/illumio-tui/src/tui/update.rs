@@ -709,6 +709,7 @@ fn on_msg(model: &mut Model, msg: Msg) -> Vec<Cmd> {
                     let order = model.limits.key_order();
                     let w = &mut model.workloads;
                     w.raw = rows;
+                    w.raw_gen += 1;
                     w.truncated = truncated;
                     w.error = None;
                     // Marks of workloads gone (deleted elsewhere) go with them.

@@ -457,6 +457,9 @@ pub struct WorkloadsState {
     pub esc_armed: bool,
     /// Compare mode (`b`): the snapshot the rows are compared with.
     pub compare: Option<WlCompare>,
+    /// Which list `raw` is: moved on by every load, so compare mode
+    /// compares a new list again.
+    pub raw_gen: u64,
 }
 
 /// What `L` and `M` change: the marked workloads, else the group under
@@ -509,6 +512,7 @@ impl WorkloadsState {
             keep_status: false,
             esc_armed: false,
             compare: None,
+            raw_gen: 0,
         }
     }
 
@@ -660,19 +664,26 @@ impl WorkloadsState {
         }
         // The strip is the fleet loaded now; the gone rows are the snapshot's.
         self.ven = tally.finish(self.truncated);
-        if let Some(c) = &self.compare {
-            let cmp = crate::snapshot::baseline::compare_workloads(
-                &self.raw,
-                now,
-                &c.workloads,
-                c.taken_at,
-            );
+        if let Some(c) = &mut self.compare {
+            // Compared once per list and snapshot; filters, `n` and the
+            // rest only filter the result.
+            let key = (self.raw_gen, self.raw.len());
+            if c.computed.as_ref().is_none_or(|(k, _)| *k != key) {
+                let cmp = crate::snapshot::baseline::compare_workloads(
+                    &self.raw,
+                    now,
+                    &c.workloads,
+                    c.taken_at,
+                );
+                c.computed = Some((key, cmp));
+            }
+            let (taken_at, cmp) = (c.taken_at, &c.computed.as_ref().expect("computed").1);
             for v in &mut views {
                 v.change = cmp.of(&v.workload.href).cloned();
             }
             // Gone: the snapshot's values, its health then.
-            views.extend(cmp.gone.into_iter().map(|w| {
-                let mut v = WorkloadRowView::new(w, c.taken_at, order);
+            views.extend(cmp.gone.iter().cloned().map(|w| {
+                let mut v = WorkloadRowView::new(w, taken_at, order);
                 v.change = Some(crate::snapshot::baseline::WlChange::of(
                     pce::traffic::Change::Gone,
                 ));

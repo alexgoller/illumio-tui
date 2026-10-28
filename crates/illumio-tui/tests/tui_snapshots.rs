@@ -3786,7 +3786,7 @@ fn workloads_compare_grouped_120x40_and_gone_only_80x24() {
     let mut m = ts::model_comparing_workloads();
     gen_key(&mut m, 'x');
     let out = render_to_string(&m, 120, 40);
-    assert!(out.contains("wl · 2 chg 1 gone"), "{out}");
+    assert!(out.contains("2 wl · 2 chg · 1 gone"), "{out}");
     insta::assert_snapshot!("workloads_compare_grouped_120x40", out);
     gen_key(&mut m, 'x');
     for _ in 0..3 {
