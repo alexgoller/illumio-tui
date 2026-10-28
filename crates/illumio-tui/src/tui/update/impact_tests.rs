@@ -132,7 +132,7 @@ fn the_report_lines_name_every_section() {
         "    ~ allow role=web ← iplist:Corp",
         "      was allow role=web ← role=db",
         "      providers 1→1 · consumers 1→0",
-        "Traffic · 1d · 4 flow records · 1 newly blocked · 1 newly allowed",
+        "Traffic · 24h · 4 flow records · 1 newly blocked · 1 newly allowed",
         "Newly blocked or potentially blocked · 1 pair",
         "Newly allowed · 1 pair",
         "Not counted",

@@ -59,8 +59,8 @@ pub fn impact_spec(
     yes: bool,
     requested: Option<BTreeSet<String>>,
 ) -> Result<LoadSpec, CliError> {
-    let w = window.unwrap_or(&ctx.config.traffic_default_window);
-    let w = parse_window(w).map_err(|e| CliError::Args(format!("--window: {e}")))?;
+    let label = window.unwrap_or(&ctx.config.traffic_default_window);
+    let w = parse_window(label).map_err(|e| CliError::Args(format!("--window: {e}")))?;
     let query = TrafficQueryBuilder::last(w)?
         .max_results(ctx.config.traffic_max_results)
         .build()?;
@@ -71,6 +71,7 @@ pub fn impact_spec(
     }
     Ok(LoadSpec {
         query,
+        window: label.to_string(),
         keys: keys_or_profile(ctx, &[]),
         mode: ctx.cache_mode,
         requested,
@@ -179,9 +180,9 @@ impl TableRows for Rules<'_> {
             if rs.rules.is_empty() {
                 out.push(vec![
                     rs.name.clone(),
-                    format!("{} (no rule changes)", rs.change),
+                    rs.change.clone(),
                     String::new(),
-                    String::new(),
+                    "(no rule changes)".into(),
                     String::new(),
                     String::new(),
                 ]);
@@ -323,6 +324,16 @@ impl TableRows for Pairs<'_> {
     }
 }
 
+/// ` · 3 not evaluated` (flow records the draft re-evaluation did not
+/// reach), empty for none.
+pub fn not_evaluated_text(n: u64) -> String {
+    if n == 0 {
+        String::new()
+    } else {
+        format!(" · {n} not evaluated")
+    }
+}
+
 /// `N of M pairs` when `--limit` (or the default) cut the list.
 fn shown_of(shown: usize, total: usize) -> String {
     if shown < total {
@@ -374,11 +385,12 @@ pub fn write_tables(
         let x = &t.transitions;
         writeln!(
             out,
-            "traffic · {} · {} flow records · {} newly blocked · {} newly allowed{}",
+            "traffic · {} · {} flow records · {} newly blocked · {} newly allowed{}{}",
             t.window,
             t.flows,
             x.newly_blocked,
             x.newly_allowed,
+            not_evaluated_text(x.not_evaluated),
             if t.truncated { " · truncated" } else { "" }
         )?;
         write_table(out, &Moves(x))?;
@@ -463,20 +475,65 @@ pub async fn run(ctx: &Context, a: &ImpactArgs) -> Result<(), CliError> {
                 if n == 1 { "" } else { "s" }
             )));
         }
-        if let Some(t) = report
-            .traffic
-            .as_ref()
-            .filter(|t| t.truncated || t.incomplete)
-        {
-            return Err(CliError::Incomplete(format!(
-                "no flow would become blocked, but the traffic result is {}: the answer is not complete",
-                if t.truncated {
-                    "truncated (cap reached; a shorter --window narrows it)"
-                } else {
-                    "incomplete (a region did not answer)"
-                }
-            )));
+        if let Some(t) = report.traffic.as_ref() {
+            let why = if t.transitions.not_evaluated > 0 {
+                Some(format!(
+                    "{} of {} flow records were not re-evaluated against the draft",
+                    t.transitions.not_evaluated, t.flows
+                ))
+            } else if t.truncated {
+                Some("truncated (cap reached; a shorter --window narrows it)".to_string())
+            } else if t.incomplete {
+                Some("incomplete (a region did not answer)".to_string())
+            } else {
+                None
+            };
+            if let Some(why) = why {
+                return Err(CliError::Incomplete(format!(
+                    "no flow would become blocked, but the traffic result is not complete: {why}"
+                )));
+            }
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A ruleset with no rule change: the change column holds its change
+    /// type only, the note sits in the rule column.
+    #[test]
+    fn a_ruleset_without_rule_changes_keeps_the_change_column_narrow() {
+        let rs = RulesetImpact {
+            name: "Shop-Prod".into(),
+            href: "/orgs/5/sec_policy/draft/rule_sets/100".into(),
+            change: "create".into(),
+            added: 0,
+            removed: 0,
+            changed: 0,
+            deny_compared: true,
+            rules: Vec::new(),
+        };
+        let t = Rules(std::slice::from_ref(&rs));
+        assert_eq!(
+            t.rows(),
+            [vec![
+                "Shop-Prod".to_string(),
+                "create".into(),
+                String::new(),
+                "(no rule changes)".into(),
+                String::new(),
+                String::new(),
+            ]]
+        );
+        assert_eq!(t.notes(), [Vec::<String>::new()]);
+    }
+
+    #[test]
+    fn not_evaluated_shows_only_when_some_are() {
+        assert_eq!(not_evaluated_text(0), "");
+        assert_eq!(not_evaluated_text(3), " · 3 not evaluated");
+    }
 }

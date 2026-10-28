@@ -42,6 +42,7 @@ fn load_impact(model: &mut Model, mode: CacheMode) -> Vec<Cmd> {
     };
     let spec = LoadSpec {
         query,
+        window: l.traffic_default_window.clone(),
         keys: l.scope_keys.clone(),
         mode,
         requested: None,

@@ -10,14 +10,11 @@
 use crate::tui::diff::{DenySide, draft_href, inlines_deny, rule_summary};
 use pce::impact::{ImpactInputs, RuleActors, rule_impact_with, rule_set_href_of, workload_labels};
 use pce::models::{PendingChange, PolicyScope, RuleSet, TrafficQuery, Workload, WorkloadFilter};
-use pce::traffic::{
-    DraftPair, Transitions, compact_duration, draft_pairs, resolve_flows, transitions,
-};
+use pce::traffic::{DraftPair, Transitions, draft_pairs, resolve_flows, transitions};
 use pce::{CacheMode, Evaluation, Impact, NameIndex, Pce, RuleKind};
 use serde::Serialize;
 use serde_json::Value;
 use std::collections::BTreeSet;
-use std::time::Duration;
 use tokio_util::sync::CancellationToken;
 
 /// The pair rows the table (and the TUI) show per direction unless told
@@ -97,7 +94,7 @@ pub struct RulesetImpact {
 /// draft.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct TrafficImpact {
-    /// `24h`.
+    /// The window as given (`24h`, `7d`).
     pub window: String,
     /// Flow records loaded.
     pub flows: u64,
@@ -447,13 +444,13 @@ pub fn unsupported(c: &RuleChange) -> Vec<String> {
 pub fn traffic_section(
     flows: &[pce::traffic::ResolvedFlow],
     keys: &[String],
-    window: Duration,
+    window: &str,
     truncated: bool,
     incomplete: bool,
 ) -> TrafficImpact {
     let pairs = draft_pairs(flows, keys);
     TrafficImpact {
-        window: compact_duration(window),
+        window: window.to_string(),
         flows: flows.len() as u64,
         truncated,
         incomplete,
@@ -500,6 +497,8 @@ impl ProvisionImpact {
 pub struct LoadSpec {
     /// The traffic query (window, cap), checked by the caller.
     pub query: TrafficQuery,
+    /// Its window as the user gave it (`24h`), echoed in the summary.
+    pub window: String,
     /// The label keys a pair is grouped by (`app,env` when empty).
     pub keys: Vec<String>,
     pub mode: CacheMode,
@@ -588,7 +587,7 @@ pub async fn load(pce: &Pce, spec: &LoadSpec, cancel: &CancellationToken) -> pce
     let traffic = traffic_section(
         &flows,
         &spec.keys,
-        spec.query.window(),
+        &spec.window,
         r.truncated,
         r.value.incomplete,
     );

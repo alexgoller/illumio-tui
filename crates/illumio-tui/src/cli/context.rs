@@ -195,18 +195,27 @@ impl Context {
         self.emit_write_meta(data, write, truncated, None)
     }
 
-    /// [`Context::emit_write_with`] with `meta.warnings` (`policy provision
-    /// --impact`: the summary covers the whole draft).
+    /// [`Context::emit_write_with`] with `policy provision --impact`'s
+    /// meta carried over: its cost, window, cap, draft counts, truncation
+    /// and warnings (the summary covers the whole draft).
     pub fn emit_write_meta(
         &self,
         data: &super::write::WriteOutput,
         write: Option<WriteMeta>,
         truncated: bool,
-        warnings: Option<Vec<String>>,
+        impact: Option<&super::output::Meta>,
     ) -> Result<(), CliError> {
         let mut meta = self.meta("none", truncated, None);
         meta.write = write;
-        meta.warnings = warnings;
+        if let Some(m) = impact {
+            meta.truncated |= m.truncated;
+            meta.warnings = m.warnings.clone();
+            meta.cost = m.cost.clone();
+            meta.draft = m.draft;
+            meta.window = m.window.clone();
+            meta.cap = m.cap;
+            meta.incomplete = m.incomplete;
+        }
         let mut out = std::io::stdout().lock();
         match self.format {
             OutputFormat::Json => write_json(&mut out, data, &meta)?,

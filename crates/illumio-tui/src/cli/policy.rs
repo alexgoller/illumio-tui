@@ -2063,8 +2063,7 @@ async fn provision_impact(
     let meta = impact_meta(ctx, &loaded, &spec, targets);
     Ok(write::ImpactOut {
         report: loaded.report,
-        truncated: meta.truncated,
-        warnings: meta.warnings,
+        meta,
     })
 }
 

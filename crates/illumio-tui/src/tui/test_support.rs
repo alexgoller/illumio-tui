@@ -861,12 +861,6 @@ pub fn impact_fixture() -> crate::provision_impact::ProvisionImpact {
         changes: changes_section(&pending, None),
         rulesets,
         not_counted: NOT_COUNTED.iter().map(|s| s.to_string()).collect(),
-        traffic: Some(traffic_section(
-            &flows,
-            &keys,
-            std::time::Duration::from_secs(86_400),
-            false,
-            false,
-        )),
+        traffic: Some(traffic_section(&flows, &keys, "24h", false, false)),
     }
 }

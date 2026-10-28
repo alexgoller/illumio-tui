@@ -225,10 +225,9 @@ impl TableRows for WriteOutput {
 /// the plan and before anything is sent, and what its reads add to `meta`.
 pub struct ImpactOut {
     pub report: ProvisionImpact,
-    /// A read behind it was cut short.
-    pub truncated: bool,
-    /// `meta.warnings` (printed to stderr as they were made).
-    pub warnings: Option<Vec<String>>,
+    /// `policy impact`'s meta: its cost, window, cap, draft counts,
+    /// truncation and warnings carry into the write's (`emit_write_meta`).
+    pub meta: super::output::Meta,
 }
 
 /// What a write's output carries besides the request or the result.
@@ -290,17 +289,12 @@ async fn send(
     plan: Plan,
     extra: Extra,
 ) -> Result<(), CliError> {
-    let mut truncated = matches!(extra, Extra::Impact(_, true));
-    let mut warnings = None;
+    let truncated = matches!(extra, Extra::Impact(_, true));
+    let mut impact_meta = None;
     let (extra, impact) = match extra {
         Extra::Counts(Some(i)) => {
-            let ImpactOut {
-                report,
-                truncated: cut,
-                warnings: w,
-            } = *i;
-            truncated |= cut;
-            warnings = w;
+            let ImpactOut { report, meta } = *i;
+            impact_meta = Some(meta);
             (Extra::Counts(None), Some(Box::new(report)))
         }
         e => (e, None),
@@ -344,7 +338,7 @@ async fn send(
             },
             _ => WriteOutput::DryRun(request),
         };
-        return ctx.emit_write_meta(&out, None, truncated, warnings);
+        return ctx.emit_write_meta(&out, None, truncated, impact_meta.as_ref());
     }
     let method = request.method;
     let path = request.path.clone();
@@ -373,7 +367,7 @@ async fn send(
                 },
                 _ => WriteOutput::Written(w),
             };
-            ctx.emit_write_meta(&out, Some(meta), truncated, warnings)
+            ctx.emit_write_meta(&out, Some(meta), truncated, impact_meta.as_ref())
         }
         Outcome::Skipped {
             existing_href,

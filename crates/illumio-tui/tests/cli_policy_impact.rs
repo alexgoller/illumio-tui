@@ -101,6 +101,18 @@ fn pending_body(rulesets: bool) -> Value {
 /// rulesets, active label groups and IP lists and the workloads; `queries`
 /// the draft query (POST, PUT, download).
 async fn mount(server: &MockServer, pending: Value, lists: u64, rules: u64, queries: u64) {
+    mount_flows(server, pending, lists, rules, queries, &draft_flows()).await;
+}
+
+/// `mount` with `flows` as the draft query's download.
+async fn mount_flows(
+    server: &MockServer,
+    pending: Value,
+    lists: u64,
+    rules: u64,
+    queries: u64,
+    flows: &str,
+) {
     Mock::given(method("GET"))
         .and(path("/api/v2/orgs/5/sec_policy/pending"))
         .respond_with(ResponseTemplate::new(200).set_body_json(pending))
@@ -187,7 +199,7 @@ async fn mount(server: &MockServer, pending: Value, lists: u64, rules: u64, quer
         .await;
     Mock::given(method("GET"))
         .and(path(format!("/api/v2{QHREF}/download")))
-        .respond_with(answer(&draft_flows()))
+        .respond_with(answer(flows))
         .expect(queries)
         .mount(server)
         .await;
@@ -256,7 +268,7 @@ async fn three_sections_from_one_pending_read_and_one_draft_query() {
     // The traffic: 443 allowed → blocked, the potentially blocked flow
     // allowed in draft.
     let t = &d["traffic"];
-    assert_eq!(t["window"], "1d");
+    assert_eq!(t["window"], "24h", "as the profile gives it");
     assert_eq!(t["flows"], 4);
     assert_eq!(t["transitions"]["newly_blocked"], 1);
     assert_eq!(t["transitions"]["newly_allowed"], 1);
@@ -339,7 +351,7 @@ async fn fail_on_blocked_exits_7_after_the_report() {
         "changes · 3 pending changes",
         "rules · 2 pending rulesets · 1 added · 0 removed · 1 changed",
         "was: allow",
-        "traffic · 1d · 4 flow records · 1 newly blocked · 1 newly allowed",
+        "traffic · 24h · 4 flow records · 1 newly blocked · 1 newly allowed",
         "allowed → blocked",
         "newly blocked or potentially blocked · 1 pair",
         "newly allowed · 1 pair",
@@ -467,6 +479,11 @@ async fn provision_dry_run_prints_the_summary_in_front_of_the_request() {
         ]
     );
     assert_eq!(d["impact"]["traffic"]["transitions"]["newly_blocked"], 1);
+    // The summary's meta carries into the write's.
+    let m = &v["meta"];
+    assert!(m["cost"].as_str().unwrap().contains("update_rules"), "{m}");
+    assert_eq!(m["draft"]["newly_blocked"], 1);
+    assert!(m["window"]["start"].is_string());
     let w = v["meta"]["warnings"].as_array().unwrap();
     assert!(w[0].as_str().unwrap().contains("whole draft"), "{w:?}");
     // A table: the summary first, then the request.
@@ -490,7 +507,7 @@ async fn provision_dry_run_prints_the_summary_in_front_of_the_request() {
             .unwrap_or_else(|| panic!("{s:?} missing:\n{out}"))
     };
     assert!(at("changes · 3 pending changes") < at("method"));
-    assert!(at("traffic · 1d") < at("counts"));
+    assert!(at("traffic · 24h") < at("counts"));
 }
 
 /// Without `--impact` a provision dry run reads nothing more.
@@ -506,4 +523,41 @@ async fn provision_without_impact_reads_nothing_more() {
         .success();
     let v = envelope(&a);
     assert!(v["data"].get("impact").is_none());
+}
+
+/// A download whose flows carry no draft decision (the re-evaluation did
+/// not reach them): `--fail-on-blocked` is exit 4, never a silent pass, and
+/// the heading counts them.
+#[tokio::test(flavor = "multi_thread")]
+async fn flows_the_draft_did_not_evaluate_fail_the_gate_with_4() {
+    let server = MockServer::start().await;
+    let reported = include_str!("../../../fixtures/traffic_flows.json").replace(
+        "\"draft_policy_decision\":\"allowed\"",
+        "\"draft_policy_decision\":null",
+    );
+    mount_flows(&server, pending_body(false), 1, 0, 1, &reported).await;
+    let home = tempfile::tempdir().unwrap();
+    let a = cmd(&server, home.path())
+        .args(["--table", "policy", "impact", "--fail-on-blocked"])
+        .assert()
+        .code(4);
+    assert!(stdout(&a).contains("· 4 not evaluated"), "{}", stdout(&a));
+    assert!(
+        stderr(&a).contains("4 of 4 flow records were not re-evaluated"),
+        "{}",
+        stderr(&a)
+    );
+}
+
+/// The window is echoed as given, not normalised (`12h`, not `0.5d`).
+#[tokio::test(flavor = "multi_thread")]
+async fn the_window_is_echoed_as_given() {
+    let server = MockServer::start().await;
+    mount(&server, pending_body(false), 1, 0, 1).await;
+    let home = tempfile::tempdir().unwrap();
+    let a = cmd(&server, home.path())
+        .args(["--json", "policy", "impact", "--window", "12h"])
+        .assert()
+        .success();
+    assert_eq!(envelope(&a)["data"]["traffic"]["window"], "12h");
 }
