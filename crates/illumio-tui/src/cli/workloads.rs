@@ -854,6 +854,10 @@ pub async fn select_against(
         .unlabeled
         .as_deref()
         .map(|named| unlabeled_keys(named, order.first()));
+    // Against a snapshot every filter is applied here, to both sides: the
+    // one read is unfiltered (as `snapshot save` reads it), so a workload
+    // the filters no longer match is never taken for gone.
+    let against = base.is_some();
     let mut filter = WorkloadFilter {
         name: args.name.clone(),
         hostname: args.hostname.clone(),
@@ -864,6 +868,12 @@ pub async fn select_against(
         labels: Vec::new(),
         max_results: args.max_results,
     };
+    if against {
+        filter = WorkloadFilter {
+            max_results: args.max_results,
+            ..WorkloadFilter::default()
+        };
+    }
     // One parser for `--label` and the app's `f`; the positive any-of
     // terms go into the one request, `!` and `-` are applied to its answer.
     let labels = LabelFilter::from_terms(&args.labels)
@@ -871,7 +881,7 @@ pub async fn select_against(
     // `app=shop app=crm`: no workload has both, so nothing is asked (an
     // empty labels parameter would mean every workload).
     let nothing = labels.matches_nothing();
-    if !nothing && labels.terms.iter().any(|t| !t.negate && !t.none) {
+    if !against && !nothing && labels.terms.iter().any(|t| !t.negate && !t.none) {
         // The labels list alone resolves them (one read, cached).
         let labels_list = ctx.pce.labels(ctx.cache_mode).await?.value;
         let idx = pce::NameIndex::new(&labels_list, &[], &[], &[]);
@@ -892,8 +902,11 @@ pub async fn select_against(
             })?;
         filter.labels = sets.unwrap_or_default();
     }
-    let local_labels: Vec<&LabelTerm> =
-        labels.terms.iter().filter(|t| t.negate || t.none).collect();
+    let local_labels: Vec<&LabelTerm> = labels
+        .terms
+        .iter()
+        .filter(|t| against || t.negate || t.none)
+        .collect();
     let c = if nothing {
         pce::Cached {
             value: Vec::new(),
@@ -923,8 +936,8 @@ pub async fn select_against(
     }
     let now = jiff::Timestamp::now();
     let (unhealthy, offline, health) = args.health_filter();
-    // Compared on the whole answer, before the local filters: a workload
-    // they hide now is not gone.
+    // Compared on the whole (unfiltered) answer, before the filters: a
+    // workload they hide now is not gone.
     let compared = base.map(|(ws, at)| (compare_workloads(&c.value, now, ws, at), at));
     let make = |w: Workload, at: jiff::Timestamp| {
         let mut r = WorkloadRow::new(w, at, &order);
@@ -957,9 +970,28 @@ pub async fn select_against(
             // the plain any-of terms, `!` and `-` are only checked here.
             && labels.keeps(&r.workload)
     };
+    // Against a snapshot: what the request would have asked the PCE,
+    // checked here on both sides (a snapshot keeps no interfaces, so with
+    // `--ip` no snapshot workload matches).
+    let asked = |w: &Workload| {
+        let has = |field: Option<&str>, want: &Option<String>| {
+            want.as_deref()
+                .is_none_or(|x| field.is_some_and(|f| f.to_lowercase().contains(&x.to_lowercase())))
+        };
+        !against
+            || (has(w.hostname.as_deref(), &args.hostname)
+                && has(w.name.as_deref(), &args.name)
+                && args
+                    .ip
+                    .as_deref()
+                    .is_none_or(|ip| w.interfaces.iter().any(|i| i.address == ip))
+                && args.online.is_none_or(|o| w.online == Some(o))
+                && managed.is_none_or(|m| m != w.is_unmanaged()))
+    };
     let mut rows: Vec<WorkloadRow> = c
         .value
         .into_iter()
+        .filter(|w| asked(w))
         .map(|w| make(w, now))
         .filter(|r| keep(r))
         .collect();
@@ -968,20 +1000,6 @@ pub async fn select_against(
         for r in &mut rows {
             r.compare = cmp.of(&r.workload.href).map(RowCompare::of);
         }
-        // What the request asked the PCE, checked on the snapshot's side.
-        let asked = |w: &Workload| {
-            let has = |field: Option<&str>, want: &Option<String>| {
-                want.as_deref().is_none_or(|x| {
-                    field.is_some_and(|f| f.to_lowercase().contains(&x.to_lowercase()))
-                })
-            };
-            has(w.hostname.as_deref(), &args.hostname)
-                && has(w.name.as_deref(), &args.name)
-                // A snapshot keeps no interfaces: `--ip` keeps no gone row.
-                && args.ip.is_none()
-                && args.online.is_none_or(|o| w.online == Some(o))
-                && managed.is_none_or(|m| m != w.is_unmanaged())
-        };
         rows.extend(
             cmp.gone
                 .into_iter()

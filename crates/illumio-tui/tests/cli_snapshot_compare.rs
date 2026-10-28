@@ -12,7 +12,7 @@ use illumio_tui::snapshot::{self, Sections, Snapshot, VERSION};
 use pce::models::{Workload, WorkloadLabel};
 use serde_json::{Value, json};
 use std::path::PathBuf;
-use wiremock::matchers::{method, path};
+use wiremock::matchers::{method, path, query_param_is_missing};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
 /// Temp config, cache and data homes for one test.
@@ -67,6 +67,28 @@ async fn expect(server: &MockServer, p: &str, body: &str, times: u64) {
 }
 
 const WORKLOADS: &str = "/api/v2/orgs/5/workloads";
+
+/// The workloads read against a snapshot: unfiltered (every filter is
+/// applied locally, to both sides), answered with `body`, `times` times. A
+/// read carrying a filter matches nothing here and fails the test.
+async fn expect_unfiltered(server: &MockServer, body: &str, times: u64) {
+    let mut m = Mock::given(method("GET")).and(path(WORKLOADS));
+    for p in [
+        "labels",
+        "hostname",
+        "name",
+        "ip_address",
+        "enforcement_mode",
+        "managed",
+        "online",
+    ] {
+        m = m.and(query_param_is_missing(p));
+    }
+    m.respond_with(answer(body))
+        .expect(times)
+        .mount(server)
+        .await;
+}
 const LABELS: &str = "/api/v2/orgs/5/labels";
 
 fn fixture_workloads() -> Vec<Workload> {
@@ -142,14 +164,8 @@ fn by_host<'a>(rows: &'a Value, host: &str) -> &'a Value {
 #[tokio::test]
 async fn workloads_against_a_snapshot_read_the_list_once_and_the_file() {
     let server = MockServer::start().await;
-    // Once per run: the file adds none.
-    expect(
-        &server,
-        WORKLOADS,
-        include_str!("../../../fixtures/workloads.json"),
-        2,
-    )
-    .await;
+    // Once per run, unfiltered: the file adds none.
+    expect_unfiltered(&server, include_str!("../../../fixtures/workloads.json"), 2).await;
     let env = Env::new();
     let b = baseline(&server);
     snapshot::save(&env.dir(), &b).unwrap();
@@ -202,20 +218,9 @@ async fn workloads_against_a_snapshot_read_the_list_once_and_the_file() {
 #[tokio::test]
 async fn changes_default_to_the_differences_and_the_filters_apply_to_both_sides() {
     let server = MockServer::start().await;
-    expect(
-        &server,
-        WORKLOADS,
-        include_str!("../../../fixtures/workloads.json"),
-        2,
-    )
-    .await;
-    expect(
-        &server,
-        LABELS,
-        include_str!("../../../fixtures/labels.json"),
-        1,
-    )
-    .await;
+    // `--label` too is applied locally: no label read, no labels parameter.
+    expect_unfiltered(&server, include_str!("../../../fixtures/workloads.json"), 2).await;
+    expect(&server, LABELS, "[]", 0).await;
     let env = Env::new();
     snapshot::save(&env.dir(), &baseline(&server)).unwrap();
     let a = env
@@ -257,6 +262,51 @@ async fn changes_default_to_the_differences_and_the_filters_apply_to_both_sides(
     assert!(body[1].contains(",gone,,"), "{out}");
 }
 
+/// A workload moved from app=shop to app=crm since the snapshot is never
+/// gone: with `--label app=shop` it matches neither side now (excluded, as
+/// the TUI's `f app=shop` hides it); with `--label app=crm` it is changed.
+#[tokio::test]
+async fn a_workload_moved_out_of_the_filter_is_not_gone() {
+    let server = MockServer::start().await;
+    let mut live = fixture_workloads();
+    for l in &mut live[0].labels {
+        if l.key.as_deref() == Some("app") {
+            l.value = Some("crm".into());
+            l.href = "/orgs/5/labels/30".into();
+        }
+    }
+    expect_unfiltered(&server, &serde_json::to_string(&live).unwrap(), 2).await;
+    let env = Env::new();
+    let b = snap(&server, fixture_workloads());
+    snapshot::save(&env.dir(), &b).unwrap();
+    let run = |label: &'static str| {
+        env.cmd(&server)
+            .args([
+                "--json",
+                "workloads",
+                "--baseline-snapshot",
+                "latest",
+                "--label",
+                label,
+                "--changes",
+                "new,changed,gone,same",
+            ])
+            .assert()
+            .success()
+    };
+    let v = schema_check::envelope(&run("app=shop").get_output().stdout);
+    let rows = v["data"].as_array().unwrap();
+    assert!(
+        rows.iter().all(|r| r["hostname"] != "host-1.example"),
+        "{rows:#?}"
+    );
+    assert!(rows.iter().all(|r| r["change"] != "gone"), "{rows:#?}");
+    let v = schema_check::envelope(&run("app=crm").get_output().stdout);
+    let h1 = by_host(&v["data"], "host-1.example");
+    assert_eq!(h1["change"], "changed");
+    assert_eq!(h1["was"], "app: shop→crm");
+}
+
 #[tokio::test]
 async fn another_pces_or_an_unknown_snapshot_is_refused_before_any_request() {
     let server = MockServer::start().await;
@@ -288,13 +338,7 @@ async fn another_pces_or_an_unknown_snapshot_is_refused_before_any_request() {
 #[tokio::test]
 async fn fields_pick_the_change_columns() {
     let server = MockServer::start().await;
-    expect(
-        &server,
-        WORKLOADS,
-        include_str!("../../../fixtures/workloads.json"),
-        1,
-    )
-    .await;
+    expect_unfiltered(&server, include_str!("../../../fixtures/workloads.json"), 1).await;
     let env = Env::new();
     snapshot::save(&env.dir(), &baseline(&server)).unwrap();
     let a = env
@@ -424,8 +468,8 @@ fn readiness_snap(server: &MockServer, at: &str, apps: &[(&str, &str, u64)]) -> 
 #[tokio::test]
 async fn readiness_trend_reads_the_snapshots_and_adds_the_live_point() {
     let server = MockServer::start().await;
-    // Two runs, readiness's requests each; the files add none.
-    mount_readiness(&server, 2).await;
+    // Three runs, readiness's requests each; the files add none.
+    mount_readiness(&server, 3).await;
     let env = Env::new();
     for (at, gaps) in [("2026-10-01T03:00:00Z", 9), ("2026-10-08T03:00:00Z", 4)] {
         snapshot::save(
@@ -474,4 +518,23 @@ async fn readiness_trend_reads_the_snapshots_and_adds_the_live_point() {
         .into_iter()
         .collect();
     assert!(row.trim_end().ends_with(&spark), "{spark} in {out}");
+    // Another window than the snapshots' 7d: no live point, said.
+    let a = env
+        .cmd(&server)
+        .args(["--json", "readiness", "--trend", "--window", "24h"])
+        .assert()
+        .success();
+    let v = schema_check::envelope(&a.get_output().stdout);
+    let warnings = v["meta"]["warnings"].to_string();
+    assert!(
+        warnings.contains("live point left out: window 1d differs from the snapshots' 7d"),
+        "{warnings}"
+    );
+    let shop = v["data"]["apps"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|a| a["app"] == "shop/prod")
+        .unwrap();
+    assert_eq!(shop["trend"].as_array().unwrap().len(), 2);
 }

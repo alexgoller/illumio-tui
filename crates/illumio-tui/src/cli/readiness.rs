@@ -49,7 +49,7 @@ pub struct ReadinessArgs {
     pub no_marks: bool,
     /// Each app's road to enforcement: its verdict and gap count in the newest 14 of the
     /// profile's snapshots that hold readiness (`snapshot save --with-readiness`), then the
-    /// live result. JSON: trend per app; the table: a sparkline of the gaps. Reads the files
+    /// live result when judged on the same window (7d) and draft (else left out, a warning). JSON: trend per app; the table: a sparkline of the gaps. Reads the files
     /// only, no extra request; another PCE's snapshots are skipped (a warning)
     #[arg(long)]
     pub trend: bool,
@@ -243,7 +243,8 @@ struct TrendReport<'a> {
 struct AppTrend<'a> {
     #[serde(flatten)]
     app: &'a AppReadiness,
-    /// The snapshots' points, oldest first, then the live result's.
+    /// The snapshots' points, oldest first, then the live result's (left
+    /// out when its window or draft differs from theirs).
     trend: &'a [TrendPoint],
 }
 
@@ -500,8 +501,12 @@ pub async fn run(ctx: &Context, args: &ReadinessArgs) -> Result<(), CliError> {
         report, mut meta, ..
     } = evaluate(ctx, args).await?;
     let apps_table = Apps(&report.apps);
-    // Each app's points: the snapshots', then the live result's.
+    // Each app's points: the snapshots', then the live result's when it
+    // is judged on the same basis (window, draft) as theirs.
     let now = Timestamp::now();
+    let mismatch = trend
+        .as_ref()
+        .and_then(|t| t.live_mismatch(&report.window, report.draft));
     let trends: Vec<Vec<TrendPoint>> = match &trend {
         None => Vec::new(),
         Some(t) => report
@@ -509,11 +514,13 @@ pub async fn run(ctx: &Context, args: &ReadinessArgs) -> Result<(), CliError> {
             .iter()
             .map(|r| {
                 let mut v = t.apps.get(&r.app).cloned().unwrap_or_default();
-                v.push(TrendPoint {
-                    taken_at: now,
-                    verdict: r.verdict,
-                    gaps: r.gap_count,
-                });
+                if mismatch.is_none() {
+                    v.push(TrendPoint {
+                        taken_at: now,
+                        verdict: r.verdict,
+                        gaps: r.gap_count,
+                    });
+                }
                 v
             })
             .collect(),
@@ -521,6 +528,9 @@ pub async fn run(ctx: &Context, args: &ReadinessArgs) -> Result<(), CliError> {
     if let Some(t) = &trend {
         let w = meta.warnings.get_or_insert_with(Vec::new);
         w.extend(t.skipped.iter().map(|s| format!("--trend: skipped {s}")));
+        if let Some(m) = &mismatch {
+            w.push(format!("--trend: {m}"));
+        }
         if t.snapshots == 0 {
             w.push(
                 "--trend: no snapshot of this profile holds readiness (snapshot save --with-readiness keeps it)"
