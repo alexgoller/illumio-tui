@@ -1146,14 +1146,14 @@
             "unchanged": {"type": "integer", "description": "evaluated records whose verdict the draft keeps"},
             "changed": {"type": "array", "items": {"$ref": "#/$defs/transition_cell"}, "description": "every non-zero reported → draft cell where the verdict changes"},
             "newly_blocked": {"type": "integer", "description": "the draft decision is stricter (allowed < potentially_blocked < blocked): allowed → potentially blocked or blocked, potentially blocked → blocked (what --fail-on-blocked gates on; meta.draft.newly_blocked counts allowed → not allowed only)"},
-            "newly_allowed": {"type": "integer", "description": "the draft decision is looser: blocked → potentially blocked or allowed, potentially blocked → allowed"}
+            "newly_allowed": {"type": "integer", "description": "the draft decision is allowed and the reported one is blocked or potentially blocked (blocked → potentially blocked is in neither count, only in changed)"}
           },
           "required": ["evaluated", "not_evaluated", "unchanged", "changed", "newly_blocked", "newly_allowed"],
           "additionalProperties": false
         },
         "blocked_pairs": {"type": "array", "items": {"$ref": "#/$defs/draft_pair"}, "description": "group pairs with flows whose draft decision is stricter, busiest first; all of them unless --limit"},
         "blocked_pairs_total": {"type": "integer"},
-        "allowed_pairs": {"type": "array", "items": {"$ref": "#/$defs/draft_pair"}, "description": "group pairs with flows whose draft decision is looser"},
+        "allowed_pairs": {"type": "array", "items": {"$ref": "#/$defs/draft_pair"}, "description": "group pairs with flows the draft allows that are blocked or potentially blocked today"},
         "allowed_pairs_total": {"type": "integer"}
       },
       "required": ["window", "flows", "truncated", "incomplete", "transitions", "blocked_pairs", "blocked_pairs_total", "allowed_pairs", "allowed_pairs_total"],

@@ -1796,7 +1796,8 @@ against the whole draft, so the summary always covers everything pending. Three 
   policy change) in its own cache slot: every flow record reported → draft (each changed cell,
   the rest as one `unchanged` count), then the app/env group pairs (the profile's scope keys)
   whose flows get a stricter decision (newly blocked: allowed → potentially blocked or blocked,
-  and potentially blocked → blocked), then those that get a looser one (newly allowed), busiest
+  and potentially blocked → blocked), then those the draft allows (newly allowed: blocked or
+  potentially blocked → allowed; blocked → potentially blocked is only in the table), busiest
   first, with their services by port. Flows the draft re-evaluation did not reach are counted
   in the heading (`· 3 not evaluated`). The table shows 20 pairs per
   direction (`--limit N`); `--json` and `--csv` carry all of them unless `--limit` is given

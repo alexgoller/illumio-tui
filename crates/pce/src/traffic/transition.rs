@@ -48,8 +48,8 @@ pub struct Transitions {
     /// potentially blocked < blocked): allowed → potentially blocked,
     /// allowed → blocked, potentially blocked → blocked ([`stricter`]).
     pub newly_blocked: u64,
-    /// The draft decision is looser: blocked → potentially blocked,
-    /// blocked → allowed, potentially blocked → allowed ([`looser`]).
+    /// The draft allows what is blocked or potentially blocked today
+    /// ([`now_allowed`]); blocked → potentially blocked is in neither count.
     pub newly_allowed: u64,
 }
 
@@ -64,7 +64,7 @@ fn rank(d: PolicyDecision) -> u8 {
 }
 
 /// How strict a decision is: allowed < potentially blocked < blocked;
-/// `None` for unknown, which is neither stricter nor looser than any.
+/// `None` for unknown, which is neither stricter nor less strict than any.
 fn strictness(d: PolicyDecision) -> Option<u8> {
     match d {
         PolicyDecision::Allowed => Some(0),
@@ -74,24 +74,23 @@ fn strictness(d: PolicyDecision) -> Option<u8> {
     }
 }
 
-/// `f`'s draft decision (by class) against its reported one: `Some(true)`
-/// stricter, `Some(false)` looser, `None` the same, unknown or no draft.
-fn direction(f: &ResolvedFlow) -> Option<bool> {
-    let d = f.draft_policy_decision.as_ref()?;
-    let (r, d) = (strictness(f.policy_decision)?, strictness(d.class())?);
-    (r != d).then_some(d > r)
-}
-
 /// The draft would block `f` more than today: allowed → potentially
 /// blocked or blocked, potentially blocked → blocked.
 pub fn stricter(f: &ResolvedFlow) -> bool {
-    direction(f) == Some(true)
+    let Some(d) = f.draft_policy_decision.as_ref() else {
+        return false;
+    };
+    matches!(
+        (strictness(f.policy_decision), strictness(d.class())),
+        (Some(r), Some(d)) if d > r
+    )
 }
 
-/// The draft would block `f` less than today: blocked → potentially
-/// blocked or allowed, potentially blocked → allowed.
-pub fn looser(f: &ResolvedFlow) -> bool {
-    direction(f) == Some(false)
+/// The draft would allow `f`, blocked or potentially blocked today
+/// (`ResolvedFlow::fixed_by_draft`). Blocked → potentially blocked is not
+/// allowed: it is neither newly allowed nor newly blocked.
+pub fn now_allowed(f: &ResolvedFlow) -> bool {
+    f.fixed_by_draft()
 }
 
 /// Adds `f` to the cell of its decisions in `cells`.
@@ -123,7 +122,7 @@ pub fn transitions<'a>(flows: impl IntoIterator<Item = &'a ResolvedFlow>) -> Tra
         };
         t.evaluated += 1;
         t.newly_blocked += u64::from(stricter(f));
-        t.newly_allowed += u64::from(looser(f));
+        t.newly_allowed += u64::from(now_allowed(f));
         if f.draft_change().is_none() {
             t.unchanged += 1;
         } else {
@@ -218,7 +217,7 @@ pub fn draft_pairs(flows: &[ResolvedFlow], keys: &[String]) -> DraftPairs {
     let keys = keys_or_default(keys);
     DraftPairs {
         newly_blocked: pairs_of(flows.iter().filter(|f| stricter(f)), &keys),
-        newly_allowed: pairs_of(flows.iter().filter(|f| looser(f)), &keys),
+        newly_allowed: pairs_of(flows.iter().filter(|f| now_allowed(f)), &keys),
     }
 }
 
@@ -322,7 +321,7 @@ mod tests {
             p.newly_allowed
                 .iter()
                 .flat_map(|x| &x.transitions)
-                .all(|c| rank(c.draft) < rank(c.reported))
+                .all(|c| c.draft == PolicyDecision::Allowed && c.reported != c.draft)
         );
     }
 
@@ -334,7 +333,7 @@ mod tests {
             (P::Allowed, D::PotentiallyBlocked, Some(true)),
             (P::Allowed, D::Blocked, Some(true)),
             (P::PotentiallyBlocked, D::Blocked, Some(true)),
-            (P::Blocked, D::PotentiallyBlocked, Some(false)),
+            (P::Blocked, D::PotentiallyBlocked, None),
             (P::Blocked, D::Allowed, Some(false)),
             (P::PotentiallyBlocked, D::Allowed, Some(false)),
             (P::Blocked, D::Blocked, None),
@@ -350,7 +349,7 @@ mod tests {
             x.policy_decision = r;
             x.draft_policy_decision = Some(d.clone());
             assert_eq!(
-                (stricter(&x), looser(&x)),
+                (stricter(&x), now_allowed(&x)),
                 (want == Some(true), want == Some(false)),
                 "{r:?} → {d:?}"
             );
@@ -362,6 +361,14 @@ mod tests {
         assert_eq!((t.newly_blocked, t.newly_allowed), (1, 0));
         let p = draft_pairs(std::slice::from_ref(&x), &keys());
         assert_eq!(p.newly_blocked.len(), 1, "pb → blocked is a blocked pair");
+        // Blocked → potentially blocked: the transition table only.
+        x.policy_decision = P::Blocked;
+        x.draft_policy_decision = Some(D::PotentiallyBlocked);
+        let t = transitions(std::slice::from_ref(&x));
+        assert_eq!((t.newly_blocked, t.newly_allowed), (0, 0));
+        assert_eq!(t.changed.len(), 1);
+        let p = draft_pairs(std::slice::from_ref(&x), &keys());
+        assert!(p.newly_blocked.is_empty() && p.newly_allowed.is_empty());
     }
 
     #[test]

@@ -55,5 +55,6 @@ pub use steps::{
     CAP_STEPS, WINDOW_STEPS, backfill_cap, next_cap, next_window, prev_cap, prev_window,
 };
 pub use transition::{
-    DraftPair, DraftPairs, TransitionCell, Transitions, draft_pairs, looser, stricter, transitions,
+    DraftPair, DraftPairs, TransitionCell, Transitions, draft_pairs, now_allowed, stricter,
+    transitions,
 };
