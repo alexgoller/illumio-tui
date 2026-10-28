@@ -19,6 +19,11 @@ pub struct ImpactView {
     pub scroll: u16,
     /// Opened from the pending overlay: `Esc` goes back to it.
     pub from_pending: bool,
+    /// The load an answer must carry to be taken (`Cmd::LoadImpact`);
+    /// `forget` moves it on, so an answer read before a write is dropped.
+    pub seq: u64,
+    /// A ruleset or workload list behind the summary was cut short.
+    pub rules_truncated: bool,
 }
 
 /// How a line of the report is drawn.
@@ -121,14 +126,25 @@ pub fn report_lines(r: &ProvisionImpact, limit: usize) -> Vec<(LineKind, String)
         out.push((
             K::Heading,
             format!(
-                "Traffic · {} · {} · {} newly blocked · {} newly allowed{}",
+                "Traffic · {} · {} · {} newly blocked · {} newly allowed{}{}",
                 t.window,
                 plural(t.flows, "flow record", "flow records"),
                 x.newly_blocked,
                 x.newly_allowed,
+                if x.not_evaluated > 0 {
+                    format!(" · {} not evaluated", x.not_evaluated)
+                } else {
+                    String::new()
+                },
                 if t.truncated { " · truncated" } else { "" }
             ),
         ));
+        if t.incomplete {
+            out.push((
+                K::Changed,
+                "  a PCE region did not answer: flows are missing".into(),
+            ));
+        }
         let aw = x
             .changed
             .iter()
@@ -209,11 +225,15 @@ pub fn report_lines(r: &ProvisionImpact, limit: usize) -> Vec<(LineKind, String)
 
 impl ImpactView {
     /// After a write: the summary is stale; the next open loads it again.
-    /// A load on its way stays on its way.
+    /// A load on its way is forgotten too: its answer, read before the
+    /// write, is dropped when it lands.
     pub fn forget(&mut self) {
         self.report = None;
         self.loaded_at = None;
         self.error = None;
+        self.loading = false;
+        self.rules_truncated = false;
+        self.seq += 1;
     }
 
     /// The report's lines, or what stands in for them: the load on its way
@@ -224,6 +244,13 @@ impl ImpactView {
             out.push((
                 LineKind::Bad,
                 format!("impact failed: {e} (r loads it again)"),
+            ));
+        }
+        if self.report.is_some() && self.rules_truncated {
+            out.push((
+                LineKind::Changed,
+                "a ruleset or workload list was cut short: rule coverage counts are lower bounds"
+                    .into(),
             ));
         }
         match &self.report {

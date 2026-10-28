@@ -4030,7 +4030,10 @@ async fn impact_loads_once_and_reopening_costs_nothing() {
     assert!(report.rulesets.is_empty());
     let t = report.traffic.as_ref().unwrap();
     assert_eq!(t.flows, 4);
-    assert_eq!(t.transitions.newly_blocked, 2, "the two allowed flows");
+    assert_eq!(
+        t.transitions.newly_blocked, 3,
+        "the two allowed flows and the potentially blocked one"
+    );
     assert!(!model.policy.impact.loading);
     assert_eq!(model.busy, 0);
 }

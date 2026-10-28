@@ -6,7 +6,7 @@ use super::*;
 use crate::tui::commands;
 use crate::tui::model::{Model, Overlay, Screen};
 use crate::tui::msg::{Cmd, Msg};
-use crate::tui::test_support::{impact_fixture, model_fixture};
+use crate::tui::test_support::{impact_answer, impact_fixture, model_fixture};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 fn press(m: &mut Model, code: KeyCode) -> Vec<Cmd> {
@@ -20,7 +20,7 @@ fn impact(m: &mut Model) -> Vec<Cmd> {
 /// The one load a command or key asked for, with its cache mode.
 fn one_load(cmds: &[Cmd]) -> CacheMode {
     match cmds {
-        [Cmd::LoadImpact(spec)] => {
+        [Cmd::LoadImpact { spec, .. }] => {
             assert_eq!(spec.keys, ["app", "env"]);
             assert_eq!(spec.query.max_results, 1000);
             assert_eq!(spec.requested, None);
@@ -38,7 +38,8 @@ fn the_command_loads_once_and_a_reopen_sends_nothing() {
     assert!(m.policy.impact.loading);
     // Asked again while it loads: nothing more.
     assert!(impact(&mut m).is_empty());
-    update(&mut m, Msg::ImpactLoaded(Ok(impact_fixture())));
+    let answer = impact_answer(&m);
+    update(&mut m, answer);
     let v = &m.policy.impact;
     assert!(!v.loading && v.loaded_at.is_some() && v.report.is_some());
     assert!(
@@ -60,7 +61,8 @@ fn the_command_loads_once_and_a_reopen_sends_nothing() {
 fn r_reloads_past_the_cache_and_a_failure_keeps_the_last_summary() {
     let mut m = model_fixture();
     impact(&mut m);
-    update(&mut m, Msg::ImpactLoaded(Ok(impact_fixture())));
+    let answer = impact_answer(&m);
+    update(&mut m, answer);
     assert_eq!(
         one_load(&press(&mut m, KeyCode::Char('r'))),
         CacheMode::Bypass
@@ -69,7 +71,14 @@ fn r_reloads_past_the_cache_and_a_failure_keeps_the_last_summary() {
         press(&mut m, KeyCode::Char('r')).is_empty(),
         "one at a time"
     );
-    update(&mut m, Msg::ImpactLoaded(Err("HTTP 503".into())));
+    let seq = m.policy.impact.seq;
+    update(
+        &mut m,
+        Msg::ImpactLoaded {
+            seq,
+            result: Err("HTTP 503".into()),
+        },
+    );
     let v = &m.policy.impact;
     assert_eq!(v.error.as_deref(), Some("HTTP 503"));
     assert!(v.report.is_some(), "the last summary stays");
@@ -96,7 +105,8 @@ fn i_in_the_pending_overlay_opens_it_and_esc_goes_back() {
 fn scrolling_stops_at_the_last_line() {
     let mut m = model_fixture();
     impact(&mut m);
-    update(&mut m, Msg::ImpactLoaded(Ok(impact_fixture())));
+    let answer = impact_answer(&m);
+    update(&mut m, answer);
     let last = m.policy.impact.lines().len() as u16 - 1;
     press(&mut m, KeyCode::End);
     assert_eq!(m.policy.impact.scroll, last);
@@ -150,7 +160,8 @@ fn the_report_lines_name_every_section() {
 fn a_write_forgets_the_summary_and_the_next_open_loads_it_again() {
     let mut m = model_fixture();
     impact(&mut m);
-    update(&mut m, Msg::ImpactLoaded(Ok(impact_fixture())));
+    let answer = impact_answer(&m);
+    update(&mut m, answer);
     press(&mut m, KeyCode::Esc);
     update(
         &mut m,
@@ -170,4 +181,66 @@ fn a_write_forgets_the_summary_and_the_next_open_loads_it_again() {
     );
     assert!(m.policy.impact.report.is_none());
     assert_eq!(one_load(&impact(&mut m)), CacheMode::Use);
+}
+
+/// A load on its way when a write lands: its answer, read before the
+/// write, is dropped, and the next open loads again.
+#[test]
+fn an_answer_read_before_a_write_is_dropped() {
+    let mut m = model_fixture();
+    impact(&mut m);
+    let stale = impact_answer(&m);
+    press(&mut m, KeyCode::Esc);
+    m.policy.impact.forget();
+    assert!(!m.policy.impact.loading, "the next open may load");
+    update(&mut m, stale);
+    assert!(m.policy.impact.report.is_none(), "dropped");
+    assert_eq!(one_load(&impact(&mut m)), CacheMode::Use);
+    let fresh = impact_answer(&m);
+    update(&mut m, fresh);
+    assert!(m.policy.impact.report.is_some());
+}
+
+/// A batch (`:batch`, the generator's writes) forgets the summary too.
+#[test]
+fn a_batch_forgets_the_summary() {
+    let mut m = model_fixture();
+    impact(&mut m);
+    let answer = impact_answer(&m);
+    update(&mut m, answer);
+    press(&mut m, KeyCode::Esc);
+    update(
+        &mut m,
+        Msg::BatchDone {
+            kinds: Vec::new(),
+            summaries: Vec::new(),
+            target: "demo".into(),
+            results: Vec::new(),
+        },
+    );
+    assert!(m.policy.impact.report.is_none());
+}
+
+/// What the summary cannot vouch for shows: a cut list, flows the draft
+/// did not reach, a region that did not answer.
+#[test]
+fn lower_bounds_and_gaps_are_said() {
+    let mut r = impact_fixture();
+    let t = r.traffic.as_mut().unwrap();
+    t.transitions.not_evaluated = 3;
+    t.incomplete = true;
+    let v = crate::tui::provision_view::ImpactView {
+        report: Some(r),
+        rules_truncated: true,
+        ..Default::default()
+    };
+    let text: Vec<String> = v.lines().into_iter().map(|(_, t)| t).collect();
+    let text = text.join("\n");
+    for s in [
+        "rule coverage counts are lower bounds",
+        "· 3 not evaluated",
+        "a PCE region did not answer",
+    ] {
+        assert!(text.contains(s), "{s:?} missing:\n{text}");
+    }
 }

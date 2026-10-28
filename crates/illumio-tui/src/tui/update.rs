@@ -934,8 +934,8 @@ fn on_msg(model: &mut Model, msg: Msg) -> Vec<Cmd> {
                 Vec::new()
             }
         },
-        Msg::ImpactLoaded(result) => {
-            provision_impact_loaded(model, result);
+        Msg::ImpactLoaded { seq, result } => {
+            provision_impact_loaded(model, seq, result);
             Vec::new()
         }
         Msg::PendingLoaded(result) => {

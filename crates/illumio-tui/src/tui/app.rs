@@ -1188,7 +1188,7 @@ impl Runtime {
                     let _ = tx.send(Msg::Stats(pce.stats()));
                 });
             }
-            Cmd::LoadImpact(spec) => {
+            Cmd::LoadImpact { seq, spec } => {
                 self.model.busy += 1;
                 let (pce, tx) = self.task_ctx();
                 tokio::spawn(async move {
@@ -1198,9 +1198,8 @@ impl Runtime {
                         &tokio_util::sync::CancellationToken::new(),
                     )
                     .await
-                    .map(|l| l.report)
                     .map_err(|e| e.to_string());
-                    let _ = tx.send(Msg::ImpactLoaded(result));
+                    let _ = tx.send(Msg::ImpactLoaded { seq, result });
                     let _ = tx.send(Msg::Stats(pce.stats()));
                 });
             }
@@ -1411,7 +1410,7 @@ impl Runtime {
                 | Msg::RuleSetsLoaded { .. }
                 | Msg::DenyRulesLoaded { .. }
                 | Msg::PendingLoaded(_)
-                | Msg::ImpactLoaded(_)
+                | Msg::ImpactLoaded { .. }
                 | Msg::ObjectsLoaded { .. }
                 | Msg::IpListsLoaded(_)
                 | Msg::LabelUsageLoaded(_)

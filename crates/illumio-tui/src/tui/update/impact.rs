@@ -53,7 +53,10 @@ fn load_impact(model: &mut Model, mode: CacheMode) -> Vec<Cmd> {
     model.status = StatusLine::info(
         "impact · loading the pending list, the rulesets and one draft traffic query…",
     );
-    vec![Cmd::LoadImpact(Box::new(spec))]
+    vec![Cmd::LoadImpact {
+        seq: model.policy.impact.seq,
+        spec: Box::new(spec),
+    }]
 }
 
 /// What the status line says while the overlay is open.
@@ -85,16 +88,22 @@ fn impact_status(v: &ImpactView) -> StatusLine {
 }
 
 /// The summary's answer: kept with its time, or the error kept beside the
-/// summary loaded before (if any).
+/// summary loaded before (if any). An answer to a load a write forgot
+/// (an older `seq`) is dropped: it was read before the write.
 pub(super) fn provision_impact_loaded(
     model: &mut Model,
-    result: Result<crate::provision_impact::ProvisionImpact, String>,
+    seq: u64,
+    result: Result<crate::provision_impact::Loaded, String>,
 ) {
     let v = &mut model.policy.impact;
+    if seq != v.seq {
+        return;
+    }
     v.loading = false;
     match result {
-        Ok(r) => {
-            v.report = Some(r);
+        Ok(l) => {
+            v.report = Some(l.report);
+            v.rules_truncated = l.rules_truncated;
             v.loaded_at = Some(Instant::now());
             v.error = None;
             v.scroll = 0;

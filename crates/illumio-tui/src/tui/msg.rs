@@ -198,7 +198,11 @@ pub enum Msg {
     },
     PendingLoaded(Result<Vec<PendingChange>, String>),
     /// What provisioning would change (`Cmd::LoadImpact`).
-    ImpactLoaded(Result<crate::provision_impact::ProvisionImpact, String>),
+    /// `seq`: the load it answers (`ImpactView::seq`).
+    ImpactLoaded {
+        seq: u64,
+        result: Result<crate::provision_impact::Loaded, String>,
+    },
     ObjectsLoaded {
         kind: ObjectKind,
         result: Result<ObjectsPayload, String>,
@@ -377,7 +381,10 @@ pub enum Cmd {
     /// `I` / `:impact`: the provision impact (`provision_impact::load`):
     /// the pending list, the rulesets and lists when a ruleset is pending,
     /// one draft traffic query.
-    LoadImpact(Box<crate::provision_impact::LoadSpec>),
+    LoadImpact {
+        seq: u64,
+        spec: Box<crate::provision_impact::LoadSpec>,
+    },
     LoadObjects {
         kind: ObjectKind,
         mode: CacheMode,
@@ -622,7 +629,9 @@ impl PartialEq for Cmd {
                 Cmd::LoadDenyRules { href: hb, mode: mb },
             ) => ha == hb && ma == mb,
             (Cmd::LoadPending(a), Cmd::LoadPending(b)) => a == b,
-            (Cmd::LoadImpact(a), Cmd::LoadImpact(b)) => a == b,
+            (Cmd::LoadImpact { seq: a, spec: sa }, Cmd::LoadImpact { seq: b, spec: sb }) => {
+                a == b && sa == sb
+            }
             (Cmd::LoadObjects { kind: ka, mode: ma }, Cmd::LoadObjects { kind: kb, mode: mb }) => {
                 ka == kb && ma == mb
             }

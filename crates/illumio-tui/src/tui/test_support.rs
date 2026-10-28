@@ -807,6 +807,18 @@ pub fn compare_with(m: &mut Model, flows: Vec<ResolvedFlow>, truncated: bool) {
     );
 }
 
+/// `impact_fixture` as the answer to the load `m` waits for.
+pub fn impact_answer(m: &Model) -> crate::tui::msg::Msg {
+    crate::tui::msg::Msg::ImpactLoaded {
+        seq: m.policy.impact.seq,
+        result: Ok(crate::provision_impact::Loaded {
+            report: impact_fixture(),
+            cache_hit: false,
+            rules_truncated: false,
+        }),
+    }
+}
+
 /// A provision impact as `provision_impact::load` builds it from the
 /// fixtures: the pending ruleset Global-Infra (created) and IP list Corp,
 /// Shop-Prod's rule 2 changed (from role=db in the active policy to Corp),

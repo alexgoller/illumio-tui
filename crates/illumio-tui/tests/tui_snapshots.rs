@@ -612,7 +612,7 @@ fn provision_impact_overlay_80x24_and_160x48() {
     use illumio_tui::tui::commands;
     use illumio_tui::tui::model::{Overlay, Screen};
     use illumio_tui::tui::msg::Msg;
-    use illumio_tui::tui::test_support::{impact_fixture, model_with_policy};
+    use illumio_tui::tui::test_support::{impact_answer, model_with_policy};
     let mut m = model_with_policy();
     m.screen = Screen::Policy;
     illumio_tui::tui::update(&mut m, Msg::Command(commands::parse("impact").unwrap()));
@@ -620,7 +620,8 @@ fn provision_impact_overlay_80x24_and_160x48() {
     let loading = render_to_string(&m, 80, 24);
     assert!(loading.contains("loading…"), "{loading}");
     insta::assert_snapshot!("provision_impact_loading_80x24", loading);
-    illumio_tui::tui::update(&mut m, Msg::ImpactLoaded(Ok(impact_fixture())));
+    let answer = impact_answer(&m);
+    illumio_tui::tui::update(&mut m, answer);
     let out = render_to_string(&m, 80, 24);
     assert!(out.contains("Provision impact"), "{out}");
     assert!(out.contains("loaded 0s ago"), "{out}");

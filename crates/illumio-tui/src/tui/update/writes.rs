@@ -241,6 +241,8 @@ pub(super) fn batch_done(
     // The runtime dropped `policy:pending`; the next `p` fetches again.
     model.policy.pending = None;
     model.policy.pending_marked.clear();
+    // The draft moved: the impact summary is stale (as after one write).
+    model.policy.impact.forget();
     let (text, kind) = batch_status(results);
     let stopped = kind == Some(true) || results.iter().any(|r| matches!(r, R::NotSent));
     model.batch_report = Some(batch_report_lines(target, summaries, results));
