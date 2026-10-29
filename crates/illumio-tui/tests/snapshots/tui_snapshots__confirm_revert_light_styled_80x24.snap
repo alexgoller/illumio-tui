@@ -2,7 +2,7 @@
 source: crates/illumio-tui/tests/tui_snapshots.rs
 expression: "render_styled(&c, 80, 24)"
 ---
- i╭ Revert these changes? ────────────────── type revert, Enter · Esc cancel ╮B
+ i╭ Revert these changes? ────────────────── type revert, Enter · Esc cancel ╮K
     @0:Rgb(150, 50, 180)/Rgb(250, 250, 247) @2:Rgb(0, 102, 204)/Rgb(250, 250, 247) @4:Rgb(150, 50, 180)/Rgb(250, 250, 247) @25:Rgb(0, 102, 204)/Rgb(250, 250, 247) @45:Rgb(120, 124, 136)/Rgb(250, 250, 247) @76:Rgb(0, 102, 204)/Rgb(250, 250, 247) @78:Rgb(120, 124, 136)/Rgb(250, 250, 247)
   │revert 2 changes:                                                         │
     @0:Rgb(120, 124, 136)/Rgb(250, 250, 247) @2:Rgb(0, 102, 204)/Rgb(250, 250, 247) @3:Rgb(176, 120, 0)/Rgb(250, 250, 247) @20:Rgb(40, 42, 48)/Rgb(250, 250, 247) @77:Rgb(0, 102, 204)/Rgb(250, 250, 247) @78:Rgb(120, 124, 136)/Rgb(250, 250, 247)

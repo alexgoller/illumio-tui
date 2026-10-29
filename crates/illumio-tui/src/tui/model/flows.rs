@@ -1616,9 +1616,13 @@ pub(super) fn short_count(n: u64) -> String {
     format!("{}E", n / scale)
 }
 
-/// Bytes as `1.2K`, `-` when none were reported.
+/// Bytes as `1.2K` (1024-based, unit shown), `-` when none were reported.
 pub(super) fn bytes_text(b: u64) -> String {
-    if b == 0 { "-".into() } else { compact_count(b) }
+    if b == 0 {
+        "-".into()
+    } else {
+        pce::traffic::human_bytes(b)
+    }
 }
 
 pub(super) fn no_sort(_: &SectionRow) -> SortKey {

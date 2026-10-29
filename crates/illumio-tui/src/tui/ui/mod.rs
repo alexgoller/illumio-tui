@@ -138,8 +138,11 @@ fn render_header(model: &Model, f: &mut Frame, area: Rect) {
         Connection::Connected { index: None, .. } => Span::styled("◐", Style::new().fg(t.warn)),
         Connection::Disconnected { .. } => Span::styled("○ disconnected", Style::new().fg(t.bad)),
     };
-    let kb = model.stats.bytes as f64 / 1024.0;
-    let right = format!("api {} calls · {kb:.1} KB ", model.stats.calls);
+    let right = format!(
+        "api {} calls · {} ",
+        model.stats.calls,
+        pce::traffic::human_bytes(model.stats.bytes)
+    );
     let mut spans = vec![Span::styled(" illumio-tui ", t.title_style())];
     // Before the host: a long hostname must never push the safety marker off.
     if model.writes.enabled {

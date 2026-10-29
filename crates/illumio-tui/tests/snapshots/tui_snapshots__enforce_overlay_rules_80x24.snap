@@ -2,7 +2,7 @@
 source: crates/illumio-tui/tests/tui_snapshots.rs
 expression: rules
 ---
- illumio-tui pce.example · org 5 ●                        api 5 calls · 20.8 KB
+ illumio-tui pce.example · org 5 ●                            api 5 calls · 20K
   1 Traffic  │  2 Policy  │  3 Objects  │  4 Workloads  │  5 Events
 ╭ Enforce · shop/prod · last 24h ───────────────────────── needs rules · 0 req ╮
 │╭ Steps ──────────────────╮╭ 2 Rules ────────────────────────────────────────╮│

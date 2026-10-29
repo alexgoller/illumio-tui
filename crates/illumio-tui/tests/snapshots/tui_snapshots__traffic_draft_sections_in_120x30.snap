@@ -2,7 +2,7 @@
 source: crates/illumio-tui/tests/tui_snapshots.rs
 expression: out
 ---
- illumio-tui pce.example · org 5 ●                                                                api 5 calls · 20.8 KB
+ illumio-tui pce.example · org 5 ●                                                                    api 5 calls · 20K
   1 Traffic  │  2 Policy  │  3 Objects  │  4 Workloads  │  5 Events
 ╭ Filters ────────────────────────────────────────────────────────────────────────── window 24h · cap 1000 · unbounded ╮
 │window 24h  src *  dst *  svc *  decision all                                                                         │
@@ -13,22 +13,22 @@ expression: out
 ╭ App-to-app · conns: lifetime ────────────────────────────────────────────────────── in · keys app,env · Enter drills ╮
 │  peer                     hosts                  service    flows  conns    bytes    decision    draft               │
 │▸ ▾ crm/prod  in · 6 groups · 1601 conns · 1 blocked · draft allows 1 · draft blocks 1                                │
-│    crm/prod               crm-web-p.example      3306/tcp        2      850     2.5M allowed     1 would block       │
+│    crm/prod               crm-web-p.example      3306/tcp        2      850     2.3M allowed     1 would block       │
 │    ipl:Corp/-             10.1.4.9               443/tcp         1      520        - allowed     -                   │
-│    shop/prod              shop-web-p.example     443/tcp         1      150    61.0K allowed     -                   │
+│    shop/prod              shop-web-p.example     443/tcp         1      150      59K allowed     -                   │
 │    hr/prod                hr-web-p.example       443/tcp         1       60        - allowed     -                   │
 │    crm/dev                crm-api-d.example      3306/tcp        1       12        - blocked     1 would allow       │
 │    erp/prod               erp-db-p.example       53/udp          1        9        - unknown     -                   │
 │  ▾ shop/prod  in · 4 groups · 1545 conns · 2 blocked · 1 pot.blocked · draft allows 1 · draft blocks 1               │
-│    shop/prod              shop-web-p.example     5432/tcp        4      821   940.0K allowed     -                   │
-│    ipl:Corp/-             10.1.4.9               443/tcp         1      700     8.4M allowed     1 would block       │
-│    hr/prod                hr-web-p.example       5432/tcp        1       16     3.8K pot.blocked 1 would allow       │
+│    shop/prod              shop-web-p.example     5432/tcp        4      821     917K allowed     -                   │
+│    ipl:Corp/-             10.1.4.9               443/tcp         1      700     7.9M allowed     1 would block       │
+│    hr/prod                hr-web-p.example       5432/tcp        1       16     3.7K pot.blocked 1 would allow       │
 │    shop/dev               shop-web-d.example     5432/tcp        1        6        - blocked     -                   │
 │    ipl:Corp/-             10.1.4.9               5432/tcp        1        2        - blocked     -                   │
 │  ▾ erp/prod  in · 4 groups · 692 conns · 2 blocked · 3 pot.blocked · draft allows 3                                  │
-│    erp/prod               erp-api-p.example      1521/tcp        2      590     1.6M allowed     -                   │
+│    erp/prod               erp-api-p.example      1521/tcp        2      590     1.4M allowed     -                   │
 │    erp/dev                erp-web-d.example      8443/tcp        1       44        - pot.blocked -                   │
-│    crm/prod               crm-web-p.example      8443/tcp        1       35     5.3K pot.blocked -                   │
+│    crm/prod               crm-web-p.example      8443/tcp        1       35     5.1K pot.blocked -                   │
 │    crm/prod               crm-db-p.example       1521/tcp        1       11        - pot.blocked 1 would allow       │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
 ready                                                 f filter  r run  a auto  v view  g group  / search  : cmd  ? help

@@ -8,5 +8,5 @@ expression: "detail_pane(&render_to_string(&m, 80, 40)).join(\"\\n\")"
 │dst        host-2.example  10.0.2.20                                          │
 │dst labels app=shop env=prod role=db                                          │
 │svc        5432/tcp  process postgres  user postgres  allowed                 │
-│seen       2026-10-07 08:00 → 10-10 07:31 · bytes in 120.0K out 4.0K · rules …│
+│seen       2026-10-07 08:00 → 10-10 07:31 · bytes in 117K out 3.9K · rules n/a│
 ╰──────────────────────────────────────────────────────────────────────────────╯

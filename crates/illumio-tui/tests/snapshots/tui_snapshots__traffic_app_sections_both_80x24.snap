@@ -2,7 +2,7 @@
 source: crates/illumio-tui/tests/tui_snapshots.rs
 expression: out
 ---
- illumio-tui pce.example · org 5 ●                        api 5 calls · 20.8 KB
+ illumio-tui pce.example · org 5 ●                            api 5 calls · 20K
   1 Traffic  │  2 Policy  │  3 Objects  │  4 Workloads  │  5 Events
 ╭ Filters ────────────────────────────────── window 24h · cap 1000 · unbounded ╮
 │window 24h  src *  dst *  svc *  decision all                                 │
@@ -13,16 +13,16 @@ expression: out
 ╭ App-to-app · conns: lifetime ──────────── both · keys app,env · Enter drills ╮
 │  peer                                  service   flows conns  bytes  decision│
 │▸ ▾ shop/prod  ← 1545 conns · 2 blocked · 1 pot.blocked  → 1004 conns         │
-│    ← shop/prod                         5432/tcp      4    821 940.0K allowed │
-│    ← ipl:Corp/-                        443/tcp       1    700   8.4M allowed │
-│    ← hr/prod                           5432/tcp      1     16   3.8K pot.blk │
+│    ← shop/prod                         5432/tcp      4    821   917K allowed │
+│    ← ipl:Corp/-                        443/tcp       1    700   7.9M allowed │
+│    ← hr/prod                           5432/tcp      1     16   3.7K pot.blk │
 │    ← shop/dev                          5432/tcp      1      6      - blocked │
 │    ← ipl:Corp/-                        5432/tcp      1      2      - blocked │
-│    → shop/prod                         5432/tcp      4    821 940.0K allowed │
-│    → crm/prod                          443/tcp       1    150  61.0K allowed │
-│    → api.partner.example/-             443/tcp       1     33  15.0K allowed │
+│    → shop/prod                         5432/tcp      4    821   917K allowed │
+│    → crm/prod                          443/tcp       1    150    59K allowed │
+│    → api.partner.example/-             443/tcp       1     33    14K allowed │
 │  ▾ crm/prod  ← 1601 conns · 1 blocked  → 896 conns · 2 pot.blocked           │
-│    ← crm/prod                          3306/tcp      2    850   2.5M allowed │
+│    ← crm/prod                          3306/tcp      2    850   2.3M allowed │
 │    ← ipl:Corp/-                        443/tcp       1    520      - allowed │
 ╰──────────────────────────────────────────────────────────────────────────────╯
 ready         f filter  r run  a auto  v view  g group  / search  : cmd  ? help

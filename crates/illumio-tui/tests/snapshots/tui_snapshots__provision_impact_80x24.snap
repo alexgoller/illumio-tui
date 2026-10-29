@@ -2,7 +2,7 @@
 source: crates/illumio-tui/tests/tui_snapshots.rs
 expression: out
 ---
- illumio-tui pce.example · org 5 ●                        api 5 calls · 20.8 KB
+ illumio-tui pce.example · org 5 ●                            api 5 calls · 20K
 ╭ Provision impact ────────────────────────────────── loaded 0s ago · r reload ╮
 │Changes · 3 pending changes                                                   │
 │  ip_lists   create  1                                                        │

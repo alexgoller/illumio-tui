@@ -2,7 +2,7 @@
 source: crates/illumio-tui/tests/tui_snapshots.rs
 expression: out
 ---
- illumio-tui ✎ writes · pce.example · org 5 ●             api 5 calls · 20.8 KB
+ illumio-tui ✎ writes · pce.example · org 5 ●                 api 5 calls · 20K
   1 Traffic  │  2 Policy  │  3 Objects  │  4 Workloads  │  5 Events
 ╭ ╭ Send this request? ─────────────────────────────────── y send · n cancel ╮ ╮
 │ │provision 1 ip_list, 1 rule_set                                           │g│

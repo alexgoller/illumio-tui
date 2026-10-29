@@ -25,9 +25,9 @@ use pce::traffic::treemap::{Rect as TreemapRect, Tile, Weight, layout, layout_zo
 use pce::traffic::{
     AppSection, Decisions, Direction, DraftCounts, ExposureRow, ExposureStatus, FlowGroup, Focus,
     FocusDirection, GroupKey, MeshColumns, MeshKey, MeshRow, PeerRow, ResolvedFlow, RiskyService,
-    SectionOrder, Totals, app_header, app_sections, app_sections_both, apps_in, compact_count,
-    flow_sections, group_by_labels, group_by_service, group_key, group_text, in_app, in_peer,
-    keys_or_default, keys_seen, mesh, mesh_key, order_sections,
+    SectionOrder, Totals, app_header, app_sections, app_sections_both, apps_in, flow_sections,
+    group_by_labels, group_by_service, group_key, group_text, in_app, in_peer, keys_or_default,
+    keys_seen, mesh, mesh_key, order_sections,
 };
 use pce::ven::{HealthSet, VenSummary, VenTally};
 use pce::write::Plan;

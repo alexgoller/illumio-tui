@@ -2,7 +2,7 @@
 source: crates/illumio-tui/tests/tui_snapshots.rs
 expression: out
 ---
- i╭ Send this request? ────────────────────── j/k scroll · y send · n cancel ╮B
+ i╭ Send this request? ────────────────────── j/k scroll · y send · n cancel ╮K
   │create rule in ruleset 100                                                │
 ╭ │impact: 1 provider · 0 consumers                                          │ ╮
 │ │POST /orgs/5/sec_policy/draft/rule_sets/100/sec_rules                     │g│

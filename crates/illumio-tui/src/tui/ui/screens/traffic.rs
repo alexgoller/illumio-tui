@@ -530,7 +530,7 @@ fn render_treemap(model: &Model, f: &mut Frame, area: Rect) {
                 Some(z) => tm.highlight(z, Some(&tile.label)),
                 None => tm.highlight(&tile.label, None),
             };
-            draw_fill(f, inner, tile, t, is_cur(i, None), mark);
+            draw_fill(f, inner, tile, tm.weight, t, is_cur(i, None), mark);
             continue;
         }
         let r = cells(tile.rect).intersection(inner);
@@ -554,7 +554,7 @@ fn render_treemap(model: &Model, f: &mut Frame, area: Rect) {
         );
         for (j, c) in tile.children.iter().enumerate() {
             let mark = tm.highlight(&tile.label, Some(&c.label));
-            draw_fill(f, inner, c, t, is_cur(i, Some(j)), mark);
+            draw_fill(f, inner, c, tm.weight, t, is_cur(i, Some(j)), mark);
         }
     }
 }
@@ -595,6 +595,7 @@ fn draw_fill(
     f: &mut Frame,
     clip: Rect,
     tile: &Tile,
+    weight: Weight,
     t: &Theme,
     cursor: bool,
     mark: Option<pce::marks::Marker>,
@@ -629,7 +630,10 @@ fn draw_fill(
     };
     let mut lines = vec![row(Some(label))];
     if r.height >= 2 {
-        lines.push(row(Some(compact_count(tile.weight))));
+        lines.push(row(Some(match weight {
+            Weight::Bytes => pce::traffic::human_bytes(tile.weight),
+            _ => compact_count(tile.weight),
+        })));
     }
     while lines.len() < r.height as usize {
         lines.push(row(None));
@@ -1023,7 +1027,7 @@ fn seen_text(fl: &ResolvedFlow, rules: &str) -> String {
         format!("{first} → {last}")
     };
     if fl.has_bytes() {
-        let n = |b: Option<u64>| b.map_or_else(|| "-".to_string(), compact_count);
+        let n = |b: Option<u64>| b.map_or_else(|| "-".to_string(), pce::traffic::human_bytes);
         s.push_str(&format!(
             " · bytes in {} out {}",
             n(fl.bytes_in),
@@ -1464,7 +1468,7 @@ mod tests {
         let mut fl = flow();
         assert_eq!(
             seen_text(&fl, "n/a"),
-            "2026-10-16 08:12 → 10-17 09:40 · bytes in 117.2K out - · rules n/a"
+            "2026-10-16 08:12 → 10-17 09:40 · bytes in 114K out - · rules n/a"
         );
         fl.last_detected = Some("2027-01-02T00:00:00Z".into());
         fl.bytes_in = None;

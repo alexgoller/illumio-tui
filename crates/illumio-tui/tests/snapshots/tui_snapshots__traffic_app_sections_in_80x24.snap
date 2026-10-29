@@ -2,7 +2,7 @@
 source: crates/illumio-tui/tests/tui_snapshots.rs
 expression: out
 ---
- illumio-tui pce.example · org 5 ●                        api 5 calls · 20.8 KB
+ illumio-tui pce.example · org 5 ●                            api 5 calls · 20K
   1 Traffic  │  2 Policy  │  3 Objects  │  4 Workloads  │  5 Events
 ╭ Filters ────────────────────────────────── window 24h · cap 1000 · unbounded ╮
 │window 24h  src *  dst *  svc *  decision all                                 │
@@ -13,16 +13,16 @@ expression: out
 ╭ App-to-app · conns: lifetime ────────────── in · keys app,env · Enter drills ╮
 │  peer                                  service   flows conns  bytes  decision│
 │▸ ▾ crm/prod  in · 6 groups · 1601 conns · 1 blocked                          │
-│    crm/prod                            3306/tcp      2    850   2.5M allowed │
+│    crm/prod                            3306/tcp      2    850   2.3M allowed │
 │    ipl:Corp/-                          443/tcp       1    520      - allowed │
-│    shop/prod                           443/tcp       1    150  61.0K allowed │
+│    shop/prod                           443/tcp       1    150    59K allowed │
 │    hr/prod                             443/tcp       1     60      - allowed │
 │    crm/dev                             3306/tcp      1     12      - blocked │
 │    erp/prod                            53/udp        1      9      - unknown │
 │  ▾ shop/prod  in · 4 groups · 1545 conns · 2 blocked · 1 pot.blocked         │
-│    shop/prod                           5432/tcp      4    821 940.0K allowed │
-│    ipl:Corp/-                          443/tcp       1    700   8.4M allowed │
-│    hr/prod                             5432/tcp      1     16   3.8K pot.blk │
+│    shop/prod                           5432/tcp      4    821   917K allowed │
+│    ipl:Corp/-                          443/tcp       1    700   7.9M allowed │
+│    hr/prod                             5432/tcp      1     16   3.7K pot.blk │
 │    shop/dev                            5432/tcp      1      6      - blocked │
 ╰──────────────────────────────────────────────────────────────────────────────╯
 ready         f filter  r run  a auto  v view  g group  / search  : cmd  ? help

@@ -1862,12 +1862,12 @@ fn flow_detail_shows_both_label_sets_and_the_bytes() {
         out.contains("dst labels app=shop env=prod role=db"),
         "{out}"
     );
-    assert!(out.contains("bytes in 120.0K"), "{out}");
+    assert!(out.contains("bytes in 117K"), "{out}");
     // In columns from 92.
     let out = render_to_string(&m, 160, 48);
     assert!(out.contains("│role  web"), "{out}");
     assert!(out.contains("│ role  db"), "{out}");
-    assert!(out.contains("bytes in 120.0K out 4.0K"), "{out}");
+    assert!(out.contains("bytes in 117K out 3.9K"), "{out}");
     m.traffic.flows.select_next(); // Corp: an IP list, no labels, no bytes
     let out = render_to_string(&m, 91, 40);
     assert!(out.contains("src labels -"), "{out}");
@@ -1937,7 +1937,7 @@ fn flow_detail_in_columns_120x40() {
     assert_eq!(at(6, "role  db"), dst);
     assert!(
         pane[8]
-            .contains("seen 2026-10-07 08:00 → 10-10 07:31 · bytes in 120.0K out 4.0K · rules n/a"),
+            .contains("seen 2026-10-07 08:00 → 10-10 07:31 · bytes in 117K out 3.9K · rules n/a"),
         "{out}"
     );
     insta::assert_snapshot!("traffic_flow_detail_columns_120x40", pane.join("\n"));

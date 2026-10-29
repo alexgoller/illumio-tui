@@ -2,7 +2,7 @@
 source: crates/illumio-tui/tests/tui_snapshots.rs
 expression: out
 ---
- i╭ Revert these changes? ────────────────── type revert, Enter · Esc cancel ╮B
+ i╭ Revert these changes? ────────────────── type revert, Enter · Esc cancel ╮K
   │revert 2 changes:                                                         │
 ╭ │type revert to confirm: rev▏                                              │ ╮
 │ │PUT /orgs/5/sec_policy/delete                                             │g│

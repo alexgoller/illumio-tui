@@ -2,7 +2,7 @@
 source: crates/illumio-tui/tests/tui_snapshots.rs
 expression: out
 ---
- illumio-tui pce.example · org 5 ●                        api 5 calls · 20.8 KB
+ illumio-tui pce.example · org 5 ●                            api 5 calls · 20K
   1 Traffic  │  2 Policy  │  3 Objects  │  4 Workloads  │  5 Events
 VEN 3 · healthy 1 · warning 1 · error 0 · offline 1 · unmanaged 1  █████████████
 ╭ Workloads ──────────────────────────────────────────────── 4 · cached 5s ago ╮
