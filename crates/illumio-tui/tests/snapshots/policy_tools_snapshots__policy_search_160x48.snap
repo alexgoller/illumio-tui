@@ -2,7 +2,7 @@
 source: crates/illumio-tui/tests/policy_tools_snapshots.rs
 expression: "render_to_string(&m, 160, 48)"
 ---
- illumio-tui pce.example · org 5 ●                                                                                                        api 5 calls · 20.8 KB
+ illumio-tui pce.example · org 5 ●                                                                                                            api 5 calls · 20K
   1 Traffic  │  2 Policy  │  3 Objects  │  4 Workloads  │  5 Events
 ╭ Search · env=prod ──────────────────────────────────────────────────────────────────────────────────────────────────────────── 5 of 5 rules · draft · 5s ago ╮
 │  ruleset            enabled           kind          scope                      consumers                 providers                  services                 │

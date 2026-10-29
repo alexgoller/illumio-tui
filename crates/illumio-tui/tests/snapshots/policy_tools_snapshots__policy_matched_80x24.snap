@@ -2,7 +2,7 @@
 source: crates/illumio-tui/tests/policy_tools_snapshots.rs
 expression: out
 ---
- illumio-tui pce.example · org 5 ●                        api 5 calls · 20.8 KB
+ illumio-tui pce.example · org 5 ●                            api 5 calls · 20K
   1 Traffic  │  2 Policy  │  3 Objects  │  4 Workloads  │  5 Events
 ╭ ╭ Consumers of override_deny role=db ← All workloads 22/tcp ── 2 workloads ╮ ╮
 │ │▸ consumers 2 · providers 1 (Tab)                                         │g│
