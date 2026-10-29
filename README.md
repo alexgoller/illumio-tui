@@ -288,7 +288,7 @@ before macOS 26; `truecolor` forces 24-bit); `ILLUMIO_WRITES` and
 `ILLUMIO_AUTO_BACKFILL` (`1`/`0`, `true`/`false`) outrank the profile's `writes` and
 `traffic_auto_backfill`. `--env-file .env` loads a dotenv file for one run. Connection settings can
 also be overridden per run with global flags: `--host`, `--pce-port`,
-`--org-id`, `--profile`, `--config`, `--insecure`, `--no-cache` (the
+`--org-id`, `--profile`, `--config`, `--insecure`, `--no-cache`, `--human` (the
 connection-port flag is `--pce-port`, not `--port`, because `traffic query`
 has its own `--port` service-port filter).
 
@@ -317,7 +317,9 @@ The last line (stderr) is what the command cost. First useful commands:
     illumio-tui traffic explain --src app=payment --dst app=ad --port 53 --proto udp
 
 Output is a table at a terminal and JSON (`{"data": ..., "meta": ...}`) when piped;
-`--table`, `--json` and `--csv` force one. JSON is made for `jq`:
+`--table`, `--json` and `--csv` force one. `--human` (`-H`) prints byte counts as `ls -h` does
+(`121K`, `1.5M`, 1024-based) in the tables, in `--csv` and in the stderr meta line; JSON keeps
+integers (`--human` with `--json` is accepted and changes nothing). JSON is made for `jq`:
 
     $ illumio-tui readiness --json | jq -r '.data.apps | sort_by(-.coverage.ratio) | .[:3][]
         | "\(.app)\t\(.verdict)\t\(.coverage.ratio*1000|floor/10)%"' | column -t -s $'\t'
@@ -578,7 +580,7 @@ the full tab row (69 columns) the tabs read `Traf`, `Pol`, `Obj`, `Wl`, `Ev`.
   (`Workloads 14   enforced 9 · selective 2 · visibility 3 · unmanaged 1`, `VENs 13 active · 1 stale`;
   a workload without a VEN counts as unmanaged, not visibility; active
   is healthy or warning, stale is offline or error), its inbound and outbound peers by service
-  and decision (flows count flow records; conns and bytes are those records' lifetime counts),
+  and decision (flows count flow records; conns and bytes are those records' lifetime counts; bytes show their unit, `1.5K`, `12M`, 1024-based),
   and the rulesets whose scope covers it (a global scope shows as `all`) or whose rules name
   its labels (draft or active, as on the Policy screen; its title says which). The traffic
   panels come from the loaded result; the workloads and the rulesets come from their screens
@@ -1141,7 +1143,7 @@ app that is not ready), 7 flows blocked since an enforcement (`enforce --watch`,
 CSV for spreadsheets: a header row, `,` separators, quotes only around cells holding `,`, `"`
 or a line break, CRLF line ends, UTF-8 without BOM. The columns are the full set, untrimmed:
 no `…` clipping, lists joined with `; ` where the table folds them (`3 hosts`, a label
-group's member count), plain numbers (`6472`, not `6.5K`), `true`/`false`, and an empty cell
+group's member count), plain numbers (`6472`, not `6.5K`; `--human` makes the bytes columns `6.3K`), `true`/`false`, and an empty cell
 for nothing (`workloads` gives `heartbeat_age_secs` and every label, ignored keys too;
 `events` every resource change, with `--diff` a `diff` column; `policy rules` adds each rule's `href`; `policy pending --diff`
 a `diff` column, one diff line per line of the cell). `traffic groups --by ...` and

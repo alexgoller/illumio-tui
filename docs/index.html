@@ -527,7 +527,7 @@ default · 8 api calls · 10783.1 KB · cache miss · 4914 ms · covers 1d
     </div>
     <div>
       <h3>5. Pick an output</h3>
-      <p>A table at a terminal, JSON when piped. <code>--table</code>, <code>--json</code> and <code>--csv</code> force one. JSON is always <code>{"data": ..., "meta": ...}</code>, so <code>jq</code> takes it apart:</p>
+      <p>A table at a terminal, JSON when piped. <code>--table</code>, <code>--json</code> and <code>--csv</code> force one. <code>--human</code> (<code>-H</code>) prints byte counts like <code>ls -h</code> (<code>121K</code>, <code>1.5M</code>) in tables, CSV and the stderr meta line; JSON keeps integers. JSON is always <code>{"data": ..., "meta": ...}</code>, so <code>jq</code> takes it apart:</p>
 <pre><code><span class="p">$ </span>illumio-tui gen infra-mgmt/Production --json | jq -r '.data.rules[]
     | "\(.action)\t\(.consumers|join(","))\t→ \(.providers|join(","))\t\(.services|join(","))"' | column -t -s $'\t'
 create  app=cart,env=Production,app=catalog,app=ecomm,app=ordering,app=payment,app=swift  → all workloads  123/udp
@@ -1158,7 +1158,7 @@ API_SECRET=xxxxxxxxxxxxxxxx</code></pre>
           </tbody>
         </table>
       </div>
-      <p><code>--env-file .env</code> loads a dotenv file for one run. Per-run flags: <code>--host</code>, <code>--pce-port</code>, <code>--org-id</code>, <code>--profile</code>, <code>--config</code>, <code>--insecure</code>, <code>--no-cache</code>. The connection port flag is <code>--pce-port</code> because <code>traffic query</code> has its own <code>--port</code> filter.</p>
+      <p><code>--env-file .env</code> loads a dotenv file for one run. Per-run flags: <code>--host</code>, <code>--pce-port</code>, <code>--org-id</code>, <code>--profile</code>, <code>--config</code>, <code>--insecure</code>, <code>--no-cache</code>, <code>--human</code>. The connection port flag is <code>--pce-port</code> because <code>traffic query</code> has its own <code>--port</code> filter.</p>
     </div>
     <div>
       <h3>Profiles</h3>
