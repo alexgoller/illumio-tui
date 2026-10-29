@@ -40,10 +40,10 @@ fn snapshot_asks_the_runtime_once_for_the_profiles_directory() {
     // The answer is shown and frees the next one.
     update(
         &mut m,
-        Msg::SnapshotSaved(Ok("snapshot saved: /data/x.json (3 KB)".into())),
+        Msg::SnapshotSaved(Ok("snapshot saved: /data/x.json (3K)".into())),
     );
     assert!(!m.snapshot_saving);
-    assert_eq!(m.status.text, "snapshot saved: /data/x.json (3 KB)");
+    assert_eq!(m.status.text, "snapshot saved: /data/x.json (3K)");
     update(&mut m, Msg::SnapshotSaved(Err("disk full".into())));
     assert_eq!(m.status.kind, StatusKind::Error);
     assert_eq!(m.status.text, "snapshot: disk full");

@@ -1825,9 +1825,9 @@ async fn save_snapshot(
         cut.push_str(w);
     }
     Ok(format!(
-        "snapshot saved: {} ({} KB){cut}",
+        "snapshot saved: {} ({}){cut}",
         file.path.display(),
-        file.bytes.div_ceil(1024)
+        pce::traffic::human_bytes(file.bytes)
     ))
 }
 
