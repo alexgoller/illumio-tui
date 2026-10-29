@@ -18,8 +18,8 @@ pub mod treemap;
 
 pub use aggregate::{
     ConnsByDecision, Dominant, DraftCounts, FlowGroup, compact_count, dominant, group_by_labels,
-    group_by_service, group_by_service_refs, group_key, group_text, group_values, keys_or_default,
-    keys_seen,
+    group_by_service, group_by_service_refs, group_key, group_text, group_values, human_bytes,
+    keys_or_default, keys_seen,
 };
 pub use compare::{
     Change, ChangeSet, CompareCounts, Compared, DecisionSet, FlowKey, PairDelta, RowChange, Sides,

@@ -133,7 +133,7 @@ impl TableRows for Saved {
                 vec![
                     s.section.to_string(),
                     s.items.to_string(),
-                    s.bytes.to_string(),
+                    super::output::bytes_text(s.bytes),
                 ]
             })
             .collect()
@@ -161,7 +161,7 @@ impl TableRows for Listed {
                     opt(&m.taken_at),
                     opt(&m.label),
                     m.sections.join(","),
-                    m.bytes.to_string(),
+                    super::output::bytes_text(m.bytes),
                     opt(&m.problem),
                 ]
             })
@@ -514,10 +514,14 @@ async fn save(ctx: &Context, args: &SaveArgs) -> Result<(), CliError> {
         truncated: snap.truncated.clone(),
     };
     let title = format!(
-        "snapshot {} · {} · {} bytes",
+        "snapshot {} · {} · {}",
         data.id,
         data.path.display(),
-        data.bytes
+        if super::output::human() {
+            super::output::bytes_text(data.bytes)
+        } else {
+            format!("{} bytes", data.bytes)
+        }
     );
     // With --table and --csv meta.warnings reach stderr on the meta line;
     // with --json they are in the envelope.

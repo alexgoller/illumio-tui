@@ -4989,3 +4989,52 @@ async fn health_is_one_filter_offline_joins_health_and_states_take_any_case() {
         json!(["health warning,error,offline"])
     );
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn human_prints_bytes_as_1024_units_in_table_csv_and_the_meta_line_not_in_json() {
+    let server = MockServer::start().await;
+    mount_traffic(&server, 5).await;
+    // Pairs: 124000 bytes is 121K; a row without bytes is 0B in the CSV.
+    let csv = cmd(&server)
+        .args(["traffic", "groups", "--window", "1h", "--csv", "--human"])
+        .assert()
+        .success();
+    let text = csv_stdout(&csv);
+    assert!(text.contains(",121K,"), "{text}");
+    assert!(!text.contains("124000"), "{text}");
+    let err = String::from_utf8_lossy(&csv.get_output().stderr).to_string();
+    assert!(!err.contains(" KB"), "the meta line is human too: {err}");
+    // The same flag short, on a peer CSV.
+    let text = csv_stdout(
+        &cmd(&server)
+            .args([
+                "traffic", "groups", "--window", "1h", "--by", "in", "--csv", "-H",
+            ])
+            .assert()
+            .success(),
+    );
+    assert!(text.contains(",1,310,121K,"), "{text}");
+    // Table.
+    let table = cmd(&server)
+        .args(["traffic", "groups", "--window", "1h", "--table", "--human"])
+        .assert()
+        .success();
+    let text = String::from_utf8_lossy(&table.get_output().stdout).to_string();
+    assert!(text.contains("121K") && !text.contains("124000"), "{text}");
+    // Off: unchanged, with the meta line in KB.
+    let plain = cmd(&server)
+        .args(["traffic", "groups", "--window", "1h", "--csv"])
+        .assert()
+        .success();
+    assert!(csv_stdout(&plain).contains("124000"));
+    assert!(String::from_utf8_lossy(&plain.get_output().stderr).contains(" KB"));
+    // JSON keeps the integers and the meta.
+    let json = stdout_json(
+        cmd(&server)
+            .args(["traffic", "groups", "--window", "1h", "--json", "--human"])
+            .assert()
+            .success(),
+    );
+    assert_eq!(json["data"][0]["bytes"], 124_000);
+    assert!(json["meta"]["bytes"].is_u64());
+}

@@ -11,6 +11,7 @@ use serde::Serialize;
 use serde_json::{Map, Value};
 use std::io::Write;
 use std::sync::OnceLock;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OutputFormat {
@@ -328,6 +329,26 @@ pub struct Selection {
     /// Every column the command can print with `--csv`
     /// (`columns::csv_columns`).
     pub csv_columns: Vec<&'static str>,
+}
+
+static HUMAN: AtomicBool = AtomicBool::new(false);
+
+/// `--human`: byte cells print as `1.5K` (the process's, set before any output).
+pub fn set_human(on: bool) {
+    HUMAN.store(on, Ordering::Relaxed);
+}
+
+pub fn human() -> bool {
+    HUMAN.load(Ordering::Relaxed)
+}
+
+/// A byte count for a table or CSV cell: the integer, or `1.5K` with `--human`.
+pub fn bytes_text(n: u64) -> String {
+    if human() {
+        pce::traffic::human_bytes(n)
+    } else {
+        n.to_string()
+    }
 }
 
 static SELECTION: OnceLock<Selection> = OnceLock::new();
@@ -728,9 +749,13 @@ pub fn write_table_csv<T: TableRows + ?Sized>(
 
 /// One line for stderr in table and CSV mode so stdout stays clean.
 pub fn meta_line(meta: &Meta) -> String {
-    let kb = meta.bytes as f64 / 1024.0;
+    let size = if human() {
+        pce::traffic::human_bytes(meta.bytes)
+    } else {
+        format!("{:.1} KB", meta.bytes as f64 / 1024.0)
+    };
     let mut s = format!(
-        "{} · {} api call{} · {kb:.1} KB · cache {} · {} ms",
+        "{} · {} api call{} · {size} · cache {} · {} ms",
         meta.profile,
         meta.api_calls,
         if meta.api_calls == 1 { "" } else { "s" },

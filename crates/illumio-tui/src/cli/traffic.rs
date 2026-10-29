@@ -1063,7 +1063,11 @@ impl TableRows for FlowRows<'_> {
 
 /// A bytes cell: `-` for every row when no row carried bytes.
 fn bytes_cell(bytes: u64, any: bool) -> String {
-    if any { bytes.to_string() } else { "-".into() }
+    if any {
+        super::output::bytes_text(bytes)
+    } else {
+        "-".into()
+    }
 }
 
 /// The per-decision connection columns `--csv` adds to pairs and sections.
@@ -1220,7 +1224,7 @@ impl TableRows for Vec<FlowGroup> {
         self.iter()
             .zip(group_cells(self))
             .map(|(g, mut row)| {
-                row[4] = g.bytes.to_string();
+                row[4] = super::output::bytes_text(g.bytes);
                 row.extend(g.conns.cells());
                 if draft {
                     row.extend(draft_cells(g.draft.as_ref()));
@@ -1373,7 +1377,7 @@ impl TableRows for Vec<MeshRow> {
                 row[0] = or_empty(&r.user);
                 row[1] = or_empty(&r.process);
                 row[5] = or_empty(&r.dst_process);
-                row[8] = r.bytes.to_string();
+                row[8] = super::output::bytes_text(r.bytes);
                 if compared {
                     row.truncate(row.len() - COMPARE_COLUMNS.len());
                 }
@@ -1605,7 +1609,7 @@ pub fn peer_csv_row(
         r.service.clone(),
         r.flows.to_string(),
         r.connections.to_string(),
-        r.bytes.to_string(),
+        super::output::bytes_text(r.bytes),
         r.last_detected.clone().unwrap_or_default(),
         r.dominant().as_str().to_string(),
         r.conns.allowed_conns.to_string(),

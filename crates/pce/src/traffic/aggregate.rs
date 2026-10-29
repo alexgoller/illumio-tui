@@ -127,6 +127,29 @@ pub fn compact_count(n: u64) -> String {
     crate::iplist_size::human(u128::from(n))
 }
 
+/// A byte count as `ls -h` prints it (1024-based): `0B`, `512B`, `1.5K`,
+/// `12M`, `2.1G`. One decimal below 10, none from 10 up, truncated and
+/// never rounded up; units `B K M G T P`.
+pub fn human_bytes(n: u64) -> String {
+    if n < 1024 {
+        return format!("{n}B");
+    }
+    let n = u128::from(n);
+    let mut scale = 1024u128;
+    for unit in ['K', 'M', 'G', 'T', 'P'] {
+        if n < scale * 1024 || unit == 'P' {
+            let whole = n / scale;
+            return if whole < 10 {
+                format!("{whole}.{}{unit}", n % scale * 10 / scale)
+            } else {
+                format!("{whole}{unit}")
+            };
+        }
+        scale *= 1024;
+    }
+    unreachable!("the P arm returns")
+}
+
 /// The grouping values of an endpoint for `keys`: one entry per key, `-`
 /// when missing or when the endpoint is not a workload.
 pub fn group_values(ep: &ResolvedEndpoint, keys: &[String]) -> Vec<String> {
@@ -312,6 +335,28 @@ fn group<'a>(
 mod tests {
     use super::*;
     use crate::traffic::resolved::tests::{flows, rich_flows};
+
+    #[test]
+    fn human_bytes_is_ls_h() {
+        for (n, want) in [
+            (0, "0B"),
+            (3, "3B"),
+            (512, "512B"),
+            (1023, "1023B"),
+            (1024, "1.0K"),
+            (1536, "1.5K"),
+            (10239, "9.9K"),
+            (10240, "10K"),
+            (12 * 1024 * 1024, "12M"),
+            (2254857831, "2.1G"),
+            (1 << 40, "1.0T"),
+            (1 << 50, "1.0P"),
+            (u64::MAX, "16383P"),
+        ] {
+            assert_eq!(human_bytes(n), want, "{n}");
+        }
+        assert_eq!(human_bytes((1 << 20) - 1), "1023K");
+    }
 
     fn keys(k: &[&str]) -> Vec<String> {
         k.iter().map(|s| s.to_string()).collect()

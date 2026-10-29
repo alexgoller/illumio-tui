@@ -172,7 +172,7 @@ impl TableRows for Peers<'_> {
                     p.decision.as_str().to_string(),
                     p.flows.to_string(),
                     p.connections.to_string(),
-                    p.bytes.to_string(),
+                    super::output::bytes_text(p.bytes),
                 ];
                 if draft {
                     row.push(DraftCounts::text(p.draft.as_ref()));

@@ -277,6 +277,26 @@ async fn list_rm_and_prune_read_only_the_files() {
         .assert()
         .success();
     assert!(stdout(&csv).starts_with("id,taken_at,label,sections,bytes,problem,path\r\n"));
+    // --human: the bytes column in 1024 units, the same rows.
+    let human = env
+        .cmd(&server)
+        .args(["--csv", "--human", "snapshot", "list"])
+        .assert()
+        .success();
+    let text = stdout(&human);
+    let raw = stdout(&csv);
+    let col = |t: &str| -> Vec<String> {
+        t.lines()
+            .skip(1)
+            .map(|l| l.split(',').nth(4).unwrap().to_string())
+            .collect()
+    };
+    assert_eq!(col(&raw).len(), 3);
+    assert!(col(&raw).iter().all(|b| b.parse::<u64>().is_ok()), "{raw}");
+    assert!(
+        col(&text).iter().all(|b| b.ends_with(['B', 'K', 'M'])),
+        "{text}"
+    );
 
     let rm = env
         .cmd(&server)

@@ -89,6 +89,10 @@ pub struct GlobalArgs {
     /// Comma-separated or repeatable; checked before any request
     #[arg(long, global = true, value_name = "FIELDS", value_delimiter = ',')]
     pub fields: Vec<String>,
+    /// Byte counts as 1.5K, 12M, 2.1G (1024-based, like ls -h) in --table and --csv, and in
+    /// the stderr meta line; --json keeps integers (accepted, no effect there)
+    #[arg(long, short = 'H', global = true)]
+    pub human: bool,
     /// Ignore cached responses
     #[arg(long, global = true)]
     pub no_cache: bool,
@@ -357,6 +361,7 @@ pub async fn run(global: GlobalArgs, command: Command) -> Result<(), CliError> {
             "--csv: {name} prints no table; use --json or --table"
         )));
     }
+    output::set_human(global.human);
     select_output(&global, &command)?;
     if let Command::Schema(s) = &command {
         return schema::run(&global, s);
