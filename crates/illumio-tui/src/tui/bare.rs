@@ -6,7 +6,7 @@
 //! with that value: the term becomes its `key=value`, so the text shows
 //! the format. Several: which one is asked. None: the grammar's own
 //! error stays, with similar labels after it.
-use crate::tokens::{similar, with_similar};
+use crate::tokens::with_similar;
 use pce::NameIndex;
 use std::ops::Range;
 
@@ -57,9 +57,7 @@ impl Rewritten {
         else {
             return err;
         };
-        let names: Vec<String> = pairs.iter().map(|(k, v)| format!("{k}={v}")).collect();
-        let mut like = similar(term, names.iter().map(String::as_str));
-        like.truncate(3);
+        let like = similar_labels(term, pairs);
         match err.split_once("; ") {
             Some((head, tail)) if !like.is_empty() => {
                 format!("{}; {tail}", with_similar(head.to_string(), &like))
@@ -67,6 +65,51 @@ impl Rewritten {
             _ => with_similar(err, &like),
         }
     }
+}
+
+/// Up to three labels whose value is like `typed`, any case: those it
+/// starts, then those holding it, then those a typo or two away (one for
+/// a short word), each group by `key=value`.
+fn similar_labels(typed: &str, pairs: &[(String, String)]) -> Vec<String> {
+    let typed = typed.to_lowercase();
+    let typos = if typed.chars().count() <= 4 { 1 } else { 2 };
+    let mut ranked: Vec<(u8, String)> = pairs
+        .iter()
+        .filter_map(|(k, v)| {
+            let value = v.to_lowercase();
+            let rank = if value.starts_with(&typed) {
+                0
+            } else if value.contains(&typed) {
+                1
+            } else if distance(&value, &typed) <= typos {
+                2
+            } else {
+                return None;
+            };
+            Some((rank, format!("{k}={v}")))
+        })
+        .collect();
+    ranked.sort();
+    ranked.dedup();
+    ranked.into_iter().take(3).map(|(_, kv)| kv).collect()
+}
+
+/// The edit distance (insert, delete, replace one character) of `a` and `b`.
+fn distance(a: &str, b: &str) -> usize {
+    let b: Vec<char> = b.chars().collect();
+    let mut row: Vec<usize> = (0..=b.len()).collect();
+    for (i, ca) in a.chars().enumerate() {
+        let mut diag = row[0];
+        row[0] = i + 1;
+        for (j, cb) in b.iter().enumerate() {
+            let next = (diag + usize::from(ca != *cb))
+                .min(row[j] + 1)
+                .min(row[j + 1] + 1);
+            diag = row[j + 1];
+            row[j + 1] = next;
+        }
+    }
+    row[b.len()]
 }
 
 /// `text` with its bare values rewritten in place (unless one is asked
@@ -292,6 +335,34 @@ mod tests {
             "other error",
             "only an error naming the value"
         );
+    }
+
+    #[test]
+    fn similar_matches_the_value_by_prefix_part_or_typo_any_case() {
+        let r = |t: &str| Rewritten {
+            text: String::new(),
+            unmatched: vec![t.to_string()],
+        };
+        let similar = |t: &str| r(t).explain(format!("{t:?}: bad; use key=value"), &pairs());
+        assert_eq!(
+            similar("Orderng"),
+            "\"Orderng\": bad; similar: app=ordering; use key=value"
+        );
+        assert_eq!(
+            similar("Order"),
+            "\"Order\": bad; similar: app=orderbook, app=ordering; use key=value",
+            "prefixes first, by name"
+        );
+        assert_eq!(
+            similar("STAGNG"),
+            "\"STAGNG\": bad; similar: env=staging, loc=staging; use key=value"
+        );
+        assert_eq!(
+            similar("app"),
+            "\"app\": bad; use key=value",
+            "keys are not values"
+        );
+        assert_eq!(similar("xyz"), "\"xyz\": bad; use key=value");
     }
 
     #[test]

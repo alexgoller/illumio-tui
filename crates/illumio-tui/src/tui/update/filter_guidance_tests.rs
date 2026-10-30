@@ -260,6 +260,22 @@ fn a_failed_query_not_from_the_editor_keeps_the_old_behaviour() {
     );
 }
 
+#[test]
+fn a_typo_or_a_capitalised_prefix_suggests_the_label_by_its_value() {
+    for typed in ["Orderng", "Order"] {
+        let mut m = traffic_typed(1, typed);
+        assert_eq!(enter(&mut m), Vec::<Cmd>::new());
+        let err = traffic_editor(&m).error.clone().unwrap();
+        // The suggestion comes before the grammar, which a cut line loses.
+        let (head, grammar) = err.split_once("; use key=value").expect(&err);
+        assert!(
+            head.contains(&format!("\"{typed}\"; similar: ")) && head.contains("app=ordering"),
+            "{typed}: {err}"
+        );
+        assert!(grammar.contains("fqdn:NAME"), "{err}");
+    }
+}
+
 // --- Workloads -------------------------------------------------------------
 
 fn label_editor(m: &Model) -> &crate::tui::label_editor::LabelFilterEditor {
