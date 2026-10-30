@@ -471,7 +471,12 @@ the full tab row (69 columns) the tabs read `Traf`, `Pol`, `Obj`, `Wl`, `Ev`.
   field, whichever `|` group it is written in, and a field of `!` terms only keeps every flow
   but those; the editor says so under the fields. Explorer takes labels, IP lists, workloads,
   IPs and ports/protocols there; `fqdn:` only on the destination side (a source `fqdn:`, to
-  include or exclude, is a form error, and src completion does not offer it). In the filter
+  include or exclude, is a form error, and src completion does not offer it). A label value
+  typed alone (`ordering`, any case) becomes its `key=value` (`app=ordering`) when one loaded
+  label has it, here, in the Workloads label filter and in the Policy rule search; a value
+  several keys have asks which (`write app=ordering or env=ordering`), one no label has keeps
+  the format error and names up to three similar labels. No request. A query the PCE refuses
+  reopens the editor with its error and the filter before it. In the filter
   editor `Ctrl-N` / `Ctrl-P` complete like a form (after a `!` too): labels, `ipl:` IP lists and the grammar's
   `ip:` `ipl:` `wl:` `fqdn:` in src and dst (`wl:` hostnames only once the Workloads screen
   has loaded them), protocols and services as `port/proto` or `from-to/proto`, the decision and transmission
@@ -984,7 +989,10 @@ the full tab row (69 columns) the tabs read `Traf`, `Pol`, `Obj`, `Wl`, `Ev`.
   others; a term with `*` must match the whole type (`sec_policy.*`, `*.delete`), as must one
   starting with `=` (`=user.login` is that type only, `!=user.login` hides only it and keeps
   `user.login_session_terminated`), else it is a substring; case-insensitive. `Ctrl-N`/`Ctrl-P`
-  complete the event types of the loaded events, also after `,`, `!`, `=` or `!=`. A severity is sent to the PCE (it takes one); `warning+` is
+  complete the event types of the loaded events, also after `,`, `!`, `=` or `!=`. A severity is sent to the PCE (it takes one of `emerg`, `alert`, `crit`, `err`, `warning`,
+  `notice`, `info`, `debug`; `error`, `warn`, `critical` and `emergency` are read as theirs, any
+  other word stays in the editor with the list and is never sent, and an error from the PCE
+  reopens the editor with it); `warning+` is
   that and worse (`err+`, `info+` …), filtered here, as is the type. The Actor field takes the
   same terms over the actor the Actor column shows (`user:alex@ryte.de`, `agent:web01`,
   `system`, `service_account:ci`, `?`); a term matches the whole actor or the name after its
@@ -2362,7 +2370,8 @@ have no description to compare.
 globs and a leading `=` match the whole type, else a substring; case-insensitive) and is repeatable; `--exclude-type X`
 is `--type '!X'`. The profile's `events.exclude_types` apply unless `--all-types`. `--severity
 warning+` (that and worse) sends no severity and filters here; a plain severity goes to the
-PCE as before. All of these filter the loaded page: the cap (`--max-results`, default 500)
+PCE as before, one of `emerg` `alert` `crit` `err` `warning` `notice` `info` `debug` (`error`,
+`warn`, `critical`, `emergency` read as theirs; any other word is an argument error, no request). All of these filter the loaded page: the cap (`--max-results`, default 500)
 still applies, and `meta.truncated` says when the page was full. `events --actor` takes the
 same terms over the actor column (`user:alex@ryte.de`, `agent:web01`, `system`), each matching
 the whole actor or the name after its kind (`--actor =alex@ryte.de`, `--actor 'user:*'`), and
