@@ -1,0 +1,28 @@
+---
+source: crates/illumio-tui/tests/tui_snapshots.rs
+expression: out
+---
+ illumio-tui pce.example · org 5 ●                            api 5 calls · 20K
+  1 Traffic  │  2 Policy  │  3 Objects  │  4 Workloads  │  5 Events
+╭ Events ───────────────────────────────── cached 5s ago · 4 rows · window 24h ╮
+│  timestamp      severity type                     actor                      │
+│▸ 10-10 07:30:00 info     user.login               user:user-1                │
+│  10-10 07:31:00 info     sec_policy.create        user:user-2                │
+│ ╭ Edit events ────── Tab next · Ctrl-N complete · Enter apply · Esc cancel ╮ │
+│ │▸ severity    Ordering▏                                                   │ │
+│ │  type                                                                    │ │
+│ │  actor                                                                   │ │
+│ │  window      24h                                                         │ │
+│ │                                                                          │ │
+│ │severity "Ordering": use one of emerg, alert, crit, err, warning, notice, │ │
+│ │info, debug, or X+ for X and worse                                        │ │
+│ │                                                                          │ │
+│ │                                                                          │ │
+│ ╰──────────────────────────────────────────────────────────────────────────╯ │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+╰──────────────────────────────────────────────────────────────────────────────╯
+ready        f filter  x/o hide/only type  t types  Enter detail  : cmd  ? help

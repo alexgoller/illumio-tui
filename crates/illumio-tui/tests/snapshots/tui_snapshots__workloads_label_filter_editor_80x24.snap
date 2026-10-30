@@ -14,7 +14,7 @@ VEN 13 · healthy 6 · warning 1 · error 0 · offline 6 · unmanaged 1  ██�
 │  c│▸ labels app=shop,crm !role=db env=prod▏                              │   │
 │  c│         env=prod  env=-                                              │   │
 │  c│                                                                      │   │
-│  s│comma: any of · space: all of · ! excludes · key=- no label           │   │
+│  s│key=value · comma: any of · space: all of · ! excludes · key=- none   │   │
 │  c│local: no request · c on Workloads clears every filter                │   │
 │  p╰──────────────────────────────────────────────────────────────────────╯   │
 │  crm-prod-06.example  10.0.1.10       full        healthy   2m ago           │

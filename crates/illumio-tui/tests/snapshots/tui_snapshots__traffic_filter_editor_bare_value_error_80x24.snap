@@ -1,0 +1,28 @@
+---
+source: crates/illumio-tui/tests/tui_snapshots.rs
+expression: out
+---
+ illumio-tui pce.example · org 5 ●                            api 5 calls · 20K
+  1 Traffic  │  2 Policy  │  3 Objects  │  4 Workloads  │  5 Events
+╭ Filters ────────────────────────────────── window 24h · cap 1000 · unbounded ╮
+│window 24h  src *  dst *  svc *  decision all                                 │
+╰──────────────────────────────────────────────────────────────────────────────╯
+╭ Result ────────────────────────────────────────────── no query yet · press r ╮
+│run ╭ Edit filter ──────────────────── Tab next · Enter run · Esc cancel ╮    │
+╰────│  window       24h                                                  │────╯
+╭ Flo│▸ source       sho▏                                                 │────╮
+│no r│  destination                                                       │    │
+│    │  service                                                           │    │
+│    │  decisions    all                                                  │    │
+│    │  transmission all                                                  │    │
+│    │  max results  1000                                                 │    │
+╰────│                                                                    │────╯
+╭ Det│source: invalid input: cannot parse filter "sho"; similar: app=shop;│ows ╮
+│sele│use key=value, ip:ADDR, ipl:NAME, wl:HOSTNAME or fqdn:NAME          │    │
+│    ╰────────────────────────────────────────────────────────────────────╯    │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+╰──────────────────────────────────────────────────────────────────────────────╯
+ready         f filter  r run  a auto  v view  g group  / search  : cmd  ? help

@@ -237,14 +237,21 @@ pub fn render_rule_filter(
         lines.push(completion_line(strip, 2 + label.len(), width, t));
     }
     lines.push(Line::from(""));
-    let note = match (&e.error, e.parse()) {
-        (Some(err), _) => Line::from(Span::styled(plain(err), Style::new().fg(t.bad))),
-        (None, Err(err)) => Line::from(Span::styled(plain(&err), t.dim_style())),
-        (None, Ok(_)) if !e.unknown.is_empty() => Line::from(Span::styled(
+    // An error takes the rows of the note and the two hints.
+    if let Some(err) = &e.error {
+        for row in crate::tui::form::wrap_rows(&plain(err), inner, 3) {
+            lines.push(Line::from(Span::styled(row, Style::new().fg(t.bad))));
+        }
+        f.render_widget(Paragraph::new(lines).block(block).style(t.base()), r);
+        return;
+    }
+    let note = match e.parse() {
+        Err(err) => Line::from(Span::styled(plain(&err), t.dim_style())),
+        Ok(_) if !e.unknown.is_empty() => Line::from(Span::styled(
             format!("no match: {}", e.unknown.join(", ")),
             t.dim_style(),
         )),
-        (None, Ok(_)) => Line::from(Span::styled(
+        Ok(_) => Line::from(Span::styled(
             "[scope:|src:|dst:][!]app=shop ipl: svc: wl: href: deny intra extra -term",
             t.dim_style(),
         )),

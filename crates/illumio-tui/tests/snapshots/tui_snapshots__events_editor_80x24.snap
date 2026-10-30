@@ -14,10 +14,10 @@ expression: "render_to_string(&m, 80, 24)"
 │ │  actor                                                                   │ │
 │ │  window      24h                                                         │ │
 │ │                                                                          │ │
-│ │severity: err (asks the PCE) · warning+ that and worse (local)            │ │
+│ │severity: emerg alert crit err warning notice info debug (asks the PCE)   │ │
+│ │  warning+ that and worse (local) · window e.g. 24h · empty = any         │ │
 │ │type: sec_policy, rule_set · !user.* hides · =exact · *.delete            │ │
 │ │actor: user:*, !system, =alex@ryte.de (local, like type)                  │ │
-│ │window e.g. 24h · empty severity, type or actor = any                     │ │
 │ ╰──────────────────────────────────────────────────────────────────────────╯ │
 │                                                                              │
 │                                                                              │

@@ -457,10 +457,13 @@ pub fn render_filter_editor(model: &Model, e: &FilterEditor, f: &mut Frame, area
     }
     lines.push(Line::from(""));
     match &e.error {
-        Some(err) => lines.push(Line::from(Span::styled(
-            err.clone(),
-            Style::new().fg(t.bad),
-        ))),
+        // In the preview's and the note's rows.
+        Some(err) => {
+            let width = (r.width as usize).saturating_sub(2);
+            for row in crate::tui::form::wrap_rows(err, width, 2) {
+                lines.push(Line::from(Span::styled(row, Style::new().fg(t.bad))));
+            }
+        }
         None => {
             let parsed = e.to_filter().ok();
             let preview = parsed.as_ref().map(|f| f.cost_hint()).unwrap_or_default();
@@ -512,14 +515,21 @@ pub fn render_label_filter(
         lines.push(completion_line(strip, 2 + label.len(), width, t));
     }
     lines.push(Line::from(""));
-    let note = match (&e.error, e.parse()) {
-        (Some(err), _) => Line::from(Span::styled(plain(err), Style::new().fg(t.bad))),
-        (None, Err(err)) => Line::from(Span::styled(plain(&err), t.dim_style())),
-        (None, Ok(_)) => {
+    // An error takes the rows of the note and the last line.
+    if let Some(err) = &e.error {
+        for row in crate::tui::form::wrap_rows(&plain(err), inner, 2) {
+            lines.push(Line::from(Span::styled(row, Style::new().fg(t.bad))));
+        }
+        f.render_widget(Paragraph::new(lines).block(block).style(t.base()), r);
+        return;
+    }
+    let note = match e.parse() {
+        Err(err) => Line::from(Span::styled(plain(&err), t.dim_style())),
+        Ok(_) => {
             let unknown = &e.unknown;
             if unknown.is_empty() {
                 Line::from(Span::styled(
-                    "comma: any of · space: all of · ! excludes · key=- no label",
+                    "key=value · comma: any of · space: all of · ! excludes · key=- none",
                     t.dim_style(),
                 ))
             } else {
@@ -767,16 +777,18 @@ pub fn render_events_editor(
     }
     lines.push(Line::from(""));
     match &e.error {
-        Some(err) => lines.push(Line::from(Span::styled(
-            err.clone(),
-            Style::new().fg(t.bad),
-        ))),
+        // In the hints' rows: a severity error lists every value.
+        Some(err) => {
+            for row in crate::tui::form::wrap_rows(err, inner, 4) {
+                lines.push(Line::from(Span::styled(row, Style::new().fg(t.bad))));
+            }
+        }
         None => {
             for hint in [
-                "severity: err (asks the PCE) · warning+ that and worse (local)",
+                "severity: emerg alert crit err warning notice info debug (asks the PCE)",
+                "  warning+ that and worse (local) · window e.g. 24h · empty = any",
                 "type: sec_policy, rule_set · !user.* hides · =exact · *.delete",
                 "actor: user:*, !system, =alex@ryte.de (local, like type)",
-                "window e.g. 24h · empty severity, type or actor = any",
             ] {
                 lines.push(Line::from(Span::styled(hint, t.dim_style())));
             }

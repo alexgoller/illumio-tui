@@ -3902,3 +3902,63 @@ fn readiness_trend_120x40_and_80x24() {
     insta::assert_snapshot!("readiness_trend_80x24", narrow);
     insta::assert_snapshot!("readiness_trend_styled_80x24", render_styled(&m, 80, 24));
 }
+
+/// Types `keys` (one key per char, `\n` is Enter, `\t` Tab) and returns the last
+/// key's commands.
+fn type_keys(m: &mut illumio_tui::tui::model::Model, keys: &str) -> Vec<illumio_tui::tui::Cmd> {
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+    let mut last = Vec::new();
+    for c in keys.chars() {
+        let code = match c {
+            '\n' => KeyCode::Enter,
+            '\t' => KeyCode::Tab,
+            c => KeyCode::Char(c),
+        };
+        last = illumio_tui::tui::update(
+            m,
+            illumio_tui::tui::Msg::Key(KeyEvent::new(code, KeyModifiers::NONE)),
+        );
+    }
+    last
+}
+
+/// #88: a severity that is not one stays in the editor, listing them.
+#[test]
+fn events_editor_refuses_an_unknown_severity_inline() {
+    use illumio_tui::tui::model::Screen;
+    use illumio_tui::tui::test_support::model_with_events;
+    let mut m = model_with_events();
+    m.screen = Screen::Events;
+    assert!(type_keys(&mut m, "fOrdering\n").is_empty());
+    let out = render_to_string(&m, 80, 24);
+    assert!(out.contains("Ordering"), "{out}");
+    assert!(out.contains("debug"), "{out}");
+    insta::assert_snapshot!("events_editor_severity_error_80x24", out);
+    insta::assert_snapshot!(
+        "events_editor_severity_error_120x40",
+        render_to_string(&m, 120, 40)
+    );
+}
+
+/// #88: a bare value no label has keeps the format and names similar ones.
+#[test]
+fn traffic_and_rule_editors_wrap_a_bare_value_error() {
+    use illumio_tui::tui::model::Screen;
+    use illumio_tui::tui::test_support::{model_fixture, model_with_policy};
+    let mut m = model_fixture();
+    m.screen = Screen::Traffic;
+    assert!(type_keys(&mut m, "f\tsho\n").is_empty());
+    let out = render_to_string(&m, 80, 24);
+    assert!(out.contains("similar: app=shop"), "{out}");
+    insta::assert_snapshot!("traffic_filter_editor_bare_value_error_80x24", out);
+    insta::assert_snapshot!(
+        "traffic_filter_editor_bare_value_error_120x40",
+        render_to_string(&m, 120, 40)
+    );
+    let mut m = model_with_policy();
+    m.screen = Screen::Policy;
+    assert!(type_keys(&mut m, "fsho\n").is_empty());
+    let out = render_to_string(&m, 80, 24);
+    assert!(out.contains("similar: app=shop"), "{out}");
+    insta::assert_snapshot!("policy_rule_search_bare_value_error_80x24", out);
+}
