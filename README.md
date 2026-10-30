@@ -475,8 +475,11 @@ the full tab row (69 columns) the tabs read `Traf`, `Pol`, `Obj`, `Wl`, `Ev`.
   typed alone (`ordering`, any case) becomes its `key=value` (`app=ordering`) when one loaded
   label has it, here, in the Workloads label filter and in the Policy rule search; a value
   several keys have asks which (`write app=ordering or env=ordering`), one no label has keeps
-  the format error and names up to three similar labels. No request. A query the PCE refuses
-  reopens the editor with its error and the filter before it. In the filter
+  the format error and names up to three similar labels. No request. A wholly quoted value
+  (`"new york"`) is looked up too in the Workloads and Policy filters, written back as
+  `loc="New York"`. When a query sent from the editor (after the cost guard's `y` too) fails,
+  the filter before it is put back; if you are still on Traffic with nothing else open, the
+  editor reopens with the error inline. In the filter
   editor `Ctrl-N` / `Ctrl-P` complete like a form (after a `!` too): labels, `ipl:` IP lists and the grammar's
   `ip:` `ipl:` `wl:` `fqdn:` in src and dst (`wl:` hostnames only once the Workloads screen
   has loaded them), protocols and services as `port/proto` or `from-to/proto`, the decision and transmission
@@ -991,8 +994,9 @@ the full tab row (69 columns) the tabs read `Traf`, `Pol`, `Obj`, `Wl`, `Ev`.
   `user.login_session_terminated`), else it is a substring; case-insensitive. `Ctrl-N`/`Ctrl-P`
   complete the event types of the loaded events, also after `,`, `!`, `=` or `!=`. A severity is sent to the PCE (it takes one of `emerg`, `alert`, `crit`, `err`, `warning`,
   `notice`, `info`, `debug`; `error`, `warn`, `critical` and `emergency` are read as theirs, any
-  other word stays in the editor with the list and is never sent, and an error from the PCE
-  reopens the editor with it); `warning+` is
+  other word stays in the editor with the list and is never sent, and when a load sent from the
+  editor fails, the filter before it is put back and, still on Events with nothing else open,
+  the editor reopens with the error); `warning+` is
   that and worse (`err+`, `info+` …), filtered here, as is the type. The Actor field takes the
   same terms over the actor the Actor column shows (`user:alex@ryte.de`, `agent:web01`,
   `system`, `service_account:ci`, `?`); a term matches the whole actor or the name after its
