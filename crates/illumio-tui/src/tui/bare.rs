@@ -57,7 +57,11 @@ impl Rewritten {
         else {
             return err;
         };
-        let like = similar_labels(term, pairs);
+        let value = term
+            .strip_prefix('"')
+            .and_then(|t| t.strip_suffix('"'))
+            .unwrap_or(term);
+        let like = similar_labels(value, pairs);
         match err.split_once("; ") {
             Some((head, tail)) if !like.is_empty() => {
                 format!("{}; {tail}", with_similar(head.to_string(), &like))
@@ -138,10 +142,16 @@ pub fn rewrite(
         let term = &text[span.clone()];
         let rest = term.trim_start_matches(|c: char| negation(grammar, c) || c.is_whitespace());
         let body = rest.trim_end();
-        if body.is_empty() || !is_bare(body, grammar) {
+        let quoted = quoted_value(body, grammar);
+        if body.is_empty() || (quoted.is_none() && !is_bare(body, grammar)) {
             continue;
         }
-        match lookup(body, pairs)? {
+        let found = match quoted {
+            Some(inner) => lookup(inner, pairs)?
+                .map(|(k, v)| format!("{k}=\"{}\"", v.replace('\\', "\\\\").replace('"', "\\\""))),
+            None => lookup(body, pairs)?.map(|(k, v)| format!("{k}={v}")),
+        };
+        match found {
             Some(kv) => {
                 let start = span.start + (term.len() - rest.len());
                 edits.push((start..start + body.len(), kv));
@@ -167,6 +177,17 @@ fn negation(grammar: Grammar, c: char) -> bool {
     }
 }
 
+/// The value of a wholly quoted term (`"New York"`) where quotes are
+/// grammar (not Traffic), with no `=`, `,`, quote or `\\` inside: such a
+/// term is a bare value too, written back quoted.
+fn quoted_value(body: &str, grammar: Grammar) -> Option<&str> {
+    if grammar == Grammar::Traffic {
+        return None;
+    }
+    let inner = body.strip_prefix('"')?.strip_suffix('"')?;
+    (!inner.trim().is_empty() && !inner.contains(['=', ',', '"', '\\'])).then_some(inner)
+}
+
 /// A term the grammar rejects, with nothing in it that names its kind
 /// (`=`, a `prefix:`, a quote or a list).
 fn is_bare(body: &str, grammar: Grammar) -> bool {
@@ -180,25 +201,26 @@ fn is_bare(body: &str, grammar: Grammar) -> bool {
     }
 }
 
-/// `key=value` of the one label whose value is `value` (any case; of
-/// several that differ only in case, the one spelt the same); `None` for
-/// no label; an error naming the keys when several have it.
-fn lookup(value: &str, pairs: &[(String, String)]) -> Result<Option<String>, String> {
+/// The one label whose value is `value` (any case; of several under one
+/// key that differ only in case, the one spelt the same); `None` for no
+/// label; an error naming the keys when several keys have it.
+fn lookup(value: &str, pairs: &[(String, String)]) -> Result<Option<(String, String)>, String> {
     let hits: Vec<&(String, String)> = pairs
         .iter()
         .filter(|(_, v)| v.to_lowercase() == value.to_lowercase())
         .collect();
+    let mut keys: Vec<&str> = Vec::new();
+    for (k, _) in &hits {
+        if !keys.contains(&k.as_str()) {
+            keys.push(k);
+        }
+    }
     let exact: Vec<&(String, String)> = hits.iter().copied().filter(|(_, v)| v == value).collect();
     let one = match (hits.as_slice(), exact.as_slice()) {
         ([], _) => return Ok(None),
-        ([one], _) | (_, [one]) => *one,
+        ([one], _) => *one,
+        (_, [one]) if keys.len() == 1 => *one,
         _ => {
-            let mut keys: Vec<&str> = Vec::new();
-            for (k, _) in &hits {
-                if !keys.contains(&k.as_str()) {
-                    keys.push(k);
-                }
-            }
             let options: Vec<String> = hits.iter().map(|(k, v)| format!("{k}={v}")).collect();
             return Err(format!(
                 "{value:?} is a value of {}: write {}",
@@ -207,7 +229,7 @@ fn lookup(value: &str, pairs: &[(String, String)]) -> Result<Option<String>, Str
             ));
         }
     };
-    Ok(Some(format!("{}={}", one.0, one.1)))
+    Ok(Some(one.clone()))
 }
 
 /// `a`, `a and b`, `a, b and c`.
@@ -374,6 +396,44 @@ mod tests {
             "app=Shop"
         );
         assert!(rewrite("SHOP", Grammar::Labels, &p).is_err());
+    }
+
+    #[test]
+    fn a_value_spelt_alike_under_another_key_is_still_asked_about() {
+        let p: Vec<(String, String)> = vec![
+            ("app".into(), "Ordering".into()),
+            ("env".into(), "ordering".into()),
+        ];
+        for typed in ["ordering", "Ordering"] {
+            let err = rewrite(typed, Grammar::Traffic, &p).unwrap_err();
+            assert_eq!(
+                err,
+                format!("{typed:?} is a value of app and env: write app=Ordering or env=ordering")
+            );
+        }
+    }
+
+    #[test]
+    fn a_wholly_quoted_value_resolves_and_stays_quoted() {
+        assert_eq!(
+            text("env=prod \"new york\" !\"New York\"", Grammar::Labels),
+            "env=prod loc=\"New York\" !loc=\"New York\""
+        );
+        assert_eq!(text("-\"new york\"", Grammar::Rules), "-loc=\"New York\"");
+        let r = rewrite("\"new yrk\"", Grammar::Labels, &pairs()).unwrap();
+        assert_eq!(r.text, "\"new yrk\"");
+        assert_eq!(
+            r.explain(
+                "\"\\\"new yrk\\\"\": expected key=value (key=- for no label)".into(),
+                &pairs()
+            ),
+            "\"\\\"new yrk\\\"\": expected key=value (key=- for no label); similar: loc=New York"
+        );
+        assert_eq!(
+            text("\"a=b\" \"x,y\"", Grammar::Labels),
+            "\"a=b\" \"x,y\"",
+            "a quoted term with = or , is the grammar's"
+        );
     }
 
     #[test]
