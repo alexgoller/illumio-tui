@@ -3961,6 +3961,10 @@ fn traffic_and_rule_editors_wrap_a_bare_value_error() {
     let out = render_to_string(&m, 80, 24);
     assert!(out.contains("similar: app=shop"), "{out}");
     insta::assert_snapshot!("policy_rule_search_bare_value_error_80x24", out);
+    insta::assert_snapshot!(
+        "policy_rule_search_bare_value_error_120x40",
+        render_to_string(&m, 120, 40)
+    );
 }
 
 /// #88: a long Traffic editor error wraps over three rows, the format

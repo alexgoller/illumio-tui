@@ -1,0 +1,44 @@
+---
+source: crates/illumio-tui/tests/tui_snapshots.rs
+expression: "render_to_string(&m, 120, 40)"
+---
+ illumio-tui pce.example · org 5 ●                                                                    api 5 calls · 20K
+  1 Traffic  │  2 Policy  │  3 Objects  │  4 Workloads  │  5 Events
+╭ Rulesets ────────────────────────── draft · 5s ago ╮╭ Rules · app=shop, env=prod ───────────────── 3 intra · 1 extra ╮
+│  ruleset                on  scopes            rules││  kind          on  scope consumer provider services P/C        │
+│▸ Shop-Prod              ✓   app=shop & env=pr     4││▸ override_deny ✓   intra All work role=db  22/tcp             -│
+│  Global-Infra           ✗   All                   1││  allow         ✓   intra role=web role=db  PostgreS           -│
+│                                                    ││  allow         ✓   extra ipl:Corp role=web 443/tcp,           -│
+│                                                    ││  deny          ✓   intra ipl:Any  All work 23/tcp             -│
+│                                                    ││                                                                │
+│                                                    ││                                                                │
+│                                                    ││                                                                │
+│                                                    ││                                                                │
+│                                                    ││                                                                │
+│                                                    ││                                                                │
+│                                                    ││                                                                │
+│                                                    ││                                                                │
+│                     ╭ Rule search ───────────────── Ctrl-N complete · Enter apply · Esc cancel ╮                     │
+│                     │▸ rules sho▏                                                              │                     │
+│                     │                                                                          │                     │
+│                     │"sho": unknown term; similar: app=shop; use [!]key=value[,value],         │                     │
+│                     │ipl:NAME, svc:NAME, svc:PORT/PROTO or svc:tcp|udp|icmp, wl:NAME,          │                     │
+│                     │href:TEXT, scope:|src:|dst: before an actor, disabled, enabled, deny, all…│                     │
+│                     ╰──────────────────────────────────────────────────────────────────────────╯                     │
+│                                                    ││                                                                │
+│                                                    ││                                                                │
+│                                                    ││                                                                │
+│                                                    ││                                                                │
+│                                                    ││                                                                │
+│                                                    ││                                                                │
+│                                                    ││                                                                │
+│                                                    ││                                                                │
+│                                                    ││                                                                │
+│                                                    ││                                                                │
+│                                                    ││                                                                │
+│                                                    ││                                                                │
+│                                                    ││                                                                │
+│                                                    ││                                                                │
+│                                                    ││                                                                │
+╰────────────────────────────────────────────────────╯╰────────────────────────────────────────────────────────────────╯
+ready                                    d scope  p pending  Enter detail  Tab pane  i impact  :fl saved  : cmd  ? help
