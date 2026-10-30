@@ -51,21 +51,19 @@ pub(super) fn fail(model: &mut Model, context: &str, e: &str, auto_off: bool) {
     }
 }
 
-/// A failed query: when the filter editor's `Enter` started it (and
-/// nothing else is open on Traffic), the editor comes back with the
-/// error inline and its fields editable, and the filter before it holds;
-/// else the status line (and the error box for a long error) as before.
+/// A failed query: when the filter editor's `Enter` started it, the
+/// filter before it is put back, and (still on Traffic, nothing else
+/// open) the editor comes back with the error inline and its fields
+/// editable; else the status line (and the error box for a long error)
+/// as before.
 pub(super) fn query_failed(model: &mut Model, seq: u64, e: &str, tripped: bool) {
-    let reopen = model.traffic.reopen.take();
-    if let Some(r) = reopen
-        && r.0 == seq
-        && model.overlay == Overlay::None
-        && model.screen == Screen::Traffic
-    {
+    if let Some(r) = model.traffic.reopen.take().filter(|r| r.0 == Some(seq)) {
         let (_, mut editor, before) = *r;
-        editor.error = Some(e.to_string());
         model.traffic.filter = before;
-        model.overlay = Overlay::FilterEditor(editor);
+        if model.overlay == Overlay::None && model.screen == Screen::Traffic {
+            editor.error = Some(e.to_string());
+            model.overlay = Overlay::FilterEditor(editor);
+        }
     }
     fail(model, "query", e, tripped);
 }

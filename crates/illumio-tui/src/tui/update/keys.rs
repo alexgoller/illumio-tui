@@ -195,10 +195,20 @@ pub(super) fn on_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
                         model.overlay = Overlay::None;
                         let before = model.traffic.filter.clone();
                         let cmds = request_query(model, f);
-                        // Sent: a PCE error for it comes back into this editor.
-                        if let [Cmd::RunQuery { seq, .. }] = &cmds[..] {
-                            model.traffic.reopen = Some(Box::new((*seq, e, before)));
-                        }
+                        // Sent (or asked about first): an error for it comes
+                        // back into this editor.
+                        let asking = matches!(
+                            &model.overlay,
+                            Overlay::Confirm {
+                                action: PendingAction::RunQuery(_),
+                                ..
+                            }
+                        );
+                        model.traffic.reopen = match &cmds[..] {
+                            [Cmd::RunQuery { seq, .. }] => Some(Box::new((Some(*seq), e, before))),
+                            _ if asking => Some(Box::new((None, e, before))),
+                            _ => None,
+                        };
                         return cmds;
                     }
                     Err(err) => {
@@ -266,7 +276,19 @@ pub(super) fn on_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
             KeyCode::Char('y') | KeyCode::Char('Y') => {
                 model.overlay = Overlay::None;
                 match action {
-                    PendingAction::RunQuery(f) => update(model, Msg::ApplyFilter(f)),
+                    PendingAction::RunQuery(f) => {
+                        let cmds = update(model, Msg::ApplyFilter(f));
+                        // The editor's query, asked about: now it has a seq.
+                        if let Some(r) = model.traffic.reopen.as_mut()
+                            && r.0.is_none()
+                        {
+                            match &cmds[..] {
+                                [Cmd::RunQuery { seq, .. }] => r.0 = Some(*seq),
+                                _ => model.traffic.reopen = None,
+                            }
+                        }
+                        cmds
+                    }
                     PendingAction::RunNow(f) => run_now(model, f),
                     PendingAction::RunBaseline { filter, start, end } => {
                         start_baseline(model, filter, start, end)
@@ -312,6 +334,11 @@ pub(super) fn on_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
             KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => {
                 model.overlay = Overlay::None;
                 model.status = StatusLine::info("cancelled");
+                if matches!(action, PendingAction::RunQuery(_))
+                    && model.traffic.reopen.as_ref().is_some_and(|r| r.0.is_none())
+                {
+                    model.traffic.reopen = None;
+                }
                 if matches!(action, PendingAction::ReloadApp) {
                     model.overlay = Overlay::App;
                 }

@@ -276,6 +276,116 @@ fn a_typo_or_a_capitalised_prefix_suggests_the_label_by_its_value() {
     }
 }
 
+/// The query a key started, else a panic.
+#[track_caller]
+fn query_seq(cmds: &[Cmd]) -> u64 {
+    match cmds {
+        [Cmd::RunQuery { seq, .. }] => *seq,
+        other => panic!("{other:?}"),
+    }
+}
+
+fn query_failed(m: &mut Model, seq: u64, e: &str) {
+    update(
+        m,
+        Msg::QueryDone {
+            seq,
+            result: Err(e.into()),
+        },
+    );
+}
+
+#[test]
+fn a_confirmed_query_from_the_editor_reopens_it_on_a_pce_error() {
+    let mut m = with_more_labels(model_fixture());
+    m.screen = Screen::Traffic;
+    let before = m.traffic.filter.clone();
+    press(&mut m, KeyCode::Char('f'));
+    send(&mut m, KeyCode::Char('u'), KeyModifiers::CONTROL);
+    type_text(&mut m, "30d");
+    press(&mut m, KeyCode::Tab);
+    type_text(&mut m, "app=shop");
+    assert_eq!(enter(&mut m), Vec::<Cmd>::new());
+    assert!(
+        matches!(m.overlay, Overlay::Confirm { .. }),
+        "{:?}",
+        m.overlay
+    );
+    let seq = query_seq(&send(&mut m, KeyCode::Char('y'), KeyModifiers::NONE));
+    query_failed(&mut m, seq, "PCE returned 406: rejected");
+    let e = traffic_editor(&m);
+    assert_eq!(e.error.as_deref(), Some("PCE returned 406: rejected"));
+    assert_eq!(e.values[0], "30d");
+    assert_eq!(m.traffic.filter, before, "the filter before it holds");
+}
+
+#[test]
+fn a_declined_confirmation_drops_the_editor_it_kept() {
+    let mut m = with_more_labels(model_fixture());
+    m.screen = Screen::Traffic;
+    press(&mut m, KeyCode::Char('f'));
+    send(&mut m, KeyCode::Char('u'), KeyModifiers::CONTROL);
+    type_text(&mut m, "30d");
+    assert_eq!(enter(&mut m), Vec::<Cmd>::new());
+    press(&mut m, KeyCode::Char('n'));
+    assert!(m.traffic.reopen.is_none());
+    // A later query (not from the editor) fails as before.
+    let mut f = m.traffic.filter.clone();
+    f.src = "env=prod".into();
+    let seq = query_seq(&update(&mut m, Msg::ApplyFilter(f)));
+    query_failed(&mut m, seq, &"x".repeat(80));
+    assert!(matches!(m.overlay, Overlay::Error(_)), "{:?}", m.overlay);
+}
+
+#[test]
+fn a_rejected_query_puts_the_filter_back_even_when_the_editor_cannot_reopen() {
+    let mut m = traffic_typed(1, "app=shop");
+    let before = m.traffic.filter.clone();
+    let seq = query_seq(&enter(&mut m));
+    m.screen = Screen::Workloads;
+    query_failed(&mut m, seq, "PCE returned 406: rejected");
+    assert_eq!(m.overlay, Overlay::None);
+    assert_eq!(m.traffic.filter, before, "r would not resend it");
+    assert!(m.status.text.contains("rejected"), "{:?}", m.status);
+}
+
+#[test]
+fn a_rejected_events_load_puts_the_filter_back_under_another_editor() {
+    let mut m = on_events();
+    press(&mut m, KeyCode::Char('f'));
+    type_text(&mut m, "err");
+    assert!(matches!(&enter(&mut m)[..], [Cmd::LoadEvents { .. }]));
+    press(&mut m, KeyCode::Char('f'));
+    update(
+        &mut m,
+        Msg::EventsLoaded(Err("PCE returned 406: no".into())),
+    );
+    assert_eq!(m.events.filter.severity, "", "put back");
+    let e = events_editor(&m);
+    assert_eq!(e.error, None, "the editor opened since is left as it is");
+}
+
+#[test]
+fn a_refilter_while_loading_is_the_editor_a_rejection_brings_back() {
+    let mut m = on_events();
+    press(&mut m, KeyCode::Char('f'));
+    type_text(&mut m, "err");
+    assert!(matches!(&enter(&mut m)[..], [Cmd::LoadEvents { .. }]));
+    // While it loads, a type-only change filters locally.
+    press(&mut m, KeyCode::Char('f'));
+    press(&mut m, KeyCode::Tab);
+    type_text(&mut m, "agent");
+    assert_eq!(enter(&mut m), Vec::<Cmd>::new());
+    update(
+        &mut m,
+        Msg::EventsLoaded(Err("PCE returned 406: no".into())),
+    );
+    let e = events_editor(&m);
+    assert_eq!(e.values[SEVERITY], "err");
+    assert_eq!(e.values[1], "agent", "the later edit is not lost");
+    assert!(e.error.is_some());
+}
+
 // --- Workloads -------------------------------------------------------------
 
 fn label_editor(m: &Model) -> &crate::tui::label_editor::LabelFilterEditor {

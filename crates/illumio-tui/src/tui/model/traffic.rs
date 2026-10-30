@@ -121,11 +121,11 @@ pub use pce::traffic::queries_text;
 #[derive(Debug)]
 pub struct TrafficState {
     pub filter: TrafficFilter,
-    /// The query the filter editor's `Enter` started (its `seq`), the
-    /// editor and the filter before it: a PCE error for that query
-    /// reopens the editor with the error inline and puts the filter back
-    /// (#88).
-    pub reopen: Option<Box<(u64, crate::tui::filter::FilterEditor, TrafficFilter)>>,
+    /// The query the filter editor's `Enter` started (its `seq`; `None`
+    /// while the cost guard asks), the editor and the filter before it:
+    /// an error for that query puts the filter back and reopens the
+    /// editor with the error inline (#88).
+    pub reopen: Option<Box<(Option<u64>, crate::tui::filter::FilterEditor, TrafficFilter)>>,
     pub query: QueryState,
     pub data: Option<TrafficData>,
     pub seq: u64,
