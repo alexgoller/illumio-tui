@@ -15,7 +15,6 @@ expression: "render_to_string(&m, 120, 40)"
 │                                                                                                                      │
 │                                                                                                                      │
 │                                                                                                                      │
-│                                                                                                                      │
 │                        ╭ Edit filter ──────────────────── Tab next · Enter run · Esc cancel ╮                        │
 │                        │  window       24h                                                  │                        │
 │                        │▸ source       sho▏                                                 │                        │
@@ -27,6 +26,7 @@ expression: "render_to_string(&m, 120, 40)"
 │                        │                                                                    │                        │
 │                        │source: invalid input: cannot parse filter "sho"; similar: app=shop;│                        │
 │                        │use key=value, ip:ADDR, ipl:NAME, wl:HOSTNAME or fqdn:NAME          │                        │
+│                        │                                                                    │                        │
 │                        ╰────────────────────────────────────────────────────────────────────╯                        │
 │                                                                                                                      │
 │                                                                                                                      │

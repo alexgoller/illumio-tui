@@ -426,8 +426,13 @@ fn draw_key_picker(
 pub fn render_filter_editor(model: &Model, e: &FilterEditor, f: &mut Frame, area: Rect) {
     let t = &model.theme;
     let strip = e.completion_strip();
-    // While completing, the candidates take a row under the active field.
-    let r = centered(area, 70, 12 + u16::from(strip.is_some()));
+    // While completing, the candidates take a row under the active field;
+    // an error takes one more than the preview and note.
+    let r = centered(
+        area,
+        70,
+        12 + u16::from(strip.is_some()) + u16::from(e.error.is_some()),
+    );
     f.render_widget(Clear, r);
     let block = panel("Edit filter", "Tab next · Enter run · Esc cancel", t, true);
     let mut lines: Vec<Line> = Vec::new();
@@ -457,10 +462,10 @@ pub fn render_filter_editor(model: &Model, e: &FilterEditor, f: &mut Frame, area
     }
     lines.push(Line::from(""));
     match &e.error {
-        // In the preview's and the note's rows.
+        // In the preview's and the note's rows and one more.
         Some(err) => {
             let width = (r.width as usize).saturating_sub(2);
-            for row in crate::tui::form::wrap_rows(err, width, 2) {
+            for row in crate::tui::form::wrap_rows(err, width, 3) {
                 lines.push(Line::from(Span::styled(row, Style::new().fg(t.bad))));
             }
         }

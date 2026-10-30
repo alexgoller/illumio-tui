@@ -7,18 +7,18 @@ expression: out
 ╭ Filters ────────────────────────────────── window 24h · cap 1000 · unbounded ╮
 │window 24h  src *  dst *  svc *  decision all                                 │
 ╰──────────────────────────────────────────────────────────────────────────────╯
-╭ Result ────────────────────────────────────────────── no query yet · press r ╮
-│run ╭ Edit filter ──────────────────── Tab next · Enter run · Esc cancel ╮    │
-╰────│  window       24h                                                  │────╯
-╭ Flo│▸ source       sho▏                                                 │────╮
-│no r│  destination                                                       │    │
-│    │  service                                                           │    │
+╭ Res╭ Edit filter ──────────────────── Tab next · Enter run · Esc cancel ╮s r ╮
+│run │  window       24h                                                  │    │
+╰────│▸ source       sho▏                                                 │────╯
+╭ Flo│  destination                                                       │────╮
+│no r│  service                                                           │    │
 │    │  decisions    all                                                  │    │
 │    │  transmission all                                                  │    │
 │    │  max results  1000                                                 │    │
-╰────│                                                                    │────╯
-╭ Det│source: invalid input: cannot parse filter "sho"; similar: app=shop;│ows ╮
-│sele│use key=value, ip:ADDR, ipl:NAME, wl:HOSTNAME or fqdn:NAME          │    │
+│    │                                                                    │    │
+╰────│source: invalid input: cannot parse filter "sho"; similar: app=shop;│────╯
+╭ Det│use key=value, ip:ADDR, ipl:NAME, wl:HOSTNAME or fqdn:NAME          │ows ╮
+│sele│                                                                    │    │
 │    ╰────────────────────────────────────────────────────────────────────╯    │
 │                                                                              │
 │                                                                              │

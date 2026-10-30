@@ -3962,3 +3962,17 @@ fn traffic_and_rule_editors_wrap_a_bare_value_error() {
     assert!(out.contains("similar: app=shop"), "{out}");
     insta::assert_snapshot!("policy_rule_search_bare_value_error_80x24", out);
 }
+
+/// #88: a long Traffic editor error wraps over three rows, the format
+/// text at its end still shown.
+#[test]
+fn traffic_filter_editor_wraps_a_long_error_over_three_rows() {
+    use illumio_tui::tui::model::Screen;
+    use illumio_tui::tui::test_support::model_fixture;
+    let mut m = model_fixture();
+    m.screen = Screen::Traffic;
+    assert!(type_keys(&mut m, "f\tthis-is-not-a-filter-term-at-all\n").is_empty());
+    let out = render_to_string(&m, 80, 24);
+    assert!(out.contains("fqdn:NAME"), "{out}");
+    insta::assert_snapshot!("traffic_filter_editor_long_error_80x24", out);
+}
