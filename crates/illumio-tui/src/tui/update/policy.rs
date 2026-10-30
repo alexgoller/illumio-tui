@@ -561,7 +561,12 @@ pub(super) fn rule_filter_key(
         KeyCode::Backspace => e.pop(),
         KeyCode::Char('u') if ctrl => e.clear(),
         KeyCode::Char(c) => e.push(c),
-        KeyCode::Enter => match e.parse() {
+        KeyCode::Enter => match bare::apply(
+            &mut e.value,
+            Grammar::Rules,
+            &loaded_label_pairs(model),
+            pce::RuleFilter::parse,
+        ) {
             Ok(f) => {
                 model.overlay = Overlay::None;
                 apply_rule_search(model, f);

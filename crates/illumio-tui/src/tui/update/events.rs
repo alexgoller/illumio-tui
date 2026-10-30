@@ -242,8 +242,15 @@ fn apply_events_filter(model: &mut Model, mut e: EventsEditor) -> Vec<Cmd> {
         actor: e.values[ACTOR].trim().to_string(),
         window: e.values[WINDOW].trim().to_string(),
     };
+    let before = model.events.filter.clone();
     match apply_events_edit(model, edit) {
-        Ok(cmds) => cmds,
+        Ok(cmds) => {
+            // Sent: a PCE error for it comes back into this editor.
+            if !cmds.is_empty() {
+                model.events.reopen = Some(Box::new((e, before)));
+            }
+            cmds
+        }
         Err(err) => {
             e.error = Some(err);
             model.overlay = Overlay::EventsEditor(e);
@@ -285,6 +292,25 @@ pub(super) fn apply_events_edit(
     model.events.filter = edit;
     model.events.rebuild();
     Ok(request_events(model, filter, CacheMode::Use))
+}
+
+/// A failed events load: when the editor's `Enter` sent it (and nothing
+/// else is open on Events), the editor comes back with the PCE's error
+/// inline and its fields editable, and the filter before it holds; else
+/// the status line (and the error box for a long error) as before.
+pub(super) fn events_failed(model: &mut Model, e: &str, tripped: bool) {
+    let reopen = model.events.reopen.take();
+    if let Some(r) = reopen
+        && model.overlay == Overlay::None
+        && model.screen == Screen::Events
+    {
+        let (mut editor, before) = *r;
+        editor.error = Some(e.to_string());
+        model.events.filter = before;
+        model.events.rebuild();
+        model.overlay = Overlay::EventsEditor(editor);
+    }
+    fail(model, "could not load events", e, tripped);
 }
 
 /// Keys of the summary (`actors`: its Actors view, else Types): `j`/`k`

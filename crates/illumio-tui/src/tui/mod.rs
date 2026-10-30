@@ -4,6 +4,7 @@
 pub mod app;
 pub mod app_picker;
 pub mod app_view;
+pub mod bare;
 pub mod bulk;
 pub mod commands;
 pub mod complete;

@@ -1,6 +1,7 @@
 //! Pure state transitions. Never performs I/O; returns `Cmd`s instead.
 use crate::tui::app_picker::{AppPicker, AppPickerOutcome, AppPickerPurpose};
 use crate::tui::app_view::{AppPanel, AppView, Loadable};
+use crate::tui::bare::{self, Grammar};
 use crate::tui::commands::{self, Command};
 use crate::tui::edit::{self, EditIntent, RulesetTarget, Start, WriteIntent};
 use crate::tui::filter::{FilterEditor, TrafficFilter};
@@ -89,6 +90,12 @@ use writes::*;
 /// The status and header note for a result a supercluster region did not
 /// answer.
 pub const INCOMPLETE: &str = " · incomplete: a PCE region did not respond";
+
+/// The loaded labels as `(key, value)`, where a filter editor looks up a
+/// bare value (#88). No request.
+fn loaded_label_pairs(model: &Model) -> Vec<(String, String)> {
+    bare::label_pairs(model.index().map(|i| i.as_ref()))
+}
 
 pub fn update(model: &mut Model, msg: Msg) -> Vec<Cmd> {
     let traffic_answer = matches!(
@@ -430,6 +437,7 @@ fn on_msg(model: &mut Model, msg: Msg) -> Vec<Cmd> {
             }
             match result {
                 Ok(o) => {
+                    model.traffic.reopen = None;
                     // A new unfocused result: a focused one kept aside is stale.
                     model.traffic.unfocused = None;
                     model.traffic.focus_result = None;
@@ -486,7 +494,7 @@ fn on_msg(model: &mut Model, msg: Msg) -> Vec<Cmd> {
                 Err(e) => {
                     model.traffic.query = QueryState::Failed(e.clone());
                     let tripped = model.traffic.auto.take_tick_failure();
-                    fail(model, "query", &e, tripped);
+                    query_failed(model, seq, &e, tripped);
                 }
             }
             Vec::new()
@@ -760,6 +768,7 @@ fn on_msg(model: &mut Model, msg: Msg) -> Vec<Cmd> {
             match result {
                 Ok(p) => {
                     let e = &mut model.events;
+                    e.reopen = None;
                     e.raw = p.events;
                     e.rebuild();
                     e.window = Some(p.window);
@@ -772,7 +781,7 @@ fn on_msg(model: &mut Model, msg: Msg) -> Vec<Cmd> {
                 }
                 Err(e) => {
                     let tripped = model.events.auto.take_tick_failure();
-                    fail(model, "could not load events", &e, tripped);
+                    events_failed(model, &e, tripped);
                 }
             }
             Vec::new()
@@ -1295,6 +1304,9 @@ mod event_types_tests;
 mod exposure_tests;
 #[cfg(test)]
 mod filter_completion_tests;
+/// #88: severities, bare label values and PCE errors in the editors.
+#[cfg(test)]
+mod filter_guidance_tests;
 #[cfg(test)]
 mod focus_tests;
 #[cfg(test)]

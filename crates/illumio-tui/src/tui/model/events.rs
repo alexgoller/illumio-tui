@@ -244,6 +244,10 @@ pub struct EventsState {
     pub requested: Option<(Option<String>, String)>,
     pub answered: Option<(Option<String>, String)>,
     pub auto: AutoRefresh,
+    /// The editor whose `Enter` sent the request in flight, and the filter
+    /// in force before it: a PCE error for it reopens the editor with the
+    /// error inline and puts that filter back (#88).
+    pub reopen: Option<Box<(crate::tui::events_editor::EventsEditor, EventsFilterEdit)>>,
 }
 
 impl EventsState {
@@ -268,6 +272,7 @@ impl EventsState {
             requested: None,
             answered: None,
             auto: AutoRefresh::new(min_refresh),
+            reopen: None,
         }
     }
 

@@ -190,10 +190,16 @@ pub(super) fn on_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
                     e.push(c);
                     model.overlay = Overlay::FilterEditor(e);
                 }
-                KeyCode::Enter => match e.to_filter() {
+                KeyCode::Enter => match e.to_filter_with(&loaded_label_pairs(model)) {
                     Ok(f) => {
                         model.overlay = Overlay::None;
-                        return request_query(model, f);
+                        let before = model.traffic.filter.clone();
+                        let cmds = request_query(model, f);
+                        // Sent: a PCE error for it comes back into this editor.
+                        if let [Cmd::RunQuery { seq, .. }] = &cmds[..] {
+                            model.traffic.reopen = Some(Box::new((*seq, e, before)));
+                        }
+                        return cmds;
                     }
                     Err(err) => {
                         e.error = Some(err);
@@ -238,13 +244,19 @@ pub(super) fn on_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
                     model.overlay = Overlay::LabelFilter(e);
                 }
                 // A malformed filter stays in the editor; the old one holds.
-                KeyCode::Enter => match apply_workload_labels(model, &e.value) {
-                    Ok(()) => model.overlay = Overlay::None,
-                    Err(err) => {
-                        e.error = Some(err);
-                        model.overlay = Overlay::LabelFilter(e);
+                KeyCode::Enter => {
+                    let pairs = loaded_label_pairs(model);
+                    match bare::apply(&mut e.value, Grammar::Labels, &pairs, |text| {
+                        apply_workload_labels(model, text)
+                    }) {
+                        Ok(()) => model.overlay = Overlay::None,
+                        Err(err) => {
+                            e.error = Some(err);
+                            label_editor_unknown(model, &mut e);
+                            model.overlay = Overlay::LabelFilter(e);
+                        }
                     }
-                },
+                }
                 _ => model.overlay = Overlay::LabelFilter(e),
             }
             Vec::new()

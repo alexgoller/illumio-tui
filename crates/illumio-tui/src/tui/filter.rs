@@ -3,6 +3,7 @@
 //! the name index, so it is async and runs in the runtime, not in `update`).
 pub use crate::filters::Terms;
 use crate::filters::{or_segments, parse_terms};
+use crate::tui::bare::Grammar;
 use crate::tui::form::{Completing, Completion, FieldKind};
 use pce::models::{PolicyDecision, TrafficQuery, Transmission};
 use pce::traffic::{
@@ -463,6 +464,24 @@ impl FilterEditor {
         };
         f.validate()?;
         Ok(f)
+    }
+
+    /// [`to_filter`](Self::to_filter) after the bare label values of the
+    /// source and destination became `key=value` (`pairs`: the loaded
+    /// labels; #88).
+    pub fn to_filter_with(&mut self, pairs: &[(String, String)]) -> Result<TrafficFilter, String> {
+        let mut unmatched = Vec::new();
+        for (field, name) in [(1, "source"), (2, "destination")] {
+            let r = crate::tui::bare::rewrite(&self.values[field], Grammar::Traffic, pairs)
+                .map_err(|e| format!("{name}: {e}"))?;
+            self.values[field] = r.text;
+            unmatched.extend(r.unmatched);
+        }
+        let r = crate::tui::bare::Rewritten {
+            text: String::new(),
+            unmatched,
+        };
+        self.to_filter().map_err(|e| r.explain(e, pairs))
     }
 
     pub fn next(&mut self) {

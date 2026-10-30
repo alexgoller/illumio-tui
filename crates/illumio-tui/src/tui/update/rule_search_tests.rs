@@ -95,7 +95,8 @@ fn a_malformed_search_stays_in_the_editor_and_unknown_names_warn() {
     search(&mut m, "role=web");
     press(&mut m, key('f'));
     press(&mut m, ctrl('u'));
-    type_text(&mut m, "shop");
+    // A word no label has (a label value alone becomes key=value, #88).
+    type_text(&mut m, "nolabel");
     press(&mut m, kc(KeyCode::Enter));
     match &m.overlay {
         Overlay::RuleFilter(e) => assert!(e.error.as_deref().unwrap().contains("unknown term")),
