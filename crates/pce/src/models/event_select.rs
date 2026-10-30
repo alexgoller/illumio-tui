@@ -282,11 +282,13 @@ pub const SEVERITIES: [&str; 8] = [
     "emerg", "alert", "crit", "err", "warning", "notice", "info", "debug",
 ];
 
-/// A severity's syslog level, 0 (`emerg`) to 7 (`debug`); `critical`,
-/// `error` and `warn` are aliases. Case-insensitive; `None` for another word.
+/// A severity's syslog level, 0 (`emerg`) to 7 (`debug`); `emergency`,
+/// `critical`, `error` and `warn` are aliases. Case-insensitive; `None`
+/// for another word.
 pub fn severity_level(s: &str) -> Option<u8> {
     let s = s.trim().to_ascii_lowercase();
     let s = match s.as_str() {
+        "emergency" => "emerg",
         "critical" => "crit",
         "error" => "err",
         "warn" => "warning",
@@ -298,11 +300,12 @@ pub fn severity_level(s: &str) -> Option<u8> {
 /// The severity field: empty (any), one severity (sent to the PCE, which
 /// takes one value), or `X+`: `X` and worse, which the PCE cannot be
 /// asked for, so nothing is sent and the loaded events are filtered here.
+/// Any other word is refused here, before a request, naming the values.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub enum SeverityFilter {
     #[default]
     Any,
-    /// Sent as is (the PCE decides what it accepts, as before `X+`).
+    /// One of [`SEVERITIES`] (an alias already the PCE's word).
     Exact(String),
     /// The worst level kept, inclusive (`warning+`: 4).
     AtLeast(u8),
@@ -318,7 +321,14 @@ impl SeverityFilter {
             Some(name) => severity_level(name).map(Self::AtLeast).ok_or_else(|| {
                 format!("severity {t:?}: X+ takes one of {}", SEVERITIES.join(", "))
             }),
-            None => Ok(Self::Exact(t.to_string())),
+            None => severity_level(t)
+                .map(|l| Self::Exact(SEVERITIES[usize::from(l)].to_string()))
+                .ok_or_else(|| {
+                    format!(
+                        "severity {t:?}: use one of {}, or X+ for X and worse",
+                        SEVERITIES.join(", ")
+                    )
+                }),
         }
     }
 
@@ -556,6 +566,34 @@ mod tests {
         );
         assert!(SeverityFilter::parse("loud+").is_err());
         assert!(SeverityFilter::parse("+").is_err());
+    }
+
+    #[test]
+    fn an_unknown_severity_is_refused_and_aliases_become_the_pce_word() {
+        let err = SeverityFilter::parse("Ordering").unwrap_err();
+        assert!(err.contains("\"Ordering\""), "{err}");
+        for v in SEVERITIES {
+            assert!(err.contains(v), "{err} lists {v}");
+        }
+        assert!(err.contains("X+"), "{err}");
+        for (typed, sent) in [
+            ("error", "err"),
+            ("Warn", "warning"),
+            ("critical", "crit"),
+            ("emergency", "emerg"),
+            ("ERR", "err"),
+            ("notice", "notice"),
+        ] {
+            assert_eq!(
+                SeverityFilter::parse(typed).unwrap().pce_value().as_deref(),
+                Some(sent),
+                "{typed}"
+            );
+        }
+        assert_eq!(
+            SeverityFilter::parse("emergency+").unwrap(),
+            SeverityFilter::AtLeast(0)
+        );
     }
 
     #[test]
