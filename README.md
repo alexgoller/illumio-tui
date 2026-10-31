@@ -234,6 +234,7 @@ Environment variables (same names as illumio-mcp-server):
 or a profile in `~/.config/illumio-tui/config.toml`:
 
     default_profile = "prod"
+    check_updates = false   # optional: no once-a-day update check in the TUI (default true)
 
     [profiles.prod]
     host = "pce.example"
@@ -286,7 +287,9 @@ the profile and `ILLUMIO_TUI_THEME` the TUI theme; `ILLUMIO_TUI_COLORS=256` maps
 24-bit colours to the xterm 256 (the default in Apple Terminal, which garbles 24-bit colour
 before macOS 26; `truecolor` forces 24-bit); `ILLUMIO_WRITES` and
 `ILLUMIO_AUTO_BACKFILL` (`1`/`0`, `true`/`false`) outrank the profile's `writes` and
-`traffic_auto_backfill`. `--env-file .env` loads a dotenv file for one run. Connection settings can
+`traffic_auto_backfill`. `ILLUMIO_TUI_NO_UPDATE_CHECK=1` turns the TUI's update check off
+like `check_updates = false` (see [Updates and what's new](#updates-and-whats-new)).
+`--env-file .env` loads a dotenv file for one run. Connection settings can
 also be overridden per run with global flags: `--host`, `--pce-port`,
 `--org-id`, `--profile`, `--config`, `--insecure`, `--no-cache`, `--human` (the
 connection-port flag is `--pce-port`, not `--port`, because `traffic query`
@@ -334,11 +337,12 @@ integers (`--human` with `--json` is accepted and changes nothing). JSON is made
 | 2 | arguments or configuration (an unknown label, an expensive query without `--yes`, a missing `--confirm-count`) |
 | 3 | authentication |
 | 4 | PCE error (a failed request, an incomplete write) |
-| 5 | rate limited |
+| 5 | rate limited; GitHub unreachable (`update check`) |
 | 6 | write refused (writes not enabled; `enforce` on an app that is not ready) |
 | 7 | flows blocked since an enforcement (`enforce --watch`), or flows the draft would newly block (`policy impact --fail-on-blocked`) |
 | 8 | a risky service exposed (`exposure --fail-on-exposed`) |
 | 9 | snapshots differ (`snapshot diff --fail-on-change`) |
+| 10 | a newer release is out (`update check --fail-if-outdated`) |
 
 Writes: enable them (`writes = true` or `ILLUMIO_WRITES=1`, else exit 6 even for a dry run),
 look with `--dry-run` (method, path and body; nothing sent), send with `--yes` (plus
@@ -441,7 +445,7 @@ Five screens: `1` Traffic, `2` Policy, `3` Objects, `4` Workloads, `5` Events. T
 takes `:traffic`, `:policy`, `:objects`, `:workloads`, `:events`, `:iplists` (Objects on its
 IP lists tab), `:filter <expr>`, `:window <dur>`, `:profile <name>`, `:writes [on|off]`,
 `:export <path>`, `:draft`, `:active`, `:unicast`, `:focus [app]`, `:app [app]`, `:gen [app]`,
-`:readiness`, `:enforce [app]`, `:exposure` (also `9`), `:used` (where the selected object is used, as `W`), `:hygiene` (unused objects, workloads missing labels), `:impact` (what provisioning the draft would change, see [Provision impact](#provision-impact)), `:batch`, `:snapshot [label]` (see [Snapshots](#snapshots)), `:save <name>`, `:filters` (`:fl`), `:load <name>`,
+`:readiness`, `:enforce [app]`, `:exposure` (also `9`), `:used` (where the selected object is used, as `W`), `:hygiene` (unused objects, workloads missing labels), `:impact` (what provisioning the draft would change, see [Provision impact](#provision-impact)), `:batch`, `:snapshot [label]` (see [Snapshots](#snapshots)), `:news` (what's new, see [Updates and what's new](#updates-and-whats-new)), `:save <name>`, `:filters` (`:fl`), `:load <name>`,
 `:default <name>|off`, `:help` and `:q` (each described below; saved filters under [Saved filters](#saved-filters)). `:export <path>` writes the table on
 screen as CSV (the rows shown, with the search and filters applied and in sort order; every
 column, whatever the terminal width, each cell whole; `~/` is the home directory), the same
@@ -459,6 +463,14 @@ the app overlay, the generator…), then related groups and the keys that work e
 `j`/`k` scroll. `Esc` closes overlays, `q` or `Ctrl-C` quits. The mouse wheel
 scrolls the current table and a click on a tab switches screen; on a terminal narrower than
 the full tab row (69 columns) the tabs read `Traf`, `Pol`, `Obj`, `Wl`, `Ev`.
+
+Once a day the TUI asks GitHub, in the background, whether a newer release is out; when one
+is, the header shows `↑ 0.5.9` in the accent colour before the `api N calls` counter (which
+never counts it). `:news` shows the release notes in a scrollable overlay (`j`/`k`, `g`/`G`,
+`Esc` closes): the releases newer than yours, else your version's. The first start after an
+upgrade says `updated to 0.5.8 · :news for what's new` once. `check_updates = false` or
+`ILLUMIO_TUI_NO_UPDATE_CHECK=1` turns the check off; details under
+[Updates and what's new](#updates-and-whats-new).
 
 - **Traffic**: `f` edit the filter, `r` run (bypasses the cache), `a` auto-refresh, `s` sort,
   `/` search; a filter that would be expensive asks for confirmation first. In src, dst and
@@ -1151,6 +1163,9 @@ the API call and byte counters at all times.
     illumio-tui profile list
     illumio-tui profile use prod
     illumio-tui completions zsh > ~/.zfunc/_illumio-tui
+    illumio-tui update check
+    illumio-tui news
+    illumio-tui news 0.5.6.. --json
 
 `traffic explain` answers which rule allows or blocks the flows of one source, destination
 and port: one Explorer query narrowed to them, evaluated against the draft (one POST, polls,
@@ -1184,7 +1199,9 @@ config, 3 auth, 4 PCE error, 5 rate limited, 6 write refused (by the guard, or `
 app that is not ready), 7 flows blocked since an enforcement (`enforce --watch`,
 `blocked_since_enforcement`) or flows the draft would newly block (`policy impact
 --fail-on-blocked`, `would_block`), 8 a risky service exposed (`exposure --fail-on-exposed`,
-`exposed`), 9 snapshots differ (`snapshot diff --fail-on-change`, `snapshots_differ`), 141 stdout closed by its reader (`| head`; quiet, no error).
+`exposed`), 9 snapshots differ (`snapshot diff --fail-on-change`, `snapshots_differ`), 10 a newer
+release is out (`update check --fail-if-outdated`, `outdated`), 141 stdout closed by its reader
+(`| head`; quiet, no error). `update check` exits 5 (`network`) when GitHub cannot be reached.
 
 `--csv` (beside `--table` and `--json`, exclusive with both) prints the same table as RFC 4180
 CSV for spreadsheets: a header row, `,` separators, quotes only around cells holding `,`, `"`
@@ -2062,6 +2079,52 @@ it) starts from the screen's default; it is an error when there is none or it do
 
 `--filter`, `filters show|rm` and `filters default <screen>` complete saved names from the config file. Saved filters need
 a profile from the config file: with `--env-file` or an env-only connection there are none.
+
+### Updates and what's new
+
+`illumio-tui update check` asks GitHub whether a newer release is out and prints either
+
+    illumio-tui 0.5.9 is available (you have 0.5.8)
+    upgrade: brew upgrade illumio-tui
+
+<!-- real output: illumio-tui update check -->
+or `illumio-tui 0.5.8 is the latest`. The upgrade line follows how this binary was installed,
+from its path: Homebrew `brew upgrade illumio-tui`, Scoop `scoop update illumio-tui`, winget
+`winget upgrade illumio-tui`, the MSI `winget upgrade illumio-tui` or the release page, a
+`.deb`/`.rpm` package or anything else the release page. There is no self-update: the package
+manager installs it. `--json` prints `{current, latest, outdated, install, upgrade,
+release_url, checked_at}` (schema `update-check`, `--fields` works); `--fail-if-outdated` exits
+10 when a newer release is out, after the report; GitHub unreachable exits 5. The one-liner for
+cron or CI is
+
+    illumio-tui update check --fail-if-outdated
+
+and a weekly mail with the notes, only when there is something new (exit 10; a network
+failure, exit 5, stays quiet):
+
+    0 9 * * 1 illumio-tui update check --fail-if-outdated >/dev/null 2>&1; [ $? -eq 10 ] && illumio-tui news | mail -s "illumio-tui update" alex@ryte.de
+
+`illumio-tui news` prints the release notes newer than your binary as markdown, or your
+version's when there are none; `news 0.5.6..` lists the releases after 0.5.6, `news
+0.5.6..0.5.8` those after 0.5.6 up to 0.5.8. `--json` prints `[{version, date, body}]`
+(schema `news`). Your version's notes and older ones are built into the binary, so they work
+offline (`--offline` uses only them); newer ones come from GitHub. When GitHub cannot be
+reached, `news` says so on stderr (and in `meta.warnings`) and shows what it has.
+
+Both make one request, `GET https://api.github.com/repos/alexgoller/illumio-tui/releases?per_page=30`:
+unauthenticated, 3 s timeout, through `HTTPS_PROXY`/`HTTP_PROXY`/`NO_PROXY` when set, drafts and
+prereleases left out. Never the PCE, never its credentials, never counted in `meta.api_calls`.
+The answer is cached for a day in `$XDG_CACHE_HOME/illumio-tui/update.json` (else
+`~/.cache/illumio-tui/`): `update check` always asks and refreshes it, `news` reads it while it
+is fresh. No other command touches the network for this.
+
+The TUI checks once a day in the background, at startup when the cache is older than 24 h; it
+never delays startup, and a failure shows nothing and waits for the next start a day later.
+Turn it off with `check_updates = false` at the top of `config.toml` or
+`ILLUMIO_TUI_NO_UPDATE_CHECK=1`; `:news` then reads only the cache and the built-in notes.
+The version the TUI last started as is kept in `$XDG_DATA_HOME/illumio-tui/last-version`, for
+the one-time `updated to` line. `ILLUMIO_TUI_UPDATE_URL` replaces `https://api.github.com`
+(the test suite points it at a mock server).
 
 ## Agents and scripts
 

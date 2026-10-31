@@ -449,6 +449,7 @@ ad/Production          needs_rules  72.2%  37 gaps
       <li>Shell completions for bash, zsh and fish ship with the Homebrew formula and the <code>.deb</code>/<code>.rpm</code>; otherwise <code>illumio-tui completions zsh &gt; ~/.zfunc/_illumio-tui</code> (PowerShell: <code>illumio-tui completions powershell | Out-String | Invoke-Expression</code> in your profile). Every subcommand, flag and enum value completes, and <code>--profile</code> completes your profile names. Labels, apps, hostnames, services, IP lists and label groups complete from a per-profile names cache that the list commands, the TUI and <code>illumio-tui completions refresh</code> fill (<code>--clear</code> deletes it; <code>completion_cache = false</code> keeps PCE names off disk). The cache needs a profile from the config file with its own <code>host</code> and <code>org_id</code>: a PCE named by <code>--host</code>/<code>--org-id</code> or <code>PCE_HOST</code>/<code>PCE_ORG_ID</code> writes none. Completion never contacts the PCE.</li>
       <li><code>:export &lt;path&gt;</code> writes the table on screen as CSV, the same format as the CLI&rsquo;s <code>--csv</code>.</li>
       <li><code>:snapshot [label]</code> saves the policy, labels and workloads to a local snapshot file (the reads <code>snapshot save</code> makes, mostly cache hits once the screens loaded); the status line shows the path. <code>illumio-tui snapshot diff</code> compares two of them.</li>
+      <li>When a newer release is out, the header shows <code>&uarr; 0.5.9</code> in the accent colour: the TUI asks GitHub once a day, in the background, and never counts it as a PCE call. <code>:news</code> shows the release notes (the releases newer than yours, else your version&rsquo;s) in a scrollable overlay; the first start after an upgrade says <code>updated to 0.5.8 &middot; :news for what&rsquo;s new</code> once. <code>check_updates = false</code> or <code>ILLUMIO_TUI_NO_UPDATE_CHECK=1</code> turns the check off; see <a href="#r-update-h">Know when there is a new release</a>.</li>
       <li>Apple Terminal garbles 24-bit colour before macOS 26, so there the theme is mapped to the xterm 256 colours by itself; <code>ILLUMIO_TUI_COLORS=256</code> or <code>truecolor</code> overrides it anywhere.</li>
     </ul>
   </article>
@@ -547,11 +548,12 @@ payment/Production,payment/Production,8080/tcp,7,70438,0,0,0,7,0,0,70438,0</code
             <tr><td>2</td><td>arguments or configuration</td><td>an unknown label, a 30-day window without <code>--yes</code>, a missing <code>--confirm-count</code></td></tr>
             <tr><td>3</td><td>authentication</td><td>a wrong key or secret</td></tr>
             <tr><td>4</td><td>PCE error</td><td>a failed request, an incomplete write</td></tr>
-            <tr><td>5</td><td>rate limited</td><td>429 / 503 after backoff</td></tr>
+            <tr><td>5</td><td>rate limited, or GitHub unreachable</td><td>429 / 503 after backoff; <code>update check</code> without a network</td></tr>
             <tr><td>6</td><td>write refused</td><td>writes not enabled; <code>enforce</code> on an app that is not ready</td></tr>
             <tr><td>7</td><td>blocked since enforcement, or would block</td><td><code>enforce --watch</code> found blocked flows; <code>policy impact --fail-on-blocked</code> found flows the draft would newly block (<code>would_block</code>)</td></tr>
             <tr><td>8</td><td>exposed</td><td><code>exposure --fail-on-exposed</code> found a risky service allowed from outside its destination&rsquo;s group</td></tr>
             <tr><td>9</td><td>snapshots differ</td><td><code>snapshot diff --fail-on-change</code> found a change</td></tr>
+            <tr><td>10</td><td>outdated</td><td><code>update check --fail-if-outdated</code> found a newer release</td></tr>
           </tbody>
         </table>
       </div>
@@ -641,7 +643,10 @@ counts   rule_sets=9, services=2</code></pre>
 <span class="c"># connection profiles</span>
 <span class="p">$ </span>illumio-tui profile add demo --from-env-file path/.env
 <span class="p">$ </span>illumio-tui profile list
-<span class="p">$ </span>illumio-tui profile use prod</code></pre>
+<span class="p">$ </span>illumio-tui profile use prod
+<span class="c"># updates: one request to GitHub's release list, never the PCE</span>
+<span class="p">$ </span>illumio-tui update check    <span class="c"># --fail-if-outdated exits 10</span>
+<span class="p">$ </span>illumio-tui news            <span class="c"># what's new since your version; news 0.5.6.. for a range</span></code></pre>
 
   <figure class="shot tour">
     <video controls muted playsinline preload="metadata" poster="assets/tour-cli-056.png" width="2216" height="1352">
@@ -1074,6 +1079,20 @@ not counted:
       <p>The same summary sits in front of the request with <code>ILLUMIO_WRITES=1 illumio-tui policy provision --all --dry-run --impact</code> (and, computed before the send, with <code>--yes</code>). With named targets the changes section marks which objects are in the request, and a warning says the rules and traffic sections still cover the whole draft. Cost: the pending list, the object lists, the draft and active rulesets, active label groups and IP lists and one workloads read (all cached; only when a ruleset is pending), then one Explorer query re-evaluated against the draft (POST, polls, one PUT <code>update_rules</code>, one download). Not counted: workload enforcement and labels (never pending), virtual services and enforcement boundaries in rule coverage. The check and the provision are two steps: <code>provision --all</code> sends what is pending when it runs, later draft edits included; name the targets the check saw to provision only those.</p>
     </article>
 
+    <article class="recipe" aria-labelledby="r-update-h">
+      <h3 id="r-update-h">Know when there is a new release</h3>
+      <p><code>update check</code> asks GitHub once and names the newer release and the upgrade command for how you installed it (Homebrew, Scoop, winget, the MSI, a <code>.deb</code>/<code>.rpm</code>, or the release page). No self-update: your package manager installs it. <code>news</code> prints the release notes newer than your binary (else your version&rsquo;s) as markdown; <code>news 0.5.6..</code> the releases after 0.5.6, <code>news 0.5.6..0.5.8</code> up to 0.5.8. Your version&rsquo;s notes and older ones are built in, so <code>news --offline</code> works without a network.</p>
+<pre><code><span class="p">$ </span>illumio-tui update check
+illumio-tui 0.5.9 is available (you have 0.5.8)
+upgrade: brew upgrade illumio-tui
+<span class="p">$ </span>illumio-tui update check --fail-if-outdated     <span class="c"># the cron or CI one-liner: exit 10 when a newer release is out</span>
+<span class="p">$ </span>illumio-tui news 0.5.6.. --json | jq -r '.data[].version'</code></pre>
+      <!-- real output: illumio-tui update check -->
+      <p>A weekly mail with the notes, only when there is something new (exit 10; no network is exit 5 and stays quiet):</p>
+<pre class="wrap"><code>0 9 * * 1 illumio-tui update check --fail-if-outdated &gt;/dev/null 2&gt;&amp;1; [ $? -eq 10 ] &amp;&amp; illumio-tui news | mail -s "illumio-tui update" alex@ryte.de</code></pre>
+      <p>One request, <code>GET https://api.github.com/repos/alexgoller/illumio-tui/releases?per_page=30</code>: unauthenticated, 3&nbsp;s, through your proxy variables, drafts and prereleases left out; never the PCE, never its credentials. The answer is cached for a day in <code>$XDG_CACHE_HOME/illumio-tui/update.json</code>: <code>update check</code> always asks, <code>news</code> reads the cache while it is fresh, and no other command goes online for this. <code>--json</code> follows the schemas <code>update-check</code> and <code>news</code>. The TUI&rsquo;s once-a-day check reads the same cache; turn it off with <code>check_updates = false</code> at the top of <code>config.toml</code> or <code>ILLUMIO_TUI_NO_UPDATE_CHECK=1</code>.</p>
+    </article>
+
     <article class="recipe" aria-labelledby="r-comp-h">
       <h3 id="r-comp-h">Tab through it all</h3>
       <p>Subcommands, flags, enum values, files and your profile names complete in bash, zsh, fish and PowerShell, without a request. PCE names (<code>app=shop</code>, <code>wl:web01</code>, <code>svc:SSH</code>, <code>shop/prod</code>) complete from a local names cache: one explicit refresh, then the lists you read anyway keep it current. It needs a profile from the config file (host and org id from there, not from flags or the environment), holds object names in plain text (mode 0600), and <code>completion_cache = false</code> turns it off.</p>
@@ -1154,6 +1173,8 @@ API_SECRET=xxxxxxxxxxxxxxxx</code></pre>
             <tr><td><code>ILLUMIO_TIER_KEY</code></td><td>the label key a rule selects a tier by</td></tr>
             <tr><td><code>ILLUMIO_IGNORE_KEYS</code></td><td>label keys hidden from label columns</td></tr>
             <tr><td><code>ILLUMIO_TUI_THEME</code></td><td><code>dark</code> (default) or <code>light</code></td></tr>
+            <tr><td><code>ILLUMIO_TUI_NO_UPDATE_CHECK</code></td><td><code>1</code> turns off the TUI&rsquo;s once-a-day update check, like <code>check_updates = false</code></td></tr>
+            <tr><td><code>ILLUMIO_TUI_UPDATE_URL</code></td><td>replaces <code>https://api.github.com</code> for the update check and <code>news</code> (tests)</td></tr>
             <tr><td><code>ILLUMIO_TUI_COLORS</code></td><td><code>256</code> maps the theme to the xterm 256 colours (the default in Apple Terminal, which garbles 24-bit colour before macOS 26); <code>truecolor</code> forces 24-bit</td></tr>
           </tbody>
         </table>
@@ -1169,6 +1190,7 @@ API_SECRET=xxxxxxxxxxxxxxxx</code></pre>
       <p>Flags override imported values. The secret comes from the env file, <code>--api-secret-stdin</code>, <code>--api-secret</code> (lands in shell history) or <code>--api-secret-cmd</code> (wins, no plaintext stored); a plaintext secret is stored as <code>api_secret</code> in a file of mode 0600. <code>--force</code> updates an existing profile's connection settings and keeps the rest (limits, labels, generator); the first profile becomes the default. Single-quote a value with a <code>$</code>: dotenv expands <code>$VAR</code>. The secret is never printed.</p>
       <p>In <code>~/.config/illumio-tui/config.toml</code>:</p>
 <pre><code>default_profile = "prod"
+check_updates = false   <span class="c"># optional: no once-a-day update check in the TUI</span>
 
 [profiles.prod]
 host = "pce.example"
