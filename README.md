@@ -414,7 +414,7 @@ PCE: https://alexgoller.github.io/illumio-tui/#workflows
 
 9. **What is new since? (compare, `c`).** `c` on Traffic asks for a baseline length (`7d`;
    `Ctrl-N` / `Ctrl-P` step) and queries the same filter over the window just before the
-   result's start. Every view but the Treemap marks its rows `NEW`, `CHG` (another set of
+   result's start. Every view marks its rows `NEW`, `CHG` (another set of
    decisions, the `was→now` column saying `allow→pot.bl`; on a plain pair what changed:
    `+1 svc · allow→block`) or `GONE` (dim, only in the
    baseline), the Result header counts the rows the view shows: `vs 7d before · 12 new · 3
@@ -450,7 +450,8 @@ overwrites it. Cells match the CLI's for the same data (Workloads: every label, 
 too, and `heartbeat_age_secs`). Sectioned views (App-to-app `in`/`out`/`both`, Blocked) export
 every peer, folded sections included, in the columns of `traffic groups --by ... --csv`; Flows
 by app exports every flow, folded sections included, in the Flows columns after a `section`
-column naming its app; the Treemap has no table.
+column naming its app; Volume exports the rows it shows (sources, and the destinations
+unfolded) with their weight and its split by decision.
 `?` shows the keys of where you are first (the traffic view, Policy, an event's detail,
 the app overlay, the generator…), then related groups and the keys that work everywhere;
 `Tab` / `S-Tab` (Shift-Tab) step through the other groups one at a time, `a` shows them all and
@@ -535,7 +536,7 @@ the full tab row (69 columns) the tabs read `Traf`, `Pol`, `Obj`, `Wl`, `Ev`.
   destinations; `both`: inbound rows `←` then outbound `→`), `d` cycles the decision filter
   (`all`, `blocked` with potentially blocked, `blocked only`) of the pairs, by service too, and
   the sections (`pairs · by service · blocked` lists just the tuples still blocked, the ones an
-  allow rule is missing for; `Enter` drills into the flows the row counts; the Treemap keeps
+  allow rule is missing for; `Enter` drills into the flows the row counts; Volume keeps
   every flow), `Space` / `z` fold a section or
   all, `s` orders the sections (connections ↓, app name A→Z, flows ↓; the rows inside keep
   theirs; the order shows in the title, e.g. `in · by app A→Z`, survives `g`, `r`, `+`/`-` and
@@ -544,10 +545,31 @@ the full tab row (69 columns) the tabs read `Traf`, `Pol`, `Obj`, `Wl`, `Ev`.
   **Mesh** lists user, process, source, destination, service and destination process like the
   Illumio UI's mesh (`u` / `p` hide the user / process column and merge rows, `Enter` drills).
   **Blocked** is App-to-app with `in` and `blocked`: each destination app with the sources
-  and services blocked or potentially blocked towards it. **Treemap** draws each source as
-  a box and its destinations as tiles sized by connections (`b` bytes) and coloured by
-  decision: `h` / `j` / `k` / `l` move, `Enter` zooms into a source and then drills into a
-  destination, `Esc` zooms out. None of this sends a request.
+  and services blocked or potentially blocked towards it. **Volume** lists every source
+  group, heaviest first, with its full name, its connections (`b`: bytes), a bar and its
+  blocked share, nothing folded into "other":
+
+  <!-- real output: illumio-tui, Traffic, v until Volume, Enter on the first source -->
+  ```
+    group                  conns  volume                        blocked
+    pos/Staging             1.8M  ████████████████▒▒▒▒▒▒▒▒▒▒▒▒  61% blocked
+      → ordering/Prod     671.8K  ██████████▒▒▒▒                 40% blocked
+      → payment/Prod      402.1K  ▒▒▒▒▒▒▒▒▒                      100% blocked
+    pos/PCI                 1.7M  ███████████████▒▒▒▒▒▒▒▒▒▒▒▒▒  58% blocked · 2% pb
+  ▸ ordering/Production     1.2M  ██████████████████████         0% blocked
+  ```
+
+  (illustrative). Bars share one scale, the largest source's, so a destination compares
+  with the sources; each is split into allowed `█`, potentially blocked `▓` and blocked `▒`
+  (unknown `░`) in the decision colours, by bytes when weighed by bytes; `N% blocked` is the
+  blocked share of the weight, `· N% pb` the potentially blocked one. `Enter` (or `l` / `→`)
+  unfolds a source's destinations under it, sorted the same way, `h` / `←` folds (on a
+  destination: its source, the cursor going there), `E` unfolds or folds every source, and
+  `Enter` on a destination drills into that pair's flows. The table keys and the wheel
+  scroll, `/` keeps a source when its name or a destination's matches, `:export` writes the
+  rows shown, compare mode adds `Δ` to sources and destinations, marks show in the gutter,
+  and with draft decisions loaded the share says `· draft +2 -1`. At 80 columns the bar
+  shrinks first, then names are cut with `…`. None of this sends a request.
   **Exposure** (`9` or `:exposure`, not in `v`'s cycle) answers which risky services reach
   what, and under which decision: RDP, SMB, NetBIOS, RPC, WinRM, SSH, Telnet, VNC and the
   database and directory ports (the profile's `[exposure]` list, see
@@ -780,7 +802,9 @@ the full tab row (69 columns) the tabs read `Traf`, `Pol`, `Obj`, `Wl`, `Ev`.
   truncated, each rung asked as usual. Squelch hides keys on both sides alike: a key with a
   squelched record on either side leaves both (a mark on the draft decision, which the baseline
   never carries, cannot make it gone; `M` shows them on both); a focus narrows both sides; a focused result (`r` on a partial
-  focus) refuses `c` and ends compare mode. The Treemap has no `Δ`.
+  focus) refuses `c` and ends compare mode. On Volume a source's `Δ` joins its
+  destinations' (new or gone when all are, else changed when any is); under `n` a source
+  shown only for its destinations has no `Δ` of its own.
 - **Policy**: `d` toggle draft / active, `p` pending changes (`Enter` on one shows its diff against active), `Tab` switch panes, `Enter` rule
   detail, or on a ruleset load its deny rules. Rules are listed in evaluation order: override
   deny, allow, deny; the allow rules intra-scope first, then extra-scope (the `scope` column,

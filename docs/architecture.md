@@ -82,8 +82,8 @@ One message, top to bottom: pressing `r` on Traffic.
    or cap; `B` sends it at `pce::traffic::backfill_cap`, the answer replacing
    the truncated result).
 4. `update` stores the result and calls `rebuild_views`, which derives the
-   Flows, App-to-app (pairs, or sections per app), Mesh and Blocked tables and
-   the treemap's tiles from the one result, grouped by the label keys in force.
+   Flows, App-to-app (pairs, or sections per app), Mesh, Blocked and Volume
+   tables from the one result, grouped by the label keys in force.
 5. `app` draws the model once, after draining whatever else is queued.
 
 Tick policy: no timer at all while idle; 250 ms while a request is in
@@ -349,22 +349,25 @@ the aggregations (`group_by_labels`, `app_sections`, `mesh`) group by
 `group_key`, which keeps IP lists, FQDNs and unlabelled hosts apart under
 their name. `pce::traffic::mesh` places the one process the PCE reports per
 flow on the destination for inbound flows and on the source otherwise.
-`pce::traffic::treemap::layout` is a squarified treemap in terminal cells (a
-row counts as two columns), rounded edge by edge so tiles neither overlap
-nor leave gaps, with the tail that gets no cell folded into `other (N)`.
-The TUI stores the tiles in `TreemapState` and recomputes them when the
-groups, the keys, the zoom, the weight or the terminal size change
-(`Msg::Resize`, `treemap_area`), never while drawing. `Drill` narrows the
-Flows view to an App-to-app or treemap pair or a Mesh row; new keys and a
-new result drop it and the zoom. The CLI's `traffic groups` and
+`pce::traffic::volume` builds the Volume view's tree (#89) from
+`group_by_labels`' pairs: a source per source group, its pairs summed, its
+compare change joined from theirs (`join_changes`), each node split by
+decision in connections (`FlowGroup::conns`) and in bytes (`byte_splits`,
+from the same flows, since `FlowGroup` carries no bytes per decision), and
+`bar_cells` lays a bar out on the largest source's scale. The TUI keeps the
+tree in `VolumeState` and lays its rows out again (`relayout_volume`) on a
+fold, `b` or `n`, never while drawing; the rows are drawn as bars
+(`ui::screens::volume`, through `render_spanning_header`) and their columns
+serve `/`, `:export` and `Δ`. `Drill` narrows the Flows view to an
+App-to-app or Volume pair or a Mesh row; new keys and a new result drop it. The CLI's `traffic groups` and
 `traffic mesh` run the same functions over one `fetch`.
 `pce::traffic::sections::app_sections` groups the flows under each app on one
 side (`Direction::In` or `Out`), one `PeerRow` per peer group and service,
 after the decision filter; App-to-app's `in` / `out` / `both` states and the
 Blocked view (`in` with `Decisions::Blocked`) are its rows, header rows drawn
 across the table (`render_spanning`). The `pairs` (plain and by service) group
-the flows `Decisions::kept` leaves; the treemap lays out its own unfiltered
-`TreemapState::groups`, and a pair's `Drill` carries the filter it was
+the flows `Decisions::kept` leaves; Volume builds its own unfiltered pairs,
+and a pair's `Drill` carries the filter it was
 drilled under. The state, the filter and the folds
 live in `TrafficState::apps_state` and survive every rebuild.
 
