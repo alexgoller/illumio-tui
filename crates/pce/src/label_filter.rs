@@ -215,7 +215,7 @@ impl LabelFilter {
                 let mut same = keys.iter().filter(|k| k.eq_ignore_ascii_case(&t.key));
                 let only = same.next().filter(|_| same.next().is_none());
                 if let Some(k) = key.or(only.map(String::as_str))
-                    && !keys.iter().any(|x| *x == t.key)
+                    && !keys.contains(&t.key)
                 {
                     out.key = k.to_string();
                 }

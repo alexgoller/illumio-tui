@@ -309,6 +309,48 @@ fn label_warnings_follow_a_reload() {
     assert_eq!(m.workloads.table.len(), 1);
 }
 
+/// #90: the label filter ignores case, shows what was typed, and refuses a
+/// name two labels share without case (the editor shows the error).
+#[test]
+fn the_label_filter_ignores_case_and_refuses_an_ambiguous_name() {
+    let mut m = on_workloads();
+    apply_workload_labels(&mut m, "app=shop").unwrap();
+    let shop = m.workloads.table.len();
+    assert!(shop > 0);
+    apply_workload_labels(&mut m, "APP=Shop").unwrap();
+    assert_eq!(m.workloads.table.len(), shop);
+    assert!(
+        m.workloads.label_warnings.is_empty(),
+        "{:?}",
+        m.workloads.label_warnings
+    );
+    assert_eq!(m.workloads.labels.to_string(), "APP=Shop");
+    apply_workload_labels(&mut m, "!APP=SHOP").unwrap();
+    assert_eq!(m.workloads.table.len(), m.workloads.raw.len() - shop);
+    // Two labels of one key that differ in case.
+    let label = |n: u32, v: &str| -> pce::models::Label {
+        serde_json::from_value(serde_json::json!({
+            "href": format!("/orgs/5/labels/{n}"), "key": "app", "value": v
+        }))
+        .unwrap()
+    };
+    let idx = pce::NameIndex::new(&[label(1, "Web"), label(2, "web")], &[], &[], &[]);
+    if let crate::tui::model::Connection::Connected { index, .. } = &mut m.connection {
+        *index = Some(std::sync::Arc::new(idx));
+    }
+    apply_workload_labels(&mut m, "APP=SHOP").unwrap();
+    let before = m.workloads.labels.to_string();
+    assert_eq!(
+        apply_workload_labels(&mut m, "app=WEB"),
+        Err("app=WEB matches app=Web and app=web; write one exactly".to_string())
+    );
+    assert_eq!(
+        m.workloads.labels.to_string(),
+        before,
+        "the old filter holds"
+    );
+}
+
 fn writes_on_workloads() -> Model {
     let mut m = on_workloads();
     m.writes = crate::tui::model::WritesState::on();

@@ -414,7 +414,6 @@ pub(crate) async fn evaluate(ctx: &Context, args: &ReadinessArgs) -> Result<Eval
     }
     let narrowed = !apps.is_empty();
     guard(ctx, args)?;
-    let mut apps = apps;
     // The apps' labels, checked before any traffic request (exit 2 with
     // the closest values), and the workload filter they make.
     let mut label_groups = Vec::new();

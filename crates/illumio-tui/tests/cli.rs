@@ -572,6 +572,76 @@ async fn workloads_with_label_filter_resolve_hrefs() {
         );
 }
 
+/// #90: `--label` ignores case: the same one request as the exact term, the
+/// local `!` check too; `meta` names the terms as typed. Several labels
+/// that differ only in case are exit 2, before any workloads request.
+#[tokio::test(flavor = "multi_thread")]
+async fn workloads_label_ignores_case_and_ambiguity_is_exit_2() {
+    use wiremock::matchers::query_param;
+    let server = MockServer::start().await;
+    mount_objects(&server).await;
+    Mock::given(method("GET"))
+        .and(path("/api/v2/orgs/5/workloads"))
+        .and(query_param(
+            "labels",
+            r#"[["/orgs/5/labels/3","/orgs/5/labels/4"]]"#,
+        ))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_string(include_str!("../../../fixtures/workloads.json"))
+                .insert_header("Content-Type", "application/json"),
+        )
+        .expect(1)
+        .mount(&server)
+        .await;
+    let out = stdout_json(
+        cmd(&server)
+            .args([
+                "workloads",
+                "--label",
+                "APP=Shop",
+                "--label",
+                "Env=PROD",
+                "--label",
+                "!ROLE=DB",
+            ])
+            .assert()
+            .success(),
+    );
+    // host-1 is shop, prod and web; the other shop host is db.
+    assert_eq!(out["data"].as_array().unwrap().len(), 1);
+    assert_eq!(out["meta"]["local_filter"], json!(["labels !ROLE=DB"]));
+    server.verify().await;
+    server.reset().await;
+    // Two labels differing in case under one key.
+    let labels = r#"[
+        {"href":"/orgs/5/labels/1","key":"app","value":"Web"},
+        {"href":"/orgs/5/labels/2","key":"app","value":"web"}]"#;
+    Mock::given(method("GET"))
+        .and(path("/api/v2/orgs/5/labels"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_string(labels)
+                .insert_header("Content-Type", "application/json"),
+        )
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/api/v2/orgs/5/workloads"))
+        .respond_with(ResponseTemplate::new(200).set_body_string("[]"))
+        .expect(0)
+        .mount(&server)
+        .await;
+    cmd(&server)
+        .args(["workloads", "--label", "app=WEB"])
+        .assert()
+        .code(2)
+        .stderr(predicate::str::contains(
+            "app=WEB matches app=Web and app=web; write one exactly",
+        ));
+    server.verify().await;
+}
+
 /// `--label k=a,b` is any of the values: the cross product of the terms
 /// in the one `labels` parameter (outer list OR, inner AND), so each
 /// invocation is exactly one list request; `!` and `-` filter its answer.

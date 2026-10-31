@@ -947,7 +947,8 @@ the full tab row (69 columns) the tabs read `Traf`, `Pol`, `Obj`, `Wl`, `Ev`.
   `f` edits a label filter on one line, applied locally like the others:
   `app=shop,crm env=prod !role=db` (a comma lists values any of which matches, a space
   separates terms that must all match, `!` excludes, `key=-` means no label for the key,
-  quote a value with spaces: `loc="New York"`). `Ctrl-N` completes keys and values from the
+  quote a value with spaces: `loc="New York"`). Label names in any filter ignore case (`app=ordering` finds `Ordering`; the exact `key=value` wins, and
+  two labels that differ only in case are an error that names them; what you typed stays in the filter). `Ctrl-N` completes keys and values from the
   label list; a key or value no label has is accepted and named dimmed (`no match: unknown
   value app=shpo`); a malformed filter stays in the editor with the error and the old one
   holds. `:filter <expr>` on Workloads sets it too (elsewhere it edits the traffic source),
@@ -1220,7 +1221,7 @@ and CSV add `change` and `was` columns. A snapshot of another profile, PCE or or
     illumio-tui workloads --baseline-snapshot latest --health offline --changes changed --table
 
 `--label` takes the app's label filter grammar, one term per flag (flags AND): `app=shop,crm`
-is any of the values. The plain terms go into the one list request as the PCE's `labels`
+is any of the values; keys and values ignore case (`app=ordering` finds `Ordering`; the exact label wins, several that differ only in case are exit 2). The plain terms go into the one list request as the PCE's `labels`
 parameter, whose outer list is OR and inner lists AND, so `--label app=shop,crm --label
 env=prod` sends `[[shop,prod],[crm,prod]]` (label hrefs, from the cached label list): still one
 request, and `--label k=v` alone sends exactly what it always did. More than 50 combinations
@@ -1439,8 +1440,8 @@ the label keys (default: the profile's scope keys), `--no-user` / `--no-process`
 across users or processes. An endpoint that is not a labelled workload is grouped under its
 name or `ipl:<list>`. `bytes` is `0` in JSON and `-` in tables when the PCE reported none.
 
-`labels` flags combine with AND: `--key` (repeatable, any of the keys) and `--value` match
-exactly, `--value-contains` is a case-insensitive substring, `--ignore-keys` hides the
+`labels` flags combine with AND: `--key` (repeatable, any of the keys) matches
+exactly, `--value` in any case (the exact value wins, several that differ only in case are exit 2), `--value-contains` is a case-insensitive substring, `--ignore-keys` hides the
 profile's `ignore_keys` (`--no-ignore-keys`, the default, keeps every key). `--unused` keeps
 the labels nothing holds, as the PCE's own usage flags say: the one labels request asks for
 `usage=true`, so a label held only by a pairing profile, a permission, an enforcement
