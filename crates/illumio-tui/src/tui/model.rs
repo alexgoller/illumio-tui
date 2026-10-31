@@ -1050,8 +1050,10 @@ impl Model {
     /// workloads or the label list changed.
     pub fn refresh_label_warnings(&mut self) {
         let idx = self.index().cloned();
+        let order = self.limits.key_order();
         let w = &mut self.workloads;
         w.label_warnings = w.unknown_labels(&w.labels, idx.as_deref());
+        w.respell_labels(idx.as_deref(), &order);
     }
 
     /// Whether the Labels tab's usage can be counted: the workloads, the

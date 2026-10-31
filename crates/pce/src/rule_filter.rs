@@ -43,7 +43,9 @@
 //! caller brings the loaded rulesets and the name index.
 use crate::impact::group_members;
 use crate::label_filter::{LabelTerm, split_outside_quotes, strip_quotes};
-use crate::models::{Actor, DenyRule, IngressService, Rule, RuleSet, Workload, proto_number};
+use crate::models::{
+    Actor, DenyRule, IngressService, Label, Rule, RuleSet, Workload, proto_number,
+};
 use crate::resolve::{NameIndex, RuleKind};
 use std::fmt;
 
@@ -547,15 +549,25 @@ fn resolve_term(
 ) {
     match t {
         RuleTerm::Label(l) | RuleTerm::At(_, ActorTerm::Label(l)) => {
-            if !idx.label_keys().contains(&l.key) {
+            if !idx
+                .label_keys()
+                .iter()
+                .any(|k| k.eq_ignore_ascii_case(&l.key))
+            {
                 out.push(format!("unknown key {}", l.key));
             } else {
-                let known = idx.values_for_key(&l.key);
-                out.extend(
-                    l.values.iter().filter(|v| !known.contains(v)).map(|v| {
-                        format!("unknown value {}={}", l.key, crate::label_filter::quote(v))
-                    }),
-                );
+                // Any case (#90): only a value no label has, or several do, is named.
+                for v in &l.values {
+                    match idx.find_label(&l.key, v) {
+                        Err(e) => out.push(e),
+                        Ok(None) => out.push(format!(
+                            "unknown value {}={}",
+                            l.key,
+                            crate::label_filter::quote(v)
+                        )),
+                        Ok(Some(_)) => {}
+                    }
+                }
             }
         }
         RuleTerm::IpList(n) | RuleTerm::At(_, ActorTerm::IpList(n)) => {
@@ -634,6 +646,20 @@ fn workload_hit(a: &Actor, name: &str, workloads: &[Workload]) -> bool {
         .is_some_and(|w| workload_named(&w.href, name, workloads))
 }
 
+/// Whether `l` is the label `key=value` names (#90): spelt alike, or the
+/// one label that name finds without case (an exact label elsewhere wins,
+/// several in other cases name none).
+fn named(idx: &NameIndex, l: &Label, key: &str, value: &str) -> bool {
+    (l.key == key && l.value == value)
+        || (l.key.eq_ignore_ascii_case(key)
+            && l.value.eq_ignore_ascii_case(value)
+            && idx
+                .find_label(key, value)
+                .ok()
+                .flatten()
+                .is_some_and(|f| f.href == l.href))
+}
+
 /// A label actor with the term's key and one of its values, or a label
 /// group with such a label among its members (sub-groups included). An
 /// exclusion actor (`All except app=shop`, `!role=web`) names what the
@@ -644,7 +670,7 @@ fn label_hit(a: &Actor, term: &LabelTerm, idx: &NameIndex) -> bool {
     }
     let is = |href: &str| {
         idx.label(href)
-            .is_some_and(|l| l.key == term.key && term.values.contains(&l.value))
+            .is_some_and(|l| term.values.iter().any(|v| named(idx, l, &term.key, v)))
     };
     if let Some(l) = &a.label {
         return is(&l.href);
@@ -827,6 +853,32 @@ mod tests {
                 parts.join("/")
             })
             .collect()
+    }
+
+    #[test]
+    fn a_label_term_matches_without_case_and_is_still_what_was_typed() {
+        // #90: the label is `app=shop`; the exact term finds the same rules.
+        assert_eq!(found("APP=Shop"), found("app=shop"));
+        assert_eq!(found("Role=WEB"), found("role=web"));
+        assert!(!found("scope:App=SHOP").is_empty());
+        assert!(
+            RuleFilter::parse("APP=Shop")
+                .unwrap()
+                .unknown(&index())
+                .is_empty()
+        );
+        assert_eq!(
+            RuleFilter::parse("APP=Shop")
+                .unwrap()
+                .resolve(&index())
+                .0
+                .to_string(),
+            "APP=Shop"
+        );
+        assert_eq!(
+            RuleFilter::parse("app=SHPO").unwrap().unknown(&index()),
+            ["unknown value app=SHPO"]
+        );
     }
 
     #[test]

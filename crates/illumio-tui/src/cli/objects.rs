@@ -14,14 +14,15 @@ use pce::write::{
 };
 use pce::{IpListSize, KeyOrder, LabelUsage, ip_list_size, label_usage};
 use serde::Serialize;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 #[derive(Args, Debug, Clone, Default)]
 pub struct LabelsArgs {
     /// Exact label key, e.g. app (repeatable: labels of any of them)
     #[arg(long)]
     pub key: Vec<String>,
-    /// Exact label value
+    /// Label value, in any case (an exact match wins; several that differ only in case are
+    /// exit 2)
     #[arg(long)]
     pub value: Option<String>,
     /// Label value containing this text, case-insensitively
@@ -317,13 +318,41 @@ fn label_out_row(o: &LabelOut, mut row: Vec<String>) -> Vec<String> {
     row
 }
 
+/// The hrefs `--value` names (#90): per key the exact label, else the one
+/// that matches without case; several in one key are exit 2. A deleted
+/// label (only listed with `--include-deleted`) matches without case.
+fn named_by_value(labels: &[Label], value: &str) -> Result<HashSet<String>, CliError> {
+    let idx = pce::NameIndex::new(labels, &[], &[], &[]);
+    let mut hrefs = HashSet::new();
+    let mut keys: Vec<&str> = labels.iter().map(|l| l.key.as_str()).collect();
+    keys.sort_unstable();
+    keys.dedup();
+    for k in keys {
+        if let Some(l) = idx.find_label(k, value).map_err(CliError::Args)? {
+            hrefs.insert(l.href.to_string());
+        }
+    }
+    hrefs.extend(
+        labels
+            .iter()
+            .filter(|l| l.is_deleted() && l.value.eq_ignore_ascii_case(value))
+            .map(|l| l.href.clone()),
+    );
+    Ok(hrefs)
+}
+
 /// Whether `l` passes the list flags (all of them; `--key`s are any of):
 /// `order` knows the profile's ignored keys. `--unused` is applied apart.
-fn keep_label(l: &Label, args: &LabelsArgs, order: &KeyOrder) -> bool {
+fn keep_label(
+    l: &Label,
+    args: &LabelsArgs,
+    order: &KeyOrder,
+    named: Option<&HashSet<String>>,
+) -> bool {
     let contains = args.value_contains.as_deref().map(str::to_lowercase);
     (args.include_deleted || !l.is_deleted())
         && (args.key.is_empty() || args.key.contains(&l.key))
-        && args.value.as_deref().is_none_or(|v| l.value == v)
+        && named.is_none_or(|n| n.contains(&l.href))
         && contains.is_none_or(|c| l.value.to_lowercase().contains(&c))
         && (!args.ignore_keys || order.shows(&l.key))
 }
@@ -374,10 +403,15 @@ pub async fn labels(ctx: &Context, args: &LabelsArgs) -> Result<(), CliError> {
     // A PCE that ignores `usage=true` returns labels without it (or with
     // flags that say nothing): every label must carry flags that decide.
     let flagged = c.value.iter().all(|l| l.usage_flags().is_some());
+    let named = args
+        .value
+        .as_deref()
+        .map(|v| named_by_value(&c.value, v))
+        .transpose()?;
     let data: Vec<Label> = c
         .value
         .into_iter()
-        .filter(|l| keep_label(l, args, &order))
+        .filter(|l| keep_label(l, args, &order, named.as_ref()))
         .collect();
     let cache = cache_label(c.hit, ctx.cache_mode);
     if !args.unused {
@@ -729,15 +763,46 @@ mod tests {
 
     /// The fixture labels `args` keeps, as `key=value`.
     fn kept(args: &LabelsArgs, order: &KeyOrder) -> Vec<String> {
-        fixture()
-            .iter()
-            .filter(|l| keep_label(l, args, order))
+        let all = fixture();
+        let named = args
+            .value
+            .as_deref()
+            .map(|v| named_by_value(&all, v).unwrap());
+        all.iter()
+            .filter(|l| keep_label(l, args, order, named.as_ref()))
             .map(|l| format!("{}={}", l.key, l.value))
             .collect()
     }
 
     fn keys(k: &[&str]) -> Vec<String> {
         k.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn value_matches_in_any_case_exact_wins_and_several_are_an_error() {
+        let label = |n: u32, k: &str, v: &str| -> Label {
+            serde_json::from_value(serde_json::json!({
+                "href": format!("/orgs/5/labels/{n}"), "key": k, "value": v
+            }))
+            .unwrap()
+        };
+        let all = [
+            label(1, "app", "Ordering"),
+            label(2, "role", "Ordering"),
+            label(3, "app", "Web"),
+            label(4, "app", "web"),
+        ];
+        let hrefs = |v: &str| {
+            let mut h: Vec<String> = named_by_value(&all, v).unwrap().into_iter().collect();
+            h.sort();
+            h
+        };
+        assert_eq!(hrefs("ordering"), ["/orgs/5/labels/1", "/orgs/5/labels/2"]);
+        assert_eq!(hrefs("web"), ["/orgs/5/labels/4"]);
+        let Err(CliError::Args(e)) = named_by_value(&all, "WEB") else {
+            panic!("ambiguous");
+        };
+        assert_eq!(e, "app=WEB matches app=Web and app=web; write one exactly");
     }
 
     #[test]

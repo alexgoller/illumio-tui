@@ -881,13 +881,31 @@ pub async fn select_against(
     // terms go into the one request, `!` and `-` are applied to its answer.
     let labels = LabelFilter::from_terms(&args.labels)
         .map_err(|e| CliError::Args(format!("--label {e}")))?;
+    // Names spelt as the labels are (`app=ordering` finds `Ordering`, #90),
+    // for the request and the local checks alike. The labels list alone
+    // does it (one read, cached); a filter with no value reads nothing.
+    let labels_idx = if labels.terms.iter().any(|t| !t.values.is_empty()) {
+        let labels_list = ctx.pce.labels(ctx.cache_mode).await?.value;
+        Some(pce::NameIndex::new(&labels_list, &[], &[], &[]))
+    } else {
+        None
+    };
+    // The terms as typed are what `meta` names.
+    let typed = labels;
+    let labels = match &labels_idx {
+        Some(idx) => typed
+            .resolved(idx)
+            .map_err(|e| CliError::Args(format!("--label {e}")))?,
+        None => typed.clone(),
+    };
     // `app=shop app=crm`: no workload has both, so nothing is asked (an
     // empty labels parameter would mean every workload).
     let nothing = labels.matches_nothing();
-    if !against && !nothing && labels.terms.iter().any(|t| !t.negate && !t.none) {
-        // The labels list alone resolves them (one read, cached).
-        let labels_list = ctx.pce.labels(ctx.cache_mode).await?.value;
-        let idx = pce::NameIndex::new(&labels_list, &[], &[], &[]);
+    if let Some(idx) = &labels_idx
+        && !against
+        && !nothing
+        && labels.terms.iter().any(|t| !t.negate && !t.none)
+    {
         let sets = labels
             .query_sets(|k, v| {
                 idx.label_href(k, v).map(str::to_string).ok_or_else(|| {
@@ -905,7 +923,7 @@ pub async fn select_against(
             })?;
         filter.labels = sets.unwrap_or_default();
     }
-    let local_labels: Vec<&LabelTerm> = labels
+    let local_labels: Vec<&LabelTerm> = typed
         .terms
         .iter()
         .filter(|t| against || t.negate || t.none)

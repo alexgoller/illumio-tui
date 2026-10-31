@@ -518,6 +518,13 @@ mod tests {
                 ip_address: "1.2.3.4".into()
             }
         );
+        // Any case (#90); the real label's href.
+        assert_eq!(
+            resolve_actor(&FilterExpr::parse("APP=Shop").unwrap(), &idx, &wls).unwrap(),
+            ActorMatch::Label {
+                label: Ref::new("/orgs/5/labels/3")
+            }
+        );
         let err = resolve_actor(&FilterExpr::parse("app=nope").unwrap(), &idx, &wls)
             .unwrap_err()
             .to_string();

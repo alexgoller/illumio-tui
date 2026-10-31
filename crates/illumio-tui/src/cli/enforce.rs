@@ -32,7 +32,9 @@ use pce::enforcement::{
 };
 use pce::models::WorkloadFilter;
 use pce::readiness::AppReadiness;
-use pce::traffic::{TrafficQueryBuilder, app_labels, keys_or_default, parse_app, resolve_flows};
+use pce::traffic::{
+    TrafficQueryBuilder, app_labels, canonical_app, keys_or_default, parse_app, resolve_flows,
+};
 use pce::write::bulk::{BulkReport, ItemResult};
 use pce::write::{
     BatchOrigin, BulkChange, BulkTarget, EnforcementMode, VisibilityLevel, plan_bulk,
@@ -742,8 +744,8 @@ async fn watch(ctx: &Context, a: &EnforceArgs) -> Result<(), CliError> {
         )));
     }
     let keys = keys_or_default(&ctx.config.scope_keys);
-    let app = parse_app(&a.app);
     let idx = ctx.pce.name_index(ctx.cache_mode).await?;
+    let app = canonical_app(&parse_app(&a.app), &keys, &idx).map_err(CliError::Args)?;
     let m = app_labels(&app, &keys, &idx).map_err(CliError::Args)?;
     let q = watch_query(since, now, m, cap)?;
     let r = ctx

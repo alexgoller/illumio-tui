@@ -361,6 +361,10 @@ pub(crate) fn apply_workload_labels(model: &mut Model, expr: &str) -> Result<(),
     let labels = pce::LabelFilter::parse(expr)?;
     let order = model.limits.key_order();
     let idx = model.index().cloned();
+    // Several labels a name matches without case: the editor says so.
+    if let Some(i) = &idx {
+        labels.resolved(i)?;
+    }
     let w = &mut model.workloads;
     let href = w.selected_row().map(|r| r.workload.href.clone());
     w.set_labels(labels, idx.as_deref(), &order);

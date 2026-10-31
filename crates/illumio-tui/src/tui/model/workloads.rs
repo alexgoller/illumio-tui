@@ -415,6 +415,9 @@ pub struct WorkloadsState {
     pub filters: WorkloadFilters,
     /// `f` / `:filter`: the label filter (`app=shop,crm !role=db`), local.
     pub labels: LabelFilter,
+    /// `labels` with its names spelt as the label list has them (#90),
+    /// what the rows are kept by; `labels` itself stays as typed.
+    pub matching: LabelFilter,
     /// The label filter's keys and values no label has (no match).
     pub label_warnings: Vec<String>,
     /// `x`: sections per label group instead of the flat table.
@@ -492,6 +495,7 @@ impl WorkloadsState {
             unhealthy_only: false,
             filters: WorkloadFilters::default(),
             labels: LabelFilter::default(),
+            matching: LabelFilter::default(),
             label_warnings: Vec::new(),
             grouped: false,
             group_keys: keys_or_default(&[]),
@@ -707,7 +711,7 @@ impl WorkloadsState {
             .into_iter()
             .filter(|v| !self.unhealthy_only || unhealthy(v.health))
             .filter(|v| self.filters.keeps(v))
-            .filter(|v| self.labels.keeps(&v.workload))
+            .filter(|v| self.matching.keeps(&v.workload))
             .map(Arc::new)
             .collect();
         // Compare mode: the counts are of the rows the filters keep; `n`
@@ -916,14 +920,25 @@ impl WorkloadsState {
     /// names its unknown keys and values (from `idx`, when loaded).
     pub fn set_labels(&mut self, labels: LabelFilter, idx: Option<&NameIndex>, order: &KeyOrder) {
         self.label_warnings = self.unknown_labels(&labels, idx);
+        self.matching = spelt(&labels, idx);
         self.labels = labels;
         self.rebuild(order);
+    }
+
+    /// The index arrived or changed: the label filter's names are spelt
+    /// again (#90), and the rows kept anew when that changes them.
+    pub fn respell_labels(&mut self, idx: Option<&NameIndex>, order: &KeyOrder) {
+        let matching = spelt(&self.labels, idx);
+        if matching != self.matching {
+            self.matching = matching;
+            self.rebuild(order);
+        }
     }
 
     /// The keys and values of `labels` neither the label list (`idx`) nor
     /// any loaded workload has: they match nothing.
     pub fn unknown_labels(&self, labels: &LabelFilter, idx: Option<&NameIndex>) -> Vec<String> {
-        labels.unknown(|k| {
+        spelt(labels, idx).unknown(|k| {
             let mut values = idx.map(|i| i.values_for_key(k)).unwrap_or_default();
             values.extend(
                 self.raw
@@ -946,6 +961,7 @@ impl WorkloadsState {
         self.unhealthy_only = false;
         self.filters = WorkloadFilters::default();
         self.labels = LabelFilter::default();
+        self.matching = LabelFilter::default();
         self.label_warnings.clear();
     }
 
@@ -1060,4 +1076,12 @@ pub(super) fn group_key_of(
     raw.iter()
         .find(|w| w.href == href)
         .map(|w| pce::label_filter::group_key(w, keys))
+}
+
+/// `labels` spelt as the label list has its names (#90); as typed while
+/// there is no list, or when several labels match a name (the editor
+/// refuses that).
+fn spelt(labels: &LabelFilter, idx: Option<&NameIndex>) -> LabelFilter {
+    idx.and_then(|i| labels.resolved(i).ok())
+        .unwrap_or_else(|| labels.clone())
 }

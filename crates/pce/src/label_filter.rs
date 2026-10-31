@@ -13,6 +13,7 @@
 //! filter runs over workloads already loaded; [`LabelFilter::query_sets`]
 //! is the part the PCE's `labels` query parameter can carry.
 use crate::models::Workload;
+use crate::resolve::NameIndex;
 use std::fmt;
 
 /// The value that stands for "no label for this key".
@@ -192,13 +193,46 @@ impl LabelFilter {
         self.terms.iter().all(|t| t.keeps(w))
     }
 
+    /// The filter with each key and value spelt as the label list has them
+    /// (#90: `app=ordering` finds `Ordering`): the exact label wins, else
+    /// the one that matches without case; a term nothing matches stays as
+    /// typed (it names an unknown label), several are an error. Done once
+    /// per filter, so [`Self::keeps`] and [`Self::query_sets`] stay exact.
+    pub fn resolved(&self, idx: &NameIndex) -> Result<Self, String> {
+        let keys = idx.label_keys();
+        let terms = self
+            .terms
+            .iter()
+            .map(|t| {
+                let mut out = t.clone();
+                let mut key = None;
+                for v in &mut out.values {
+                    if let Some(l) = idx.find_label(&t.key, v)? {
+                        key.get_or_insert(l.key);
+                        *v = l.value.to_string();
+                    }
+                }
+                let mut same = keys.iter().filter(|k| k.eq_ignore_ascii_case(&t.key));
+                let only = same.next().filter(|_| same.next().is_none());
+                if let Some(k) = key.or(only.map(String::as_str))
+                    && !keys.iter().any(|x| *x == t.key)
+                {
+                    out.key = k.to_string();
+                }
+                out.values.dedup();
+                Ok(out)
+            })
+            .collect::<Result<Vec<_>, String>>()?;
+        Ok(Self { terms })
+    }
+
     /// The filter with exactly `pairs` for their keys: earlier terms on
     /// those keys are dropped, the others kept (`None`: no label, `key=-`).
     pub fn narrowed(&self, pairs: &[(String, Option<String>)]) -> Self {
         let mut terms: Vec<LabelTerm> = self
             .terms
             .iter()
-            .filter(|t| !pairs.iter().any(|(k, _)| *k == t.key))
+            .filter(|t| !pairs.iter().any(|(k, _)| k.eq_ignore_ascii_case(&t.key)))
             .cloned()
             .collect();
         terms.extend(pairs.iter().map(|(k, v)| LabelTerm {
@@ -596,5 +630,61 @@ mod tests {
             f.unknown(known),
             ["unknown value app=shpo", "unknown key os"]
         );
+    }
+
+    fn spelling_index() -> NameIndex {
+        let label = |n: u32, k: &str, v: &str| -> crate::models::Label {
+            serde_json::from_value(serde_json::json!({
+                "href": format!("/orgs/5/labels/{n}"), "key": k, "value": v
+            }))
+            .unwrap()
+        };
+        NameIndex::new(
+            &[
+                label(1, "app", "Ordering"),
+                label(2, "app", "Web"),
+                label(3, "app", "web"),
+                label(4, "env", "Prod"),
+            ],
+            &[],
+            &[],
+            &[],
+        )
+    }
+
+    #[test]
+    fn resolved_spells_names_as_the_labels_do_and_keeps_the_rest() {
+        let idx = spelling_index();
+        let f = LabelFilter::parse("APP=ordering,nope !Env=prod env=-").unwrap();
+        let r = f.resolved(&idx).unwrap();
+        assert_eq!(r.to_string(), "app=Ordering,nope !env=Prod env=-");
+        // Exact wins over a match in another case.
+        let exact = LabelFilter::parse("app=web")
+            .unwrap()
+            .resolved(&idx)
+            .unwrap();
+        assert_eq!(exact.to_string(), "app=web");
+        // The typed filter is untouched, and keeps by the spelt one.
+        assert_eq!(f.to_string(), "APP=ordering,nope !Env=prod env=-");
+        assert!(r.keeps(&wl(&[("app", "Ordering")])));
+        assert!(!f.keeps(&wl(&[("app", "Ordering")])));
+        let err = LabelFilter::parse("app=WEB")
+            .unwrap()
+            .resolved(&idx)
+            .unwrap_err();
+        assert_eq!(
+            err,
+            "app=WEB matches app=Web and app=web; write one exactly"
+        );
+        // A key no label has stays as typed.
+        let key = LabelFilter::parse("os=x").unwrap().resolved(&idx).unwrap();
+        assert_eq!(key.to_string(), "os=x");
+    }
+
+    #[test]
+    fn narrowing_replaces_a_term_whose_key_differs_in_case() {
+        let f = LabelFilter::parse("App=shop env=prod").unwrap();
+        let n = f.narrowed(&[("app".into(), Some("crm".into()))]);
+        assert_eq!(n.to_string(), "env=prod app=crm");
     }
 }

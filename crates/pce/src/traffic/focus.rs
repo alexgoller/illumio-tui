@@ -551,6 +551,22 @@ mod tests {
     }
 
     #[test]
+    fn an_app_is_found_without_case_and_resolved_to_the_pces_spelling() {
+        let idx = index();
+        let f = focus("SHOP/Prod", Both);
+        assert_eq!(f.resolved(&idx).unwrap().app, ["shop", "prod"]);
+        assert_eq!(f.label_matches(&idx).unwrap().len(), 2);
+        // A slot no label has stays for the error to name.
+        let f = focus("SHP/prod", Both);
+        assert_eq!(f.resolved(&idx).unwrap().app, ["SHP", "prod"]);
+        assert!(
+            f.label_matches(&idx)
+                .unwrap_err()
+                .contains("no app=SHP label")
+        );
+    }
+
+    #[test]
     fn an_unknown_app_names_the_closest_labels() {
         let idx = index();
         let e = focus("shp/prod", Both).label_matches(&idx).unwrap_err();
