@@ -2,6 +2,15 @@
 
 Every illumio-tui release, newest first. Downloads, packages and checksums for each one are on [GitHub Releases](https://github.com/alexgoller/illumio-tui/releases).
 
+## v0.5.9 — 2026-10-31
+
+### New
+
+- **Update check** (#91). Know when a new release is out.
+  - `illumio-tui update check` asks GitHub for the latest release and prints the upgrade command for how this copy was installed: Homebrew, Scoop, winget, the MSI or the release page. `--fail-if-outdated` exits 10 for cron, and `--json` is available. If GitHub can't be reached it exits 4, and if GitHub's rate limit is hit it exits 5.
+  - The TUI checks once a day in the background and shows `↑ 0.5.10` in the header when a newer version is out. It never delays startup or quitting, says nothing when offline, and never contacts the PCE. Turn it off with `check_updates = false` at the top of `config.toml` or with `ILLUMIO_TUI_NO_UPDATE_CHECK=1`. Other CLI commands never go online for this.
+- **What's new** (#91). `illumio-tui news` shows the notes of the releases newer than yours, and `news 0.5.6..` shows a range. Your own version's notes and older ones are built into the binary, so `--offline` works anywhere. In the TUI, `:news` opens them, and the first start after an upgrade says `updated to …` once.
+
 ## v0.5.8 — 2026-10-31
 
 ### New
