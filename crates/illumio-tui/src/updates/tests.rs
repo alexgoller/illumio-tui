@@ -197,6 +197,10 @@ fn the_install_follows_the_binary_path() {
             r"C:\Program Files\illumio-tui\illumio-tui.exe",
             Install::Msi,
         ),
+        (
+            r"C:\Users\alex\AppData\Local\Programs\illumio-tui\illumio-tui.exe",
+            Install::Msi,
+        ),
         ("/usr/bin/illumio-tui", Install::Package),
         ("/Users/alex/.cargo/bin/illumio-tui", Install::Other),
     ];

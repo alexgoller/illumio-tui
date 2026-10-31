@@ -581,7 +581,8 @@ impl Install {
             Install::Scoop
         } else if lower.contains("\\winget\\packages\\") {
             Install::Winget
-        } else if lower.contains("program files") {
+        // The MSI installs per user, under %LOCALAPPDATA%\Programs.
+        } else if lower.contains("program files") || lower.contains("\\programs\\illumio-tui\\") {
             Install::Msi
         } else if path.starts_with("/usr/bin/") {
             Install::Package
