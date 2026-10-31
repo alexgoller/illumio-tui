@@ -198,7 +198,7 @@ fn cut(s: &str, w: usize) -> String {
 const HINTS: &str = " · Enter unfolds/drills · z all";
 
 /// `by conns · b bytes · Enter unfolds/drills · z all` (or `by bytes · b
-/// conns · …`), then `extra` (the marks' counts, the search), dim like
+/// conns · …`), then `extra` (the search, the marks' counts), dim like
 /// every panel meta; the `b` hint fainter still when no flow carried
 /// bytes, since `b` then refuses. The key hints only where all of it fits
 /// `room` cells (`?` lists the keys): the weight and `extra` never push
@@ -220,16 +220,27 @@ pub fn volume_meta(
     } else {
         dim.add_modifier(Modifier::DIM)
     };
-    let extra: Vec<String> = extra.iter().map(|e| format!(" · {e}")).collect();
+    let extra: String = extra.iter().map(|e| format!(" · {e}")).collect();
     let hints = width(" · ") + width(toggle) + width(HINTS);
-    let long = width(by) + hints + extra.iter().map(|e| width(e)).sum::<usize>();
+    let long = width(by) + hints + width(&extra);
     let mut out = vec![Span::styled(by, dim)];
     if long <= room {
         out.push(Span::styled(" · ", dim));
         out.push(Span::styled(toggle, toggle_style));
         out.push(Span::styled(HINTS, dim));
     }
-    out.extend(extra.into_iter().map(|e| Span::styled(e, dim)));
+    // What does not fit is cut with `…`, never drawn over the title.
+    let left = room.saturating_sub(width(by));
+    let extra = if width(&extra) <= left {
+        extra
+    } else if left > width(" · …") {
+        format!("{}…", clip_width(&extra, left - 1))
+    } else {
+        String::new()
+    };
+    if !extra.is_empty() {
+        out.push(Span::styled(extra, dim));
+    }
     out
 }
 
@@ -238,11 +249,13 @@ pub fn render_volume(model: &Model, f: &mut Frame, area: Rect) {
     let x = &model.traffic;
     let table = &x.volume;
     let st = &x.volume_state;
-    let mut extra: Vec<String> = x.marks_meta(TrafficView::Volume).into_iter().collect();
+    // The search first: where the meta is cut, the marks' counts go first.
+    let mut extra: Vec<String> = Vec::new();
     let search = header_meta(table);
     if !search.is_empty() {
         extra.push(search);
     }
+    extra.extend(x.marks_meta(TrafficView::Volume));
     // Two corners, a space either side of the title and the meta, a gap.
     let title = TrafficView::Volume.title();
     let room = (area.width as usize).saturating_sub(width(title) + 7);
@@ -325,6 +338,22 @@ mod tests {
         let search = ["/crm".to_string()];
         let both = volume_meta(Weight::Bytes, true, &search, 40, &t);
         assert_eq!(meta_text(&both), "by bytes · /crm");
+        // A long search with the marks' counts: cut at the room, never over
+        // the title.
+        let long = [
+            "/a-very-long-search-term▏".to_string(),
+            "4 rows (9 flows) squelched · M shows them".to_string(),
+        ];
+        for room in [0, 5, 12, 30, 67] {
+            let m = meta_text(&volume_meta(Weight::Connections, true, &long, room, &t));
+            assert!(width(&m) <= room.max(width("by conns")), "{room}: {m}");
+            assert!(m.starts_with("by conns"), "{m}");
+        }
+        let m = meta_text(&volume_meta(Weight::Connections, true, &long, 67, &t));
+        assert!(
+            m.contains("/a-very-long-search-term") && m.ends_with('…'),
+            "{m}"
+        );
     }
 
     #[test]

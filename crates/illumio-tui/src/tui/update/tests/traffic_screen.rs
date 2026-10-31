@@ -1103,6 +1103,15 @@ fn space_folds_one_source_and_z_folds_them_all() {
     assert!(open > 9);
     quiet(&mut m, key('j'));
     assert!(selected(&m).starts_with('→'));
+    // z unfolding the rest keeps the cursor on its destination row; z
+    // folding all puts it on that row's source.
+    let dst = selected(&m);
+    quiet(&mut m, key('z'));
+    assert_eq!(selected(&m), dst, "unfolding all leaves the cursor be");
+    quiet(&mut m, key('z'));
+    assert_eq!(selected(&m), src, "folding all: its source");
+    quiet(&mut m, key(' '));
+    quiet(&mut m, key('j'));
     quiet(&mut m, key(' '));
     assert_eq!(volume_rows(&m).len(), 9);
     assert_eq!(selected(&m), src);
@@ -1119,7 +1128,7 @@ fn e_explains_a_destination_row_as_app_to_app_explains_a_pair() {
     assert_eq!(m.overlay, Overlay::None);
     assert_eq!(
         m.status.text,
-        "E explains a flow: select one in the Flows view"
+        "E explains one pair: move to a → destination row"
     );
     assert_eq!(volume_rows(&m).len(), 9, "E folds nothing");
     // A pair with several flows says so; a pair with one explains it.

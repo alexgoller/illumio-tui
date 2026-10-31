@@ -2897,6 +2897,19 @@ fn traffic_marks_volume_80x24_and_120x34() {
         "traffic_marks_volume_light_styled_80x24",
         render_styled(&m, 80, 24)
     );
+    m.set_theme("dark");
+    // A long search with the marks' counts: the meta is cut, the title stays.
+    gen_key(&mut m, '/');
+    for c in "a-search-longer-than-the-room".chars() {
+        gen_key(&mut m, c);
+    }
+    let out = render_to_string(&m, 80, 24);
+    let top = out.lines().find(|l| l.contains("by conns")).unwrap();
+    assert!(top.starts_with("╭ Volume ─"), "{top}");
+    assert!(
+        top.contains("/a-search-longer") && top.contains('…'),
+        "{top}"
+    );
 }
 
 #[test]

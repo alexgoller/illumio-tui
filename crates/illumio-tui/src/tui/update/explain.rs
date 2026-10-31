@@ -131,6 +131,10 @@ pub(super) fn explain_key(model: &mut Model) -> Vec<Cmd> {
                 None => return Vec::new(),
             }
         }
+        TrafficView::Volume => {
+            model.status = StatusLine::warn("E explains one pair: move to a → destination row");
+            return Vec::new();
+        }
         TrafficView::Exposure => match t.exposure_rows.selected_item() {
             Some(r) => r.sample.clone(),
             None => {

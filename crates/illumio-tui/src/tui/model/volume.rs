@@ -374,7 +374,8 @@ impl TrafficState {
     }
 
     /// `z` on Volume: every source unfolded, or every one folded when all
-    /// already are. The cursor stays on its source.
+    /// already are. Unfolding keeps the cursor on its row; folding puts it
+    /// on that row's source.
     pub fn fold_all_volume(&mut self) {
         let sources: Vec<Vec<String>> = self
             .volume_state
@@ -392,8 +393,9 @@ impl TrafficState {
             st.unfolded.extend(sources);
         }
         let src = self.volume.selected_item().map(|r| r.src().to_vec());
+        // `relayout_volume` keeps the cursor on its row when it stays.
         self.relayout_volume();
-        if let Some(src) = src {
+        if let Some(src) = src.filter(|_| all) {
             self.volume
                 .select_where(|r| r.is_source() && r.src() == src.as_slice());
         }
