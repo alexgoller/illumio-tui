@@ -45,6 +45,7 @@
 <p><a href="./">&larr; Back to the site</a></p>
 <nav class="toc" aria-label="Releases">
 <ul>
+<li><a href="#v0.5.8">v0.5.8</a> <span>2026-10-31</span></li>
 <li><a href="#v0.5.7">v0.5.7</a> <span>2026-10-26</span></li>
 <li><a href="#v0.5.6">v0.5.6</a> <span>2026-10-26</span></li>
 <li><a href="#v0.5.5">v0.5.5</a> <span>2026-10-24</span></li>
@@ -78,6 +79,64 @@
 <li><a href="#v0.1.0">v0.1.0</a> <span>2026-10-12</span></li>
 </ul>
 </nav>
+</section>
+
+<section class="panel release" id="v0.5.8" aria-labelledby="v0.5.8-h">
+  <h2 id="v0.5.8-h"><a href="#v0.5.8">v0.5.8</a> <span class="date">2026-10-31</span></h2>
+<h3>New</h3>
+<ul>
+<li><strong>Provision impact</strong> (<a href="https://github.com/alexgoller/illumio-tui/issues/86">#86</a>). Before you provision, see what the draft would change for the traffic you actually have.
+<ul>
+<li>It re-evaluates the last window's flows (24h by default) against the draft and lists the transitions: <strong>newly blocked</strong> (including potentially blocked → blocked), <strong>newly allowed</strong>, and the rest unchanged, by app pair and service. It also lists the pending changes and how many rules each ruleset adds or removes.</li>
+<li>TUI: <strong><code>I</code></strong> in the pending-changes overlay, or <code>:impact</code>. <code>r</code> reloads it, and a write forgets it.</li>
+<li>CLI: <code>policy impact</code>, and <code>policy provision --impact</code> shows it before asking. <code>--fail-on-blocked</code> exits 7 when any flow would become blocked, and 4 when some flows could not be evaluated. Schema <code>policy-impact.json</code>.</li>
+</ul>
+</li>
+<li><strong>Exposure</strong> (<a href="https://github.com/alexgoller/illumio-tui/issues/82">#82</a>). Where risky services (RDP, SMB, NetBIOS, RPC, WinRM, SSH, Telnet, VNC and the common databases) can be reached, and under which decision. One Explorer query, through the cost guard.
+<ul>
+<li>Each destination group and service shows its sources: inside the group, other apps, IP lists and the internet. Rows allowed from outside the group come first.</li>
+<li>TUI: <strong><code>9</code></strong> or <code>:exposure</code>. CLI: <code>exposure [--service rdp,ssh] [--only exposed] [--draft]</code>, and <code>--fail-on-exposed</code> exits 8.</li>
+<li>Override or extend the list per profile under <code>[profiles.NAME.exposure]</code>.</li>
+</ul>
+</li>
+<li><strong>Hygiene report</strong> (<a href="https://github.com/alexgoller/illumio-tui/issues/83">#83</a>). Cleanup candidates: labels, label groups, IP lists and services that nothing uses, and workloads missing any of the profile's label keys.
+<ul>
+<li>Labels use the PCE's own usage flags. PCE built-ins are never listed. What wasn't searched is named, so an unused row is a candidate, not a verdict.</li>
+<li>TUI: <code>:hygiene</code> (<code>Enter</code> jumps to the object, <code>W</code> checks it with where-used). CLI: <code>hygiene [--kind …]</code>.</li>
+</ul>
+</li>
+<li><strong>Local snapshots</strong> (<a href="https://github.com/alexgoller/illumio-tui/issues/84">#84</a>). Policy, labels and workloads, saved locally as JSON under the data dir, so you can later ask what changed.
+<ul>
+<li><code>snapshot save [--what …] [--with-readiness] [--label TEXT]</code>, <code>snapshot list</code>, <code>snapshot diff [A] [B]</code> (timestamps, <code>latest</code>, <code>previous</code> or <code>now</code>; <code>--fail-on-change</code> exits 9), <code>snapshot rm</code> and <code>snapshot prune --keep N</code>. TUI: <code>:snapshot</code>.</li>
+<li>A diff never mixes profiles or PCEs.</li>
+</ul>
+</li>
+<li><strong>Compare against a snapshot</strong> (<a href="https://github.com/alexgoller/illumio-tui/issues/85">#85</a>). No request: the loaded list is compared with the file.
+<ul>
+<li>Workloads <strong><code>b</code></strong> picks a snapshot. Rows are marked <code>NEW</code>, <code>CHG</code> or <code>GONE</code>, with a <code>was→now</code> column (<code>app: crm→payment</code>, <code>mode: visibility→selective</code>, <code>ven: active→stopped</code>). CLI: <code>workloads --baseline-snapshot latest</code>.</li>
+<li>Readiness shows each app's <strong>trend</strong> from snapshots taken with <code>--with-readiness</code> (<code>readiness --trend</code>).</li>
+</ul>
+</li>
+<li><strong>Generator: only what is new</strong> (<a href="https://github.com/alexgoller/illumio-tui/issues/81">#81</a>). In the generator, <strong><code>N</code></strong> proposes rules only for traffic that is new since a baseline (<code>gen APP --baseline 7d</code>, and <code>--changes new,changed</code>). Flows seen before are counted, not proposed.</li>
+<li><strong>Volume view replaces the Treemap</strong> (<a href="https://github.com/alexgoller/illumio-tui/issues/89">#89</a>). The Treemap was hard to read. On Traffic, <strong>Volume</strong> lists every source group by size: its full name, its connections (<code>b</code>: bytes), a bar split into allowed, potentially blocked and blocked, and its blocked share. <code>Space</code> or <code>Enter</code> unfolds a source's destinations and <code>z</code> unfolds them all. <code>Enter</code> on a destination drills into its flows, and <code>E</code> explains that pair. Unlike the Treemap, Volume works with compare mode (<code>Δ</code>), marks, <code>/</code> search and <code>:export</code>.</li>
+<li><strong>Human-readable bytes</strong> (<a href="https://github.com/alexgoller/illumio-tui/issues/87">#87</a>). <code>--human</code> / <code>-H</code> shows bytes as <code>2.9G</code> and <code>597M</code> (1024-based) in tables, CSV and the stderr summary. JSON stays raw. The TUI always shows units.</li>
+</ul>
+<h3>Changed</h3>
+<ul>
+<li><strong>Labels in filters ignore case</strong> (<a href="https://github.com/alexgoller/illumio-tui/issues/90">#90</a>). <code>app=ORDERING</code> finds <code>app=ordering</code>, in the TUI and the CLI alike. An exact match always wins. When the case-insensitive match is ambiguous (<code>Web</code> and <code>web</code> under one key), you get an error that names both. Writes (the rule form, bulk labels, label creation) still match exactly.</li>
+<li><strong>Filters help when they are wrong</strong> (<a href="https://github.com/alexgoller/illumio-tui/issues/88">#88</a>).
+<ul>
+<li>A bare value like <code>Ordering</code> resolves to <code>app=Ordering</code> when exactly one label has that value. Otherwise the error suggests similar values.</li>
+<li>A filter the PCE rejects reopens the editor with the error and restores the previous filter, instead of a box that blocked editing.</li>
+<li><code>events --severity</code> is checked locally (<code>error</code>, <code>warn</code>, <code>critical</code> and <code>emergency</code> are accepted as aliases), so a wrong value exits 2 without a request.</li>
+</ul>
+</li>
+<li>Policy search <code>intra</code> now also matches deny rules without an extra-scope flag, because those are intra-scope.</li>
+</ul>
+<h3>Fixed</h3>
+<ul>
+<li>Extra-scope deny rules were evaluated as intra-scope in readiness, policy search and the impact engine. They now honour the rule's <code>unscoped_consumers</code> flag (<a href="https://github.com/alexgoller/illumio-tui/issues/86">#86</a>).</li>
+</ul>
 </section>
 
 <section class="panel release" id="v0.5.7" aria-labelledby="v0.5.7-h">

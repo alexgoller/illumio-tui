@@ -2,6 +2,44 @@
 
 Every illumio-tui release, newest first. Downloads, packages and checksums for each one are on [GitHub Releases](https://github.com/alexgoller/illumio-tui/releases).
 
+## v0.5.8 — 2026-10-31
+
+### New
+
+- **Provision impact** (#86). Before you provision, see what the draft would change for the traffic you actually have.
+  - It re-evaluates the last window's flows (24h by default) against the draft and lists the transitions: **newly blocked** (including potentially blocked → blocked), **newly allowed**, and the rest unchanged, by app pair and service. It also lists the pending changes and how many rules each ruleset adds or removes.
+  - TUI: **`I`** in the pending-changes overlay, or `:impact`. `r` reloads it, and a write forgets it.
+  - CLI: `policy impact`, and `policy provision --impact` shows it before asking. `--fail-on-blocked` exits 7 when any flow would become blocked, and 4 when some flows could not be evaluated. Schema `policy-impact.json`.
+- **Exposure** (#82). Where risky services (RDP, SMB, NetBIOS, RPC, WinRM, SSH, Telnet, VNC and the common databases) can be reached, and under which decision. One Explorer query, through the cost guard.
+  - Each destination group and service shows its sources: inside the group, other apps, IP lists and the internet. Rows allowed from outside the group come first.
+  - TUI: **`9`** or `:exposure`. CLI: `exposure [--service rdp,ssh] [--only exposed] [--draft]`, and `--fail-on-exposed` exits 8.
+  - Override or extend the list per profile under `[profiles.NAME.exposure]`.
+- **Hygiene report** (#83). Cleanup candidates: labels, label groups, IP lists and services that nothing uses, and workloads missing any of the profile's label keys.
+  - Labels use the PCE's own usage flags. PCE built-ins are never listed. What wasn't searched is named, so an unused row is a candidate, not a verdict.
+  - TUI: `:hygiene` (`Enter` jumps to the object, `W` checks it with where-used). CLI: `hygiene [--kind …]`.
+- **Local snapshots** (#84). Policy, labels and workloads, saved locally as JSON under the data dir, so you can later ask what changed.
+  - `snapshot save [--what …] [--with-readiness] [--label TEXT]`, `snapshot list`, `snapshot diff [A] [B]` (timestamps, `latest`, `previous` or `now`; `--fail-on-change` exits 9), `snapshot rm` and `snapshot prune --keep N`. TUI: `:snapshot`.
+  - A diff never mixes profiles or PCEs.
+- **Compare against a snapshot** (#85). No request: the loaded list is compared with the file.
+  - Workloads **`b`** picks a snapshot. Rows are marked `NEW`, `CHG` or `GONE`, with a `was→now` column (`app: crm→payment`, `mode: visibility→selective`, `ven: active→stopped`). CLI: `workloads --baseline-snapshot latest`.
+  - Readiness shows each app's **trend** from snapshots taken with `--with-readiness` (`readiness --trend`).
+- **Generator: only what is new** (#81). In the generator, **`N`** proposes rules only for traffic that is new since a baseline (`gen APP --baseline 7d`, and `--changes new,changed`). Flows seen before are counted, not proposed.
+- **Volume view replaces the Treemap** (#89). The Treemap was hard to read. On Traffic, **Volume** lists every source group by size: its full name, its connections (`b`: bytes), a bar split into allowed, potentially blocked and blocked, and its blocked share. `Space` or `Enter` unfolds a source's destinations and `z` unfolds them all. `Enter` on a destination drills into its flows, and `E` explains that pair. Unlike the Treemap, Volume works with compare mode (`Δ`), marks, `/` search and `:export`.
+- **Human-readable bytes** (#87). `--human` / `-H` shows bytes as `2.9G` and `597M` (1024-based) in tables, CSV and the stderr summary. JSON stays raw. The TUI always shows units.
+
+### Changed
+
+- **Labels in filters ignore case** (#90). `app=ORDERING` finds `app=ordering`, in the TUI and the CLI alike. An exact match always wins. When the case-insensitive match is ambiguous (`Web` and `web` under one key), you get an error that names both. Writes (the rule form, bulk labels, label creation) still match exactly.
+- **Filters help when they are wrong** (#88).
+  - A bare value like `Ordering` resolves to `app=Ordering` when exactly one label has that value. Otherwise the error suggests similar values.
+  - A filter the PCE rejects reopens the editor with the error and restores the previous filter, instead of a box that blocked editing.
+  - `events --severity` is checked locally (`error`, `warn`, `critical` and `emergency` are accepted as aliases), so a wrong value exits 2 without a request.
+- Policy search `intra` now also matches deny rules without an extra-scope flag, because those are intra-scope.
+
+### Fixed
+
+- Extra-scope deny rules were evaluated as intra-scope in readiness, policy search and the impact engine. They now honour the rule's `unscoped_consumers` flag (#86).
+
 ## v0.5.7 — 2026-10-26
 
 ### New
