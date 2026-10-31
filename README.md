@@ -451,7 +451,8 @@ too, and `heartbeat_age_secs`). Sectioned views (App-to-app `in`/`out`/`both`, B
 every peer, folded sections included, in the columns of `traffic groups --by ... --csv`; Flows
 by app exports every flow, folded sections included, in the Flows columns after a `section`
 column naming its app; Volume exports the rows it shows (sources, and the destinations
-unfolded) with their weight and its split by decision.
+unfolded) with their weight and its split by decision, a `level` column (`source`,
+`destination`) first: a source sums its destinations, so sum one level only.
 `?` shows the keys of where you are first (the traffic view, Policy, an event's detail,
 the app overlay, the generator…), then related groups and the keys that work everywhere;
 `Tab` / `S-Tab` (Shift-Tab) step through the other groups one at a time, `a` shows them all and
@@ -555,17 +556,22 @@ the full tab row (69 columns) the tabs read `Traf`, `Pol`, `Obj`, `Wl`, `Ev`.
     pos/Staging             1.8M  ████████████████▒▒▒▒▒▒▒▒▒▒▒▒  61% blocked
       → ordering/Prod     671.8K  ██████████▒▒▒▒                 40% blocked
       → payment/Prod      402.1K  ▒▒▒▒▒▒▒▒▒                      100% blocked
-    pos/PCI                 1.7M  ███████████████▒▒▒▒▒▒▒▒▒▒▒▒▒  58% blocked · 2% pb
+    pos/PCI                 1.7M  ██████████████▓▒▒▒▒▒▒▒▒▒▒▒▒▒  58% blocked · 2% pb
   ▸ ordering/Production     1.2M  ██████████████████████         0% blocked
   ```
 
   (illustrative). Bars share one scale, the largest source's, so a destination compares
   with the sources; each is split into allowed `█`, potentially blocked `▓` and blocked `▒`
-  (unknown `░`) in the decision colours, by bytes when weighed by bytes; `N% blocked` is the
-  blocked share of the weight, `· N% pb` the potentially blocked one. `Enter` (or `l` / `→`)
+  (unknown `░`) in the decision colours, by bytes when weighed by bytes, and takes the
+  width the terminal leaves; `N% blocked` is the blocked share of the connections,
+  `· N% pb` the potentially blocked one, in either weight (blocked flows often report no
+  bytes; by bytes the column says `blocked (conns)`). `Enter` (or `l` / `→`, or `Space`)
   unfolds a source's destinations under it, sorted the same way, `h` / `←` folds (on a
-  destination: its source, the cursor going there), `E` unfolds or folds every source, and
-  `Enter` on a destination drills into that pair's flows. The table keys and the wheel
+  destination: its source, the cursor going there; `Space` there too), `z` unfolds or
+  folds every source, `Enter` on a destination drills into that pair's flows and `E`
+  explains it as on an App-to-app pair (the one flow behind it, or how many there are).
+  In compare mode a source's weight, bar and share are the result's traffic only: a gone
+  destination shows dim on its own row with the baseline's. The table keys and the wheel
   scroll, `/` keeps a source when its name or a destination's matches, `:export` writes the
   rows shown, compare mode adds `Δ` to sources and destinations, marks show in the gutter,
   and with draft decisions loaded the share says `· draft +2 -1`. At 80 columns the bar
