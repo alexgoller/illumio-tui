@@ -27,6 +27,7 @@ pub mod schema;
 pub mod snapshot;
 pub mod traffic;
 pub mod traffic_explain;
+pub mod update;
 pub mod where_used;
 pub mod workloads;
 pub mod write;
@@ -260,6 +261,18 @@ pub enum Command {
     /// the files. The files hold what the reads returned, no credentials.
     #[command(subcommand)]
     Snapshot(snapshot::SnapshotCmd),
+    /// Is a newer illumio-tui out? (GitHub's release list, never the PCE)
+    ///
+    /// `update check` asks GitHub once and prints the newest release and how to upgrade this
+    /// install. Package managers install it: there is no self-update.
+    #[command(subcommand)]
+    Update(update::UpdateCmd),
+    /// What's new: the release notes newer than this binary, else this version's
+    ///
+    /// RANGE `0.5.6..` (after 0.5.6) or `0.5.6..0.5.8` picks releases. This version's notes and
+    /// older ones are built in (offline); newer ones come from GitHub's release list (cached a
+    /// day, else one request; never the PCE). Markdown, or --json [{version, date, body}].
+    News(update::NewsArgs),
 }
 
 /// The command's name for `--csv`'s refusal when it prints no table (a
@@ -298,6 +311,8 @@ fn csv_refusal(command: &Command) -> Option<&'static str> {
         c if filters::saves_filter(c) => Some("--save-filter"),
         Command::Enforce(a) if !a.watch => Some("enforce --to/--rollback"),
         Command::Schema(a) if !a.command.is_empty() => Some("schema COMMAND"),
+        Command::Update(_) => Some("update check"),
+        Command::News(_) => Some("news"),
         _ => None,
     }
 }
@@ -366,6 +381,13 @@ pub async fn run(global: GlobalArgs, command: Command) -> Result<(), CliError> {
     if let Command::Schema(s) = &command {
         return schema::run(&global, s);
     }
+    // GitHub's release list and the built-in notes: no profile, no PCE.
+    if let Command::Update(u) = &command {
+        return update::run_update(&global, u).await;
+    }
+    if let Command::News(n) = &command {
+        return update::run_news(&global, n).await;
+    }
     if let Command::Profile(p) = &command {
         return profile::run(&global, p);
     }
@@ -415,7 +437,12 @@ pub async fn run(global: GlobalArgs, command: Command) -> Result<(), CliError> {
         Command::Traffic(t) => traffic::run(&ctx, &t).await,
         Command::Completions(_) => names_cache::refresh(&ctx).await,
         Command::Snapshot(s) => snapshot::run(&ctx, &s).await,
-        Command::Profile(_) | Command::Marks(_) | Command::Filters(_) | Command::Schema(_) => {
+        Command::Profile(_)
+        | Command::Marks(_)
+        | Command::Filters(_)
+        | Command::Schema(_)
+        | Command::Update(_)
+        | Command::News(_) => {
             unreachable!("handled above")
         }
     }

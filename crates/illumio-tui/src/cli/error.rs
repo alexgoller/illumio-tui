@@ -3,7 +3,9 @@
 //! enforcement (`enforce --watch`) or by the draft once provisioned
 //! (`policy impact --fail-on-blocked`), 8 a risky service exposed (`exposure
 //! --fail-on-exposed`), 9 snapshots differ (`snapshot diff
-//! --fail-on-change`); 141 stdout closed by its reader (quiet).
+//! --fail-on-change`), 10 a newer release exists (`update check
+//! --fail-if-outdated`); 5 also when GitHub cannot be reached (`update
+//! check`); 141 stdout closed by its reader (quiet).
 use crate::config::ConfigError;
 use crate::marks::MarksError;
 use pce::PceError;
@@ -55,6 +57,14 @@ pub enum CliError {
     /// the report.
     #[error("{0}")]
     Changed(String),
+    /// `update check --fail-if-outdated` found a newer release: exit 10,
+    /// after the report.
+    #[error("{0}")]
+    Outdated(String),
+    /// `update check` could not read the releases (no network, a proxy,
+    /// GitHub's answer): exit 5, as a connection the PCE refuses for now.
+    #[error("{0}")]
+    Unreachable(String),
     /// `marks.toml`: invalid (exit 2, every problem), locked by another
     /// writer (exit 3), a mark gone (exit 2), unreadable (exit 1).
     #[error("{}", .0.lines().join("; "))]
@@ -85,6 +95,8 @@ impl CliError {
             CliError::Blocked(_) | CliError::WouldBlock(_) => 7,
             CliError::Exposed(_) => 8,
             CliError::Changed(_) => 9,
+            CliError::Outdated(_) => 10,
+            CliError::Unreachable(_) => 5,
             CliError::Write(e) => write_exit_code(e),
             CliError::Io(_) if self.is_broken_pipe() => BROKEN_PIPE_EXIT,
             CliError::Io(_) | CliError::Other(_) => 1,
@@ -111,6 +123,8 @@ impl CliError {
             CliError::WouldBlock(_) => "would_block".into(),
             CliError::Exposed(_) => "exposed".into(),
             CliError::Changed(_) => "snapshots_differ".into(),
+            CliError::Outdated(_) => "outdated".into(),
+            CliError::Unreachable(_) => "network".into(),
             CliError::Marks(e) => match e {
                 MarksError::Parse(_) => "marks_invalid".into(),
                 MarksError::Locked => "marks_locked".into(),
@@ -195,6 +209,10 @@ mod tests {
         assert_eq!((e.exit_code(), e.kind().as_str()), (8, "exposed"));
         let c = CliError::Changed("3 changes".into());
         assert_eq!((c.exit_code(), c.kind().as_str()), (9, "snapshots_differ"));
+        let o = CliError::Outdated("0.5.9 is available".into());
+        assert_eq!((o.exit_code(), o.kind().as_str()), (10, "outdated"));
+        let u = CliError::Unreachable("cannot reach GitHub".into());
+        assert_eq!((u.exit_code(), u.kind().as_str()), (5, "network"));
         assert!(wrapped.to_string().contains("audit"));
     }
 

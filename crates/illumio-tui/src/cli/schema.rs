@@ -139,6 +139,8 @@ pub const COMMANDS: &[(&str, &str)] = &[
     ("snapshot diff", "snapshot-diff"),
     ("snapshot rm", "snapshot-rm"),
     ("snapshot prune", "snapshot-rm"),
+    ("update check", "update-check"),
+    ("news", "news"),
 ];
 
 /// Commands that print no envelope: a script, a file, a schema.
@@ -197,6 +199,7 @@ const FILES: &[(&str, &str)] = &[
     ("marks-list", include_str!("../../schemas/marks-list.json")),
     ("marks-rm", include_str!("../../schemas/marks-rm.json")),
     ("meta", include_str!("../../schemas/meta.json")),
+    ("news", include_str!("../../schemas/news.json")),
     (
         "policy-impact",
         include_str!("../../schemas/policy-impact.json"),
@@ -295,6 +298,10 @@ const FILES: &[(&str, &str)] = &[
     (
         "workloads-ven-summary",
         include_str!("../../schemas/workloads-ven-summary.json"),
+    ),
+    (
+        "update-check",
+        include_str!("../../schemas/update-check.json"),
     ),
     ("where-used", include_str!("../../schemas/where-used.json")),
     ("write", include_str!("../../schemas/write.json")),
@@ -650,6 +657,8 @@ pub fn schema_of(command: &Command) -> Option<&'static str> {
             SN::Diff(_) => "snapshot-diff",
             SN::Rm(_) | SN::Prune(_) => "snapshot-rm",
         },
+        Command::Update(_) => "update-check",
+        Command::News(_) => "news",
     })
 }
 

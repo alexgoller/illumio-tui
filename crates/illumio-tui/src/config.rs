@@ -21,6 +21,8 @@
 //! `[profiles.<name>.exposure]` names the risky services `exposure` and
 //! the TUI's `:exposure` look for: `services` replaces the default list,
 //! `extra` adds to it; a bad entry is an error where the list is used.
+//! `check_updates = false` (top level), or `ILLUMIO_TUI_NO_UPDATE_CHECK=1`,
+//! stops the TUI's once-a-day background check for a newer release.
 //! The tool writes a secret only where `profile add` is given one: the
 //! profile's `api_secret`, in a config file of mode 0600.
 use serde::{Deserialize, Serialize};
@@ -33,6 +35,9 @@ pub struct ConfigFile {
     /// Keep the names shell completion offers on disk (default true).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub completion_cache: Option<bool>,
+    /// The TUI's once-a-day check for a newer release (default true).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub check_updates: Option<bool>,
     #[serde(default)]
     pub profiles: BTreeMap<String, Profile>,
     /// Keys this version does not know, kept so `profile use` can rewrite
@@ -280,6 +285,9 @@ pub struct ResolvedConfig {
     /// The risky services of `exposure`: the profile's list, checked, or
     /// why it is malformed (an error only where the list is used).
     pub exposure_services: Result<Vec<pce::traffic::RiskyService>, String>,
+    /// The TUI checks for a newer release once a day: `check_updates`
+    /// (top level, default true), off with `ILLUMIO_TUI_NO_UPDATE_CHECK`.
+    pub check_updates: bool,
 }
 
 impl ResolvedConfig {
@@ -813,7 +821,15 @@ pub fn resolve(
         generator_consolidate_min_peers,
         event_exclude_types,
         exposure_services,
+        check_updates: check_updates(file, env_str(crate::updates::NO_CHECK_ENV)),
     })
+}
+
+/// Whether the TUI checks for a newer release: `check_updates` (default
+/// true), unless the opt-out variable is set to anything but a false value.
+pub fn check_updates(file: &ConfigFile, no_check: Option<String>) -> bool {
+    let opted_out = no_check.is_some_and(|v| parse_bool(&v) != Some(false));
+    file.check_updates.unwrap_or(true) && !opted_out
 }
 
 /// `events.exclude_types`, checked: each entry one term of the type filter
@@ -1011,6 +1027,38 @@ api_secret_cmd = "echo   from-command  "
         assert!(completion_cache(&ConfigFile::default(), "a"));
         let text = toml::to_string(&ConfigFile::default()).unwrap();
         assert!(!text.contains("completion_cache"), "{text}");
+    }
+
+    #[test]
+    fn the_update_check_is_on_unless_written_off_or_opted_out() {
+        let on = ConfigFile::default();
+        let off: ConfigFile = toml::from_str("check_updates = false\n").unwrap();
+        assert!(check_updates(&on, None));
+        assert!(!check_updates(&off, None));
+        assert!(!check_updates(&on, Some("1".into())));
+        assert!(!check_updates(&on, Some("anything".into())));
+        assert!(check_updates(&on, Some("0".into())));
+        assert!(!check_updates(&off, Some("false".into())));
+        assert!(
+            resolve(&file(), &Overrides::default(), &env(&[]))
+                .unwrap()
+                .check_updates
+        );
+        let c = resolve(
+            &file(),
+            &Overrides::default(),
+            &env(&[("ILLUMIO_TUI_NO_UPDATE_CHECK", "1")]),
+        )
+        .unwrap();
+        assert!(!c.check_updates);
+        // Written back only when set; `profile use` keeps it.
+        let text = toml::to_string(&on).unwrap();
+        assert!(!text.contains("check_updates"), "{text}");
+        assert!(
+            toml::to_string(&off)
+                .unwrap()
+                .contains("check_updates = false")
+        );
     }
 
     #[test]

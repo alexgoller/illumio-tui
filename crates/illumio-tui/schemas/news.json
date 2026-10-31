@@ -1,0 +1,14 @@
+{
+  "type": "array",
+  "description": "release notes, newest first: this version and older from the built-in CHANGELOG, newer ones from GitHub's release list",
+  "items": {
+    "type": "object",
+    "properties": {
+      "version": {"type": "string", "description": "MAJOR.MINOR.PATCH, no leading v"},
+      "date": {"type": ["string", "null"], "description": "YYYY-MM-DD"},
+      "body": {"type": "string", "description": "the notes in markdown, as the GitHub release body (## headings)"}
+    },
+    "required": ["version", "date", "body"],
+    "additionalProperties": false
+  }
+}

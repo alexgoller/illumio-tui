@@ -63,6 +63,9 @@ fn completions_prints_a_script_per_shell() {
         "profile",
         "marks",
         "completions",
+        "update",
+        "news",
+        "fail-if-outdated",
     ];
     for shell in ["bash", "zsh", "fish"] {
         let s = stdout(bin(dir.path()).args(["completions", shell]));

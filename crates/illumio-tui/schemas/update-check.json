@@ -1,0 +1,23 @@
+{
+  "type": "object",
+  "properties": {
+    "current": {"type": "string", "description": "this binary's version"},
+    "latest": {
+      "type": ["string", "null"],
+      "description": "the newest published release (drafts and prereleases left out); null when GitHub lists none"
+    },
+    "outdated": {"type": "boolean", "description": "latest is newer than current"},
+    "install": {
+      "enum": ["homebrew", "scoop", "winget", "msi", "package", "other"],
+      "description": "how this binary was installed, from its resolved path"
+    },
+    "upgrade": {
+      "type": ["string", "null"],
+      "description": "how to upgrade this install; null when up to date"
+    },
+    "release_url": {"type": ["string", "null"], "description": "the newest release's page"},
+    "checked_at": {"type": "string", "description": "when GitHub answered (UTC)"}
+  },
+  "required": ["current", "latest", "outdated", "install", "upgrade", "release_url", "checked_at"],
+  "additionalProperties": false
+}

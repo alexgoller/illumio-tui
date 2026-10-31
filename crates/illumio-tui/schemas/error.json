@@ -9,7 +9,7 @@
         "message": {"type": "string"},
         "exit_code": {
           "type": "integer",
-          "description": "1 generic, 2 arguments/config, 3 auth, 4 PCE error, 5 rate limited, 6 write refused, 7 blocked since an enforcement or by the draft once provisioned (policy impact --fail-on-blocked), 8 exposed, 9 snapshots differ"
+          "description": "1 generic, 2 arguments/config, 3 auth, 4 PCE error, 5 rate limited (or GitHub unreachable: update check), 6 write refused, 7 blocked since an enforcement or by the draft once provisioned (policy impact --fail-on-blocked), 8 exposed, 9 snapshots differ, 10 a newer release (update check --fail-if-outdated)"
         }
       },
       "required": ["kind", "message", "exit_code"],

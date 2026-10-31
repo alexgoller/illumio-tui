@@ -104,7 +104,7 @@ pub fn csv_columns(command: &Command) -> Vec<&'static str> {
         return Vec::new();
     }
     match command {
-        Command::Health => Vec::new(),
+        Command::Health | Command::Update(_) | Command::News(_) => Vec::new(),
         Command::Labels(c) if c.action.is_none() => {
             vec!["key", "value", "workloads", "rules", "deleted", "href"]
         }
