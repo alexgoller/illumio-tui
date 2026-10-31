@@ -58,7 +58,7 @@ pub(super) fn open_app_by_name(model: &mut Model, name: &str) -> Vec<Cmd> {
     let labelled = model
         .index()
         .map(|idx| pce::traffic::app_labels(&app, &keys, idx));
-    if !apps.iter().any(|a| *a == text) && !matches!(labelled, Some(Ok(_))) {
+    if !apps.contains(&text) && !matches!(labelled, Some(Ok(_))) {
         let near = pce::traffic::closest(name, &apps, 3);
         model.status = StatusLine::warn(match (near.is_empty(), labelled) {
             (false, _) => format!(
@@ -88,7 +88,7 @@ pub(super) fn gen_by_name(model: &mut Model, name: &str) -> Vec<Cmd> {
     let labelled = model
         .index()
         .map(|idx| pce::traffic::app_labels(&app, &keys, idx));
-    if !loaded.iter().any(|a| *a == text) && !matches!(labelled, Some(Ok(_))) {
+    if !loaded.contains(&text) && !matches!(labelled, Some(Ok(_))) {
         let near = pce::traffic::closest(name, &loaded, 3);
         model.status = StatusLine::warn(match (near.is_empty(), labelled) {
             (false, _) => format!(

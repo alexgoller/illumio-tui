@@ -941,7 +941,7 @@ pub(super) fn focus_by_name(model: &mut Model, name: &str) {
     let Some(app) = super::app_overlay::typed_app(model, &keys, name) else {
         return;
     };
-    if apps.iter().any(|a| *a == app.join("/")) {
+    if apps.contains(&app.join("/")) {
         model.screen = Screen::Traffic;
         focus_on(model, app);
         return;

@@ -265,7 +265,7 @@ pub(super) fn enforce_by_name(model: &mut Model, name: &str) -> Vec<Cmd> {
     let labelled = model
         .index()
         .map(|idx| pce::traffic::app_labels(&app, &keys, idx));
-    if !loaded.iter().any(|a| *a == text) && !matches!(labelled, Some(Ok(_))) {
+    if !loaded.contains(&text) && !matches!(labelled, Some(Ok(_))) {
         let near = pce::traffic::closest(name, &loaded, 3);
         model.status = StatusLine::warn(match (near.is_empty(), labelled) {
             (false, _) => format!(
