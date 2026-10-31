@@ -225,6 +225,10 @@ pub struct TrafficState {
     /// there are any (`shown_flows`).
     compare_hidden: BTreeSet<pce::traffic::FlowKey>,
     recent_view: Option<Vec<ResolvedFlow>>,
+    /// Compare mode: the recent and baseline flows by service on every
+    /// decision, as `rebuild_pairs` just grouped them; `rebuild_volume`
+    /// takes them rather than grouping the result again.
+    pub(super) service_sides: Option<(Vec<FlowGroup>, Vec<FlowGroup>)>,
     /// `:exposure` / `9` (#82): the screen is on the exposure query (its
     /// own cache slot) until `Esc` on the Exposure view; `None` off.
     pub exposure: Option<ExposureMode>,
@@ -462,6 +466,7 @@ impl TrafficState {
             baseline_view: None,
             compare_hidden: BTreeSet::new(),
             recent_view: None,
+            service_sides: None,
             exposure: None,
             exposure_rows: TableView::new(exposure_columns()),
             exposure_squelched: 0,
@@ -1229,6 +1234,7 @@ impl TrafficState {
     /// App-to-app's pairs, and by service while `o` is on (none while off),
     /// from the flows the focus and the decision filter keep. Pure.
     pub fn rebuild_pairs(&mut self) {
+        self.service_sides = None;
         let (groups, services, counts) = {
             let st = &self.apps_state;
             let keys = &self.keys;
@@ -1285,6 +1291,7 @@ impl TrafficState {
                     kept_baseline: &kept_b,
                 },
             );
+            self.service_sides = Some((all_r, all_b));
             let pair_counts =
                 pce::traffic::compare_pairs(&mut groups, &group_by_labels(&kb, keys), &by_service);
             services = if self.apps_state.by_service {

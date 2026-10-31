@@ -2102,7 +2102,7 @@ fn traffic_volume_80x24_160x48_unfolded_and_light() {
     let out = render_to_string(&m, 80, 24);
     assert!(out.contains("Volume"), "{out}");
     assert!(
-        out.contains("by conns · b bytes · Enter unfolds · E all"),
+        out.contains("by conns · b bytes · Enter unfolds/drills · z all"),
         "{out}"
     );
     assert!(
@@ -2117,6 +2117,13 @@ fn traffic_volume_80x24_160x48_unfolded_and_light() {
         out.contains("→ crm/prod") && out.contains("→ api.partner.example/-"),
         "destinations named: {out}"
     );
+    // The bar takes the width: the heaviest source's reaches the share.
+    let corp = out.lines().find(|l| l.contains("ipl:Corp/-")).unwrap();
+    assert!(corp.contains("▒  1% blocked"), "{corp}");
+    assert!(
+        corp.trim_end_matches('│').trim_end().ends_with("6% pb"),
+        "{corp}"
+    );
     insta::assert_snapshot!("traffic_volume_unfolded_160x48", out);
     m.set_theme("light");
     insta::assert_snapshot!(
@@ -2130,6 +2137,10 @@ fn traffic_volume_80x24_160x48_unfolded_and_light() {
     gen_key(&mut m, 'b');
     let out = render_to_string(&m, 80, 24);
     assert!(out.contains("by bytes · b conns"), "{out}");
+    assert!(
+        out.contains("blocked (conns)"),
+        "the share stays the connections': {out}"
+    );
     assert!(
         out.contains("▸ shop/prod"),
         "the cursor follows its row: {out}"
@@ -2875,7 +2886,12 @@ fn traffic_marks_volume_80x24_and_120x34() {
     assert!(out.contains("4 rows (9 flows) squelched"), "{out}");
     assert!(out.contains("◆ hr/prod"), "{out}");
     insta::assert_snapshot!("traffic_marks_volume_120x34", out);
-    insta::assert_snapshot!("traffic_marks_volume_80x24", render_to_string(&m, 80, 24));
+    let out = render_to_string(&m, 80, 24);
+    assert!(
+        out.contains("╭ Volume ") && out.contains("by conns · 4 rows (9 flows) squelched"),
+        "the title and the weight stay: {out}"
+    );
+    insta::assert_snapshot!("traffic_marks_volume_80x24", out);
     m.set_theme("light");
     insta::assert_snapshot!(
         "traffic_marks_volume_light_styled_80x24",
@@ -3709,7 +3725,7 @@ fn traffic_compare_80x24_and_160x48() {
     let out = render_to_string(&m, 80, 24);
     assert!(out.contains("Volume") && out.contains("CHG"), "{out}");
     insta::assert_snapshot!("traffic_compare_volume_80x24", out);
-    update(&mut m, key('E'));
+    update(&mut m, key('z'));
     insta::assert_snapshot!(
         "traffic_compare_volume_unfolded_80x24",
         render_to_string(&m, 80, 24)

@@ -249,7 +249,11 @@ pub const HELP_GROUPS: &[HelpGroup] = &[
         title: "Volume",
         lines: &[
             key("Enter l / h", "unfold a source · fold (on → its source)"),
-            key("Enter E b", "on → its flows · all sources · conns/bytes"),
+            key("Space / z", "fold or unfold a source · all sources"),
+            key(
+                "Enter E b",
+                "on →: its flows · explain the pair · conns/bytes",
+            ),
         ],
     },
     HelpGroup {

@@ -18,14 +18,22 @@ use ratatui::text::Span;
 const INDENT: &str = "  → ";
 /// The weight's cells (`1023K`, `16383P`: six at most).
 const WEIGHT: usize = 6;
-/// The bar's room while names fit; the least it shrinks to before names
-/// are cut; the least a name keeps.
-const BAR_MAX: usize = 60;
+/// The least the bar shrinks to before names are cut (it takes the room
+/// left otherwise, the width of the terminal); the least a name keeps.
 const BAR_MIN: usize = 8;
 const NAME_MIN: usize = 12;
 /// The bar's glyphs by decision, so the split reads without colour too:
 /// allowed, potentially blocked, blocked, unknown.
 const GLYPHS: [&str; 4] = ["█", "▓", "▒", "░"];
+
+/// The share column's title: by bytes it says the share is still of the
+/// connections.
+fn share_title(weight: Weight) -> &'static str {
+    match weight {
+        Weight::Connections => "blocked",
+        Weight::Bytes => "blocked (conns)",
+    }
+}
 
 fn width(s: &str) -> usize {
     Span::raw(s).width()
@@ -40,10 +48,11 @@ fn name_text(r: &VolumeRow) -> String {
     }
 }
 
-/// `61% blocked · 12% pb`, then ` · draft +3 -1` while draft decisions
-/// are loaded and the draft would change something in the row.
+/// `61% blocked · 12% pb` of the connections, whatever the weight
+/// (blocked flows often report no bytes), then ` · draft +3 -1` while
+/// draft decisions are loaded and the draft would change something.
 pub fn share_text(r: &VolumeRow, draft: bool) -> String {
-    let mut s = r.split().blocked_text();
+    let mut s = r.node.blocked_text();
     let d = draft_short(r.node.group.draft.as_ref());
     if draft && !d.is_empty() && d != "-" {
         s.push_str(&format!(" · draft {d}"));
@@ -61,19 +70,21 @@ pub struct VolumeLayout {
 
 impl VolumeLayout {
     /// The layout of `rows` in `avail` cells: name, weight and share always
-    /// shown; the bar takes the room the longest name leaves (up to
-    /// `BAR_MAX`), shrinking to `BAR_MIN` before names are cut, names cut
-    /// no shorter than `NAME_MIN` before the bar goes.
+    /// shown; the bar takes the room the longest name leaves, shrinking to
+    /// `BAR_MIN` before names are cut, names cut no shorter than
+    /// `NAME_MIN` before the bar goes.
     pub fn of(rows: &[VolumeRow], avail: usize, delta: bool, draft: bool) -> Self {
-        Self::fit(Self::measure(rows, draft), avail, delta)
+        let weight = rows.first().map_or(Weight::Connections, |r| r.weight);
+        Self::fit(Self::measure(rows, draft, weight), avail, delta)
     }
 
-    /// The longest name cell and share text of `rows`: measured once a
-    /// draw, whatever the width.
-    pub fn measure(rows: &[VolumeRow], draft: bool) -> (usize, usize) {
+    /// The longest name cell and share text of `rows` (the share's title
+    /// at least): measured once a draw, whatever the width.
+    pub fn measure(rows: &[VolumeRow], draft: bool, weight: Weight) -> (usize, usize) {
         let name = rows.iter().map(|r| width(&name_text(r))).max();
         let share = rows.iter().map(|r| width(&share_text(r, draft))).max();
-        (name.unwrap_or(0), share.unwrap_or(0).max(width("blocked")))
+        let title = width(share_title(weight));
+        (name.unwrap_or(0), share.unwrap_or(0).max(title))
     }
 
     /// `of` from `measure`'s widths.
@@ -82,7 +93,7 @@ impl VolumeLayout {
         // Two cells between name, weight, bar and share.
         let rest = avail.saturating_sub(delta + WEIGHT + share + 6);
         let (name, bar) = if name_full + BAR_MIN <= rest {
-            (name_full, (rest - name_full).min(BAR_MAX))
+            (name_full, rest - name_full)
         } else {
             let name = rest.saturating_sub(BAR_MIN).max(NAME_MIN.min(rest));
             (name, rest - name)
@@ -107,7 +118,7 @@ impl VolumeLayout {
             s.push_str(&fit("volume", self.bar));
             s.push_str("  ");
         }
-        s.push_str("blocked");
+        s.push_str(share_title(weight));
         s
     }
 
@@ -161,7 +172,7 @@ impl VolumeLayout {
             out.push(Span::raw(" ".repeat(self.bar - used + 2)));
         }
         let share = share_text(r, draft);
-        let quiet = gone || r.split().blocked == 0;
+        let quiet = gone || r.node.split(Weight::Connections).blocked == 0;
         out.push(Span::styled(share, if quiet { dim } else { Style::new() }));
         out
     }
@@ -183,13 +194,25 @@ fn cut(s: &str, w: usize) -> String {
     }
 }
 
-/// `by conns · b bytes · Enter unfolds · E all` (or `by bytes · b conns
-/// · …`), dim like every panel meta; the `b` hint fainter still when no
-/// flow carried bytes, since `b` then refuses.
-pub fn volume_meta(weight: Weight, has_bytes: bool, t: &Theme) -> Vec<Span<'static>> {
+/// The key hints after the weight.
+const HINTS: &str = " · Enter unfolds/drills · z all";
+
+/// `by conns · b bytes · Enter unfolds/drills · z all` (or `by bytes · b
+/// conns · …`), then `extra` (the marks' counts, the search), dim like
+/// every panel meta; the `b` hint fainter still when no flow carried
+/// bytes, since `b` then refuses. The key hints only where all of it fits
+/// `room` cells (`?` lists the keys): the weight and `extra` never push
+/// the title out.
+pub fn volume_meta(
+    weight: Weight,
+    has_bytes: bool,
+    extra: &[String],
+    room: usize,
+    t: &Theme,
+) -> Vec<Span<'static>> {
     let (by, toggle) = match weight {
-        Weight::Connections => ("by conns · ", "b bytes"),
-        Weight::Bytes => ("by bytes · ", "b conns"),
+        Weight::Connections => ("by conns", "b bytes"),
+        Weight::Bytes => ("by bytes", "b conns"),
     };
     let dim = t.dim_style();
     let toggle_style = if has_bytes {
@@ -197,11 +220,17 @@ pub fn volume_meta(weight: Weight, has_bytes: bool, t: &Theme) -> Vec<Span<'stat
     } else {
         dim.add_modifier(Modifier::DIM)
     };
-    vec![
-        Span::styled(by, dim),
-        Span::styled(toggle, toggle_style),
-        Span::styled(" · Enter unfolds · E all", dim),
-    ]
+    let extra: Vec<String> = extra.iter().map(|e| format!(" · {e}")).collect();
+    let hints = width(" · ") + width(toggle) + width(HINTS);
+    let long = width(by) + hints + extra.iter().map(|e| width(e)).sum::<usize>();
+    let mut out = vec![Span::styled(by, dim)];
+    if long <= room {
+        out.push(Span::styled(" · ", dim));
+        out.push(Span::styled(toggle, toggle_style));
+        out.push(Span::styled(HINTS, dim));
+    }
+    out.extend(extra.into_iter().map(|e| Span::styled(e, dim)));
+    out
 }
 
 pub fn render_volume(model: &Model, f: &mut Frame, area: Rect) {
@@ -209,17 +238,18 @@ pub fn render_volume(model: &Model, f: &mut Frame, area: Rect) {
     let x = &model.traffic;
     let table = &x.volume;
     let st = &x.volume_state;
-    let mut meta = volume_meta(st.weight, st.has_bytes, t);
-    if let Some(m) = x.marks_meta(TrafficView::Volume) {
-        meta.push(Span::styled(format!(" · {m}"), t.dim_style()));
-    }
+    let mut extra: Vec<String> = x.marks_meta(TrafficView::Volume).into_iter().collect();
     let search = header_meta(table);
     if !search.is_empty() {
-        meta.push(Span::styled(format!(" · {search}"), t.dim_style()));
+        extra.push(search);
     }
-    let block = panel_spans(TrafficView::Volume.title(), meta, t, true);
+    // Two corners, a space either side of the title and the meta, a gap.
+    let title = TrafficView::Volume.title();
+    let room = (area.width as usize).saturating_sub(width(title) + 7);
+    let meta = volume_meta(st.weight, st.has_bytes, &extra, room, t);
+    let block = panel_spans(title, meta, t, true);
     let (draft, delta) = (x.draft_loaded(), x.comparing());
-    let measured = VolumeLayout::measure(table.rows(), draft);
+    let measured = VolumeLayout::measure(table.rows(), draft, st.weight);
     let layout = |avail| VolumeLayout::fit(measured, avail, delta);
     let dim = t.dim_style();
     let row_style = |r: &VolumeRow| {
@@ -259,21 +289,42 @@ mod tests {
     #[test]
     fn the_meta_dims_b_bytes_when_no_flow_has_bytes() {
         let t = Theme::dark();
-        let with = volume_meta(Weight::Connections, true, &t);
+        let with = volume_meta(Weight::Connections, true, &[], 80, &t);
         assert_eq!(
             meta_text(&with),
-            "by conns · b bytes · Enter unfolds · E all"
+            "by conns · b bytes · Enter unfolds/drills · z all"
         );
-        assert_eq!(with[1].content, "b bytes");
-        assert_eq!(with[1].style, t.dim_style());
-        let without = volume_meta(Weight::Connections, false, &t);
+        assert_eq!(with[2].content, "b bytes");
+        assert_eq!(with[2].style, t.dim_style());
+        let without = volume_meta(Weight::Connections, false, &[], 80, &t);
         assert_eq!(meta_text(&without), meta_text(&with));
-        assert_eq!(without[1].style, t.dim_style().add_modifier(Modifier::DIM));
+        assert_eq!(without[2].style, t.dim_style().add_modifier(Modifier::DIM));
         assert_eq!(without[0].style, t.dim_style(), "only the b hint greys");
         assert_eq!(
-            meta_text(&volume_meta(Weight::Bytes, true, &t)),
-            "by bytes · b conns · Enter unfolds · E all"
+            meta_text(&volume_meta(Weight::Bytes, true, &[], 80, &t)),
+            "by bytes · b conns · Enter unfolds/drills · z all"
         );
+    }
+
+    #[test]
+    fn the_key_hints_give_way_to_the_marks_and_the_search() {
+        let t = Theme::dark();
+        let extra = ["4 rows (9 flows) squelched · M shows them".to_string()];
+        // 80 columns: the title takes 13, 67 left.
+        let short = volume_meta(Weight::Connections, true, &extra, 67, &t);
+        assert_eq!(
+            meta_text(&short),
+            "by conns · 4 rows (9 flows) squelched · M shows them"
+        );
+        let wide = volume_meta(Weight::Connections, true, &extra, 147, &t);
+        assert!(
+            meta_text(&wide).contains("z all · 4 rows"),
+            "{}",
+            meta_text(&wide)
+        );
+        let search = ["/crm".to_string()];
+        let both = volume_meta(Weight::Bytes, true, &search, 40, &t);
+        assert_eq!(meta_text(&both), "by bytes · /crm");
     }
 
     #[test]
@@ -281,11 +332,12 @@ mod tests {
         let mut m = model_with_rich_flows();
         m.traffic.fold_all_volume();
         let rows = m.traffic.volume.rows();
-        let (name, share) = VolumeLayout::measure(rows, false);
+        let (name, share) = VolumeLayout::measure(rows, false, Weight::Connections);
         assert_eq!(name, width("  → api.partner.example/-"));
-        // Wide: every name whole, the bar as long as allowed.
+        // Wide: every name whole, the bar takes the rest of the width.
         let wide = VolumeLayout::of(rows, 200, false, false);
-        assert_eq!((wide.name, wide.bar), (name, BAR_MAX));
+        let full = 200 - (name + WEIGHT + share + 6);
+        assert_eq!((wide.name, wide.bar), (name, full));
         // Narrower: the bar gives way first ...
         let at = name + BAR_MIN + WEIGHT + share + 6;
         let l = VolumeLayout::of(rows, at + 5, false, false);
@@ -299,7 +351,7 @@ mod tests {
         assert_eq!((l.name, l.bar), (NAME_MIN, 3));
         // The `Δ` cell takes five cells from the same room.
         let d = VolumeLayout::of(rows, 200, true, false);
-        assert_eq!((d.delta, d.name, d.bar), (5, name, BAR_MAX));
+        assert_eq!((d.delta, d.name, d.bar), (5, name, full - 5));
         // Every row fits its width exactly but for the share.
         let t = Theme::dark();
         for avail in [40, 76, 120, 156] {
@@ -338,9 +390,27 @@ mod tests {
         assert!(dst.starts_with("  → "), "{dst}");
         assert!(l.header(Weight::Connections).starts_with("group"));
         assert!(l.header(Weight::Bytes).contains("bytes  volume"));
+        assert!(l.header(Weight::Bytes).ends_with("blocked (conns)"));
+        assert!(
+            l.header(Weight::Connections).ends_with("volume  blocked")
+                || l.header(Weight::Connections).ends_with("blocked")
+        );
         // The bar's segments are in the decisions' colours.
         let spans = l.spans(&rows[0], false, &t);
         let blocked = spans.iter().find(|s| s.content.starts_with('▒')).unwrap();
         assert_eq!(blocked.style, t.decision_style(PolicyDecision::Blocked));
+    }
+
+    #[test]
+    fn by_bytes_the_share_stays_the_connections() {
+        let mut m = model_with_rich_flows();
+        let t = Theme::dark();
+        assert!(m.traffic.toggle_volume_weight());
+        let rows = m.traffic.volume.rows();
+        let corp = rows.iter().find(|r| r.name() == "ipl:Corp/-").unwrap();
+        assert_eq!(share_text(corp, false), "1% blocked · 6% pb");
+        let l = VolumeLayout::of(rows, 120, false, false);
+        assert!(text(&l.spans(corp, false, &t)).ends_with("1% blocked · 6% pb"));
+        assert!(l.header(Weight::Bytes).ends_with("blocked (conns)"));
     }
 }

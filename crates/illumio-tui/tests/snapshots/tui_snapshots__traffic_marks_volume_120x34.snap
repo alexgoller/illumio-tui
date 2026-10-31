@@ -10,7 +10,7 @@ expression: out
 ╭ Result ─────────────────────────────────────────────────────────────────────────────────────────── 30 flows · 3s ago ╮
 │21 of 30 flows (9 squelched) allowed 8 pot.blocked 6 blocked 6  ██████████████████████████████████████████████████████│
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
-╭ Volume ────────────────────── by conns · b bytes · Enter unfolds · E all · 4 rows (9 flows) squelched · M shows them ╮
+╭ Volume ─────────────── by conns · b bytes · Enter unfolds/drills · z all · 4 rows (9 flows) squelched · M shows them ╮
 │    group                       conns  volume                                                     blocked             │
 │    crm/prod                      896  █████████████████████████████████████████████████████▓▓▓▓  0% blocked · 5% pb  │
 │      → crm/prod                  850  ██████████████████████████████████████████████████████     0% blocked          │

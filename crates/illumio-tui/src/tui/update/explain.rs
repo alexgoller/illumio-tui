@@ -65,8 +65,31 @@ fn open(model: &mut Model, flow: ResolvedFlow, from_app: bool) -> Vec<Cmd> {
     Vec::new()
 }
 
+/// The one loaded flow behind pair `g` that `decisions` keeps, or why `E`
+/// cannot pick one (none, or several: drill first).
+fn pair_flow(
+    t: &crate::tui::model::TrafficState,
+    g: &pce::traffic::FlowGroup,
+    decisions: Decisions,
+) -> Result<ResolvedFlow, String> {
+    let keys = t.effective_keys();
+    let flows: Vec<&ResolvedFlow> = t
+        .loaded_flows()
+        .iter()
+        .filter(|f| decisions.keeps(f) && g.contains(f, &keys))
+        .collect();
+    match flows.as_slice() {
+        [f] => Ok((*f).clone()),
+        [] => Err("no loaded flow behind this row".into()),
+        many => Err(format!(
+            "{} flows behind this pair: Enter, then E on one",
+            many.len()
+        )),
+    }
+}
+
 /// `E` on the Traffic screen: the selected flow (Flows), the one flow
-/// behind an App-to-app pair row, or an Exposure row's busiest exposing
+/// behind an App-to-app pair row or a Volume destination row, or an Exposure row's busiest exposing
 /// flow (else its busiest; `e` there too).
 pub(super) fn explain_key(model: &mut Model) -> Vec<Cmd> {
     let t = &model.traffic;
@@ -87,26 +110,25 @@ pub(super) fn explain_key(model: &mut Model) -> Vec<Cmd> {
                 model.status = StatusLine::warn("no row selected");
                 return Vec::new();
             };
-            let keys = t.effective_keys();
-            let decisions = t.apps_state.decisions;
-            let flows: Vec<&ResolvedFlow> = t
-                .loaded_flows()
-                .iter()
-                .filter(|f| decisions.keeps(f) && g.contains(f, &keys))
-                .collect();
-            match flows.as_slice() {
-                [f] => (*f).clone(),
-                [] => {
-                    model.status = StatusLine::warn("no loaded flow behind this row");
+            match pair_flow(t, g, t.apps_state.decisions) {
+                Ok(f) => f,
+                Err(e) => {
+                    model.status = StatusLine::warn(e);
                     return Vec::new();
                 }
-                many => {
-                    model.status = StatusLine::warn(format!(
-                        "{} flows behind this pair: Enter, then E on one",
-                        many.len()
-                    ));
+            }
+        }
+        // A Volume destination row is a pair, under every decision; a
+        // source row holds many, as an App-to-app section header does.
+        TrafficView::Volume if t.volume.selected_item().is_some_and(|r| !r.is_source()) => {
+            let g = t.volume.selected_item().map(|r| &r.node.group);
+            match g.map(|g| pair_flow(t, g, Decisions::All)) {
+                Some(Ok(f)) => f,
+                Some(Err(e)) => {
+                    model.status = StatusLine::warn(e);
                     return Vec::new();
                 }
+                None => return Vec::new(),
             }
         }
         TrafficView::Exposure => match t.exposure_rows.selected_item() {

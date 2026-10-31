@@ -226,7 +226,7 @@ fn every_view_gains_the_delta_and_the_header_its_counts() {
     assert!(!meta.contains("no Δ here"), "{meta}");
     let out = render_to_string(&m, 160, 48);
     assert!(out.contains(" Δ ") && out.contains("CHG"), "{out}");
-    quiet(&mut m, key('E'));
+    quiet(&mut m, key('z'));
     let unfolded = m.traffic.view_counts().unwrap();
     assert!(
         unfolded.new + unfolded.changed + unfolded.gone > counts.new + counts.changed + counts.gone,
@@ -943,7 +943,7 @@ fn the_header_counts_equal_the_rows_each_view_shows_under_every_n() {
                 quiet(&mut m, key('x'));
             }
             // Volume (#89): its sources, then every destination unfolded.
-            7 => quiet(&mut m, key('E')),
+            7 => quiet(&mut m, key('z')),
             _ => quiet(&mut m, key('v')),
         }
         let what = format!(

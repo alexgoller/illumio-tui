@@ -142,6 +142,26 @@ macro_rules! split_column {
 /// the weight column is `conns` or `bytes`, the decision columns in it.
 pub fn volume_columns(weight: Weight, draft: bool, cmp: bool) -> Vec<Column<VolumeRow>> {
     let mut cols: Vec<Column<VolumeRow>> = vec![
+        // A source sums its destinations: say which a row is, so a sum of
+        // the weight column can keep one level.
+        Column {
+            title: "level",
+            width: 0,
+            cell: |r| {
+                if r.is_source() {
+                    "source".into()
+                } else {
+                    "destination".into()
+                }
+            },
+            key: volume_text,
+            right: false,
+            hide_below: 0,
+            narrow: None,
+            narrow_width: 0,
+            full_title: None,
+            full: None,
+        },
         Column {
             title: "src",
             width: 0,
@@ -213,13 +233,17 @@ impl TrafficState {
     /// pair's from the baseline), each source's marks summed from its
     /// pairs'; then its rows.
     pub(super) fn rebuild_volume(&mut self, mut pairs: Vec<FlowGroup>) {
+        let sides = self.service_sides.take();
         let keys = &self.keys;
         let recent = self.shown_flows();
         let mut fallback = ByteSplits::new();
         if let Some(b) = self.baseline_view.as_ref() {
             // As App-to-app's pairs on every decision: each service key
             // judged, then a pair from its keys.
-            let (all_r, all_b) = (group_by_service(recent, keys), group_by_service(b, keys));
+            let (all_r, all_b) = match sides {
+                Some(sides) => sides,
+                None => (group_by_service(recent, keys), group_by_service(b, keys)),
+            };
             let mut services = all_r.clone();
             pce::traffic::compare_groups(
                 &mut services,
@@ -230,7 +254,7 @@ impl TrafficState {
         }
         let mut tree = volume::tree(&pairs, &volume::byte_splits(recent, keys), &fallback);
         for s in &mut tree {
-            s.node.group.marks = sum_marks(
+            Arc::make_mut(&mut s.node).group.marks = sum_marks(
                 s.dsts
                     .iter()
                     .map(|d| (d.group.flows, d.group.marks.as_ref())),
@@ -275,11 +299,7 @@ impl TrafficState {
         {
             volume::keep_changes(&mut shown, cmp.show.set());
         }
-        let scale = shown
-            .iter()
-            .map(|s| s.node.weight(weight))
-            .max()
-            .unwrap_or(0);
+        let scale = volume::scale(&shown, weight);
         let mut rows = Vec::new();
         for (i, s) in shown.into_iter().enumerate() {
             let open = unfolded.contains(&s.node.group.src);
@@ -289,7 +309,7 @@ impl TrafficState {
                 names.push_str(&d.group.dst.join("/").to_lowercase());
             }
             rows.push(VolumeRow {
-                node: Arc::new(s.node),
+                node: s.node,
                 source: i,
                 kind: VolumeKind::Source {
                     names: names.into(),
@@ -299,7 +319,7 @@ impl TrafficState {
             });
             if open {
                 rows.extend(s.dsts.into_iter().map(|d| VolumeRow {
-                    node: Arc::new(d),
+                    node: d,
                     source: i,
                     kind: VolumeKind::Dest,
                     weight,
@@ -326,7 +346,8 @@ impl TrafficState {
 
     /// `Enter` / `l` on a source (`unfold`), `h` (`!unfold`): its
     /// destinations shown or hidden; on a destination `h` folds its source
-    /// and the cursor goes there. `None` unfold: `Enter`'s toggle. Whether
+    /// and the cursor goes there. `None` unfold: `Enter`'s and `Space`'s
+    /// toggle (`Space` on a destination folds its source). Whether
     /// anything changed.
     pub fn fold_volume(&mut self, unfold: Option<bool>) -> bool {
         let Some(r) = self.volume.selected_item() else {
@@ -352,8 +373,8 @@ impl TrafficState {
         true
     }
 
-    /// `E` on Volume: every source unfolded, or all folded when all are
-    /// (or when some are). The cursor stays on its source.
+    /// `z` on Volume: every source unfolded, or every one folded when all
+    /// already are. The cursor stays on its source.
     pub fn fold_all_volume(&mut self) {
         let sources: Vec<Vec<String>> = self
             .volume_state

@@ -1081,29 +1081,90 @@ fn enter_unfolds_a_source_h_folds_it_and_enter_on_a_destination_drills() {
 }
 
 #[test]
-fn e_unfolds_every_source_or_folds_them_all() {
+fn space_folds_one_source_and_z_folds_them_all() {
     let mut m = on_volume(80, 24);
     quiet(&mut m, key('j'));
     let src = selected(&m);
-    quiet(&mut m, key('E'));
+    quiet(&mut m, key('z'));
     let pairs = m.traffic.volume_state.tree_pairs().count();
     assert_eq!(volume_rows(&m).len(), 9 + pairs);
     assert_eq!(selected(&m), src, "the cursor stays on its source");
-    assert!(m.status.text.is_empty() || !m.status.text.contains("explain"));
-    quiet(&mut m, key('E'));
+    quiet(&mut m, key('z'));
     assert_eq!(volume_rows(&m).len(), 9);
-    // One unfolded: E unfolds the rest.
+    // One unfolded: z unfolds the rest.
     quiet(&mut m, enter());
-    quiet(&mut m, key('E'));
+    quiet(&mut m, key('z'));
     assert_eq!(volume_rows(&m).len(), 9 + pairs);
-    assert!(m.overlay == Overlay::None, "E is no explain here");
+    quiet(&mut m, key('z'));
+    // Space toggles the source under the cursor; on a destination it
+    // folds its source, the cursor going there.
+    quiet(&mut m, key(' '));
+    let open = volume_rows(&m).len();
+    assert!(open > 9);
+    quiet(&mut m, key('j'));
+    assert!(selected(&m).starts_with('→'));
+    quiet(&mut m, key(' '));
+    assert_eq!(volume_rows(&m).len(), 9);
+    assert_eq!(selected(&m), src);
+    quiet(&mut m, key(' '));
+    assert_eq!(volume_rows(&m).len(), open);
+    assert_eq!(m.overlay, Overlay::None, "no key opened anything");
+}
+
+#[test]
+fn e_explains_a_destination_row_as_app_to_app_explains_a_pair() {
+    let mut m = on_volume(80, 24);
+    // A source holds many pairs: the warning App-to-app gives off a pair.
+    quiet(&mut m, key('E'));
+    assert_eq!(m.overlay, Overlay::None);
+    assert_eq!(
+        m.status.text,
+        "E explains a flow: select one in the Flows view"
+    );
+    assert_eq!(volume_rows(&m).len(), 9, "E folds nothing");
+    // A pair with several flows says so; a pair with one explains it.
+    m.traffic.volume.select_where(|r| r.name() == "shop/prod");
+    quiet(&mut m, enter());
+    quiet(&mut m, key('j'));
+    assert_eq!(selected(&m), "→ shop/prod");
+    quiet(&mut m, key('E'));
+    assert_eq!(
+        m.status.text,
+        "4 flows behind this pair: Enter, then E on one"
+    );
+    let single = m
+        .traffic
+        .volume_state
+        .tree_pairs()
+        .find(|(s, d)| {
+            let keys = m.traffic.effective_keys();
+            m.traffic
+                .loaded_flows()
+                .iter()
+                .filter(|f| {
+                    &pce::traffic::group_key(&f.src, &keys) == *s
+                        && &pce::traffic::group_key(&f.dst, &keys) == *d
+                })
+                .count()
+                == 1
+        })
+        .map(|(s, d)| (s.clone(), d.clone()))
+        .expect("a pair with one flow");
+    m.traffic.volume_state.unfolded.insert(single.0.clone());
+    m.traffic.relayout_volume();
+    m.traffic
+        .volume
+        .select_where(|r| r.src() == single.0.as_slice() && r.dst() == Some(single.1.as_slice()));
+    let cmds = update(&mut m, key('E'));
+    assert!(cmds.is_empty(), "no request");
+    assert!(matches!(m.overlay, Overlay::Explain(_)), "{:?}", m.overlay);
 }
 
 #[test]
 fn volume_scrolls_with_the_table_keys_and_the_wheel_and_keeps_its_order() {
     use crossterm::event::MouseEventKind;
     let mut m = on_volume(80, 24);
-    quiet(&mut m, key('E'));
+    quiet(&mut m, key('z'));
     let n = m.traffic.volume.len();
     assert!(n > 13, "more rows than the panel holds: {n}");
     quiet(&mut m, kc(KeyCode::End));
@@ -1155,7 +1216,7 @@ fn b_weighs_by_bytes_or_says_there_are_none() {
     assert_eq!(m.traffic.volume_state.weight, Weight::Bytes);
     assert_eq!(m.traffic.volume.rows()[0].value(), 8_350_000);
     assert_eq!(selected(&m), src, "the cursor follows its row");
-    assert_eq!(m.traffic.volume.columns[2].title, "bytes");
+    assert_eq!(m.traffic.volume.columns[3].title, "bytes");
     quiet(&mut m, key('b'));
     assert_eq!(m.traffic.volume_state.weight, Weight::Connections);
     if let Some(d) = m.traffic.data.as_mut() {
@@ -1741,6 +1802,7 @@ fn export_of_sections_is_every_peer_as_the_cli_prints_them_folded_or_not() {
     assert_eq!(
         headers,
         [
+            "level",
             "src",
             "dst",
             "conns",
@@ -1751,18 +1813,22 @@ fn export_of_sections_is_every_peer_as_the_cli_prints_them_folded_or_not() {
         ]
     );
     assert_eq!(rows.len(), m.traffic.volume.len());
-    assert!(rows.iter().all(|r| r[1].is_empty()), "folded: sources only");
-    let total: u64 = rows.iter().map(|r| r[2].parse::<u64>().unwrap()).sum();
+    assert!(
+        rows.iter().all(|r| r[0] == "source" && r[2].is_empty()),
+        "folded: sources only"
+    );
+    let total: u64 = rows.iter().map(|r| r[3].parse::<u64>().unwrap()).sum();
     let split: u64 = rows
         .iter()
-        .map(|r| (3..7).map(|i| r[i].parse::<u64>().unwrap()).sum::<u64>())
+        .map(|r| (4..8).map(|i| r[i].parse::<u64>().unwrap()).sum::<u64>())
         .sum();
     assert_eq!(total, split, "the decisions add up to the weight");
     update(&mut m, enter());
     let (_, _, _, rows) = export_cmd(&mut m, "export v.csv");
     assert_eq!(rows.len(), m.traffic.volume.len());
     assert!(
-        rows.iter().any(|r| !r[1].is_empty()),
+        rows.iter()
+            .any(|r| r[0] == "destination" && !r[2].is_empty()),
         "the unfolded destinations"
     );
 }

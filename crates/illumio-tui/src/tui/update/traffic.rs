@@ -505,11 +505,8 @@ pub(super) fn traffic_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
             model.status = model.traffic.auto.toggle();
         }
         KeyCode::Char('w') => return flow_rule_key(model),
-        // Which rule allows or blocks the flow: no request. (On Volume `E`
-        // folds or unfolds every source.)
-        KeyCode::Char('E') if model.traffic.view != TrafficView::Volume => {
-            return explain_key(model);
-        }
+        // Which rule allows or blocks the flow: no request.
+        KeyCode::Char('E') => return explain_key(model),
         // Squelched flows shown or left out: a rebuild, no request.
         KeyCode::Char('M') => model.status = model.traffic.toggle_squelched(),
         // The mark form for the row: marks.toml only, no request.
@@ -692,7 +689,11 @@ pub(super) fn traffic_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
                 model.status = StatusLine::info("no byte counts in this result");
             }
         }
-        KeyCode::Char('E') if model.traffic.view == TrafficView::Volume => {
+        // The fold keys of every foldable view: `Space` one source, `z` all.
+        KeyCode::Char(' ') if model.traffic.view == TrafficView::Volume => {
+            model.traffic.fold_volume(None);
+        }
+        KeyCode::Char('z') if model.traffic.view == TrafficView::Volume => {
             model.traffic.fold_all_volume();
         }
         KeyCode::Char('s') if model.traffic.view == TrafficView::Volume => {
