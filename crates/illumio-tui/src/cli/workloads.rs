@@ -884,7 +884,16 @@ pub async fn select_against(
     // Names spelt as the labels are (`app=ordering` finds `Ordering`, #90),
     // for the request and the local checks alike. The labels list alone
     // does it (one read, cached); a filter with no value reads nothing.
-    let labels_idx = if labels.terms.iter().any(|t| !t.values.is_empty()) {
+    // Values with nothing in common even without case need no list read.
+    let never = {
+        let mut lower = labels.clone();
+        for t in &mut lower.terms {
+            t.key = t.key.to_lowercase();
+            t.values.iter_mut().for_each(|v| *v = v.to_lowercase());
+        }
+        lower.matches_nothing()
+    };
+    let labels_idx = if !never && labels.terms.iter().any(|t| !t.values.is_empty()) {
         let labels_list = ctx.pce.labels(ctx.cache_mode).await?.value;
         Some(pce::NameIndex::new(&labels_list, &[], &[], &[]))
     } else {
