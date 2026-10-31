@@ -121,7 +121,7 @@ async fn check_names_the_newer_release_and_how_to_upgrade() {
     );
     let cache = Cache::load(&env.cache_file()).expect("the cache is written");
     assert_eq!(cache.latest.as_deref(), Some(next().as_str()));
-    assert_eq!(cache.newer.len(), 1);
+    assert_eq!(cache.releases.len(), 2, "every release read");
 
     let a = env
         .cmd(&server.uri())
@@ -173,7 +173,7 @@ async fn check_up_to_date_is_the_latest_and_fields_pick() {
 }
 
 #[tokio::test]
-async fn check_without_github_exits_5_and_bad_flags_send_nothing() {
+async fn check_without_github_exits_4_and_bad_flags_send_nothing() {
     let env = Env::new();
     let server = MockServer::start().await;
     Mock::given(method("GET"))
@@ -185,7 +185,7 @@ async fn check_without_github_exits_5_and_bad_flags_send_nothing() {
         .cmd(&server.uri())
         .args(["update", "check"])
         .assert()
-        .code(5);
+        .code(4);
     let err: Value = serde_json::from_str(stderr(&a).trim()).unwrap();
     assert_eq!(err["error"]["kind"], "network");
     assert!(
@@ -200,8 +200,26 @@ async fn check_without_github_exits_5_and_bad_flags_send_nothing() {
         .cmd("http://127.0.0.1:9")
         .args(["update", "check"])
         .assert()
-        .code(5);
+        .code(4);
     assert!(stderr(&a).contains("cannot reach GitHub"), "{}", stderr(&a));
+    // GitHub's rate limit: exit 5, said plainly.
+    let limited = MockServer::start().await;
+    Mock::given(method("GET"))
+        .respond_with(ResponseTemplate::new(403).insert_header("x-ratelimit-remaining", "0"))
+        .expect(1)
+        .mount(&limited)
+        .await;
+    let a = env
+        .cmd(&limited.uri())
+        .args(["update", "check"])
+        .assert()
+        .code(5);
+    let err: Value = serde_json::from_str(stderr(&a).trim()).unwrap();
+    assert_eq!(err["error"]["kind"], "rate_limited");
+    assert_eq!(
+        err["error"]["message"],
+        "GitHub rate limit reached; try again later"
+    );
     let quiet = silent().await;
     env.cmd(&quiet.uri())
         .args(["update", "check", "--csv"])

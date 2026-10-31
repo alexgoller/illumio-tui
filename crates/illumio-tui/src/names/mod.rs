@@ -127,21 +127,23 @@ pub fn path_from(
     home: Option<&Path>,
     profile: &str,
 ) -> Option<PathBuf> {
+    root_from(xdg_cache_home, home).map(|r| r.join(dir_name(profile)).join(FILE_NAME))
+}
+
+/// `$XDG_CACHE_HOME/illumio-tui`, else `$HOME/.cache/illumio-tui`.
+fn root_from(xdg_cache_home: Option<&Path>, home: Option<&Path>) -> Option<PathBuf> {
     let base = match (xdg_cache_home, home) {
         (Some(x), _) => x.to_path_buf(),
         (None, Some(h)) => h.join(".cache"),
         (None, None) => return None,
     };
-    Some(
-        base.join("illumio-tui")
-            .join(dir_name(profile))
-            .join(FILE_NAME),
-    )
+    Some(base.join("illumio-tui"))
 }
 
-/// [`path_from`] with the environment; on Windows without `HOME`, the
-/// local app data folder.
-pub fn default_path(profile: &str) -> Option<PathBuf> {
+/// The tool's cache directory ([`root_from`] with the environment; on
+/// Windows without `HOME`, the local app data folder): the names caches
+/// and the update check's `update.json` live under it.
+pub fn cache_root() -> Option<PathBuf> {
     let var = |name| {
         std::env::var_os(name)
             .filter(|v| !v.is_empty())
@@ -150,13 +152,14 @@ pub fn default_path(profile: &str) -> Option<PathBuf> {
     let home = var("HOME");
     #[cfg(windows)]
     if var("XDG_CACHE_HOME").is_none() && home.is_none() {
-        return dirs::cache_dir().map(|d| {
-            d.join("illumio-tui")
-                .join(dir_name(profile))
-                .join(FILE_NAME)
-        });
+        return dirs::cache_dir().map(|d| d.join("illumio-tui"));
     }
-    path_from(var("XDG_CACHE_HOME").as_deref(), home.as_deref(), profile)
+    root_from(var("XDG_CACHE_HOME").as_deref(), home.as_deref())
+}
+
+/// The profile's names cache under [`cache_root`].
+pub fn default_path(profile: &str) -> Option<PathBuf> {
+    cache_root().map(|r| r.join(dir_name(profile)).join(FILE_NAME))
 }
 
 /// The profile's file, or `None` when `completion_cache = false` keeps

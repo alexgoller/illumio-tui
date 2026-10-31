@@ -95,7 +95,11 @@ fn the_cache_keeps_the_newer_releases_and_the_attempt_time() {
     let releases = vec![rel(&up.to_string()), rel(CURRENT)];
     let c = Cache::from_fetch(&releases, now);
     assert_eq!(c.latest.as_deref(), Some(up.to_string().as_str()));
-    assert_eq!(c.newer, vec![rel(&up.to_string())]);
+    assert_eq!(
+        c.releases, releases,
+        "every release, for readers of any version"
+    );
+    assert_eq!(c.newer_than(current), vec![rel(&up.to_string())]);
     assert_eq!(c.update_for(current), Some(up));
     assert_eq!(c.update_for(up), None);
     assert!(c.newer_than(up).is_empty());
@@ -110,7 +114,7 @@ fn the_cache_keeps_the_newer_releases_and_the_attempt_time() {
     let later = ts("2026-11-03T10:00:00Z");
     let f = Cache::failed(Some(c.clone()), later);
     assert_eq!((f.attempted_at, f.fetched_at), (later, Some(now)));
-    assert_eq!(f.newer, c.newer);
+    assert_eq!(f.releases, c.releases);
     assert!(f.attempted_recently(later) && !f.fetched_recently(later));
     let first = Cache::failed(None, later);
     assert_eq!((first.fetched_at, first.latest), (None, None));
@@ -124,14 +128,94 @@ fn the_cache_keeps_the_newer_releases_and_the_attempt_time() {
 }
 
 #[test]
-fn a_version_change_is_noted_once_and_a_first_start_says_nothing() {
+fn an_older_binary_reads_every_release_newer_than_itself() {
+    // 0.5.9 fetched; within the day a 0.5.7 binary sharing the cache asks.
+    let c = Cache::from_fetch(
+        &[rel("0.5.10"), rel("0.5.9"), rel("0.5.8"), rel("0.5.7")],
+        ts("2026-11-01T10:00:00Z"),
+    );
+    let names = |r: Vec<Release>| r.into_iter().map(|r| r.version).collect::<Vec<_>>();
+    assert_eq!(
+        names(c.newer_than(v("0.5.7"))),
+        ["0.5.10", "0.5.9", "0.5.8"]
+    );
+    assert_eq!(names(c.newer_than(v("0.5.9"))), ["0.5.10"]);
+    // A cache an earlier build wrote (`newer`) still reads.
+    let old: Cache = serde_json::from_value(serde_json::json!({
+        "fetched_at": "2026-11-01T10:00:00Z", "attempted_at": "2026-11-01T10:00:00Z",
+        "latest": "0.5.9", "newer": [rel("0.5.9")]
+    }))
+    .unwrap();
+    assert_eq!(old.releases, vec![rel("0.5.9")]);
+}
+
+#[test]
+fn an_upgrade_is_noted_until_shown_and_a_first_start_says_nothing() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("illumio-tui/last-version");
     assert_eq!(note_start(&path, "0.5.8"), None, "fresh install");
     assert_eq!(std::fs::read_to_string(&path).unwrap(), "0.5.8\n");
     assert_eq!(note_start(&path, "0.5.8"), None);
     assert_eq!(note_start(&path, "0.5.9"), Some("0.5.9".into()));
+    // Not recorded before it was shown (a start that never got `ready`).
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), "0.5.8\n");
+    assert_eq!(note_start(&path, "0.5.9"), Some("0.5.9".into()));
+    note_seen(&path, "0.5.9").unwrap();
     assert_eq!(note_start(&path, "0.5.9"), None, "once");
+}
+
+#[test]
+fn a_downgrade_says_nothing_and_is_recorded() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("last-version");
+    std::fs::write(&path, "0.5.9\n").unwrap();
+    assert_eq!(note_start(&path, "0.5.8"), None);
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), "0.5.8\n");
+    std::fs::write(&path, "garbage").unwrap();
+    assert_eq!(note_start(&path, "0.5.8"), None);
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), "0.5.8\n");
+}
+
+#[cfg(unix)]
+#[test]
+fn a_state_dir_that_cannot_be_written_never_nags() {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = tempfile::tempdir().unwrap();
+    let state = dir.path().join("state");
+    std::fs::create_dir(&state).unwrap();
+    let path = state.join("last-version");
+    std::fs::write(&path, "0.5.8\n").unwrap();
+    std::fs::set_permissions(&state, std::fs::Permissions::from_mode(0o555)).unwrap();
+    // Root ignores the mode: nothing to prove there.
+    let writable = std::fs::File::create(state.join("probe")).is_ok();
+    let said = note_start(&path, "0.5.9");
+    std::fs::set_permissions(&state, std::fs::Permissions::from_mode(0o755)).unwrap();
+    if !writable {
+        assert_eq!(said, None, "it would say it at every start");
+    }
+}
+
+#[test]
+fn concurrent_saves_never_leave_a_broken_cache() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("update.json");
+    let threads: Vec<_> = (0..8)
+        .map(|i| {
+            let path = path.clone();
+            std::thread::spawn(move || {
+                let body: Vec<Release> = (0..200).map(|n| rel(&format!("0.{i}.{n}"))).collect();
+                for _ in 0..5 {
+                    Cache::from_fetch(&body, ts("2026-11-01T10:00:00Z"))
+                        .save(&path)
+                        .unwrap();
+                }
+            })
+        })
+        .collect();
+    for t in threads {
+        t.join().unwrap();
+    }
+    assert!(Cache::load(&path).is_some(), "the last whole write");
 }
 
 #[test]
@@ -217,12 +301,12 @@ fn the_install_follows_the_binary_path() {
     );
     assert_eq!(
         Install::Winget.upgrade_hint("0.5.9"),
-        "winget upgrade illumio-tui"
+        "winget upgrade AlexGoller.IllumioTUI"
     );
     assert!(
         Install::Msi
             .upgrade_hint("0.5.9")
-            .starts_with("winget upgrade illumio-tui")
+            .starts_with("winget upgrade AlexGoller.IllumioTUI")
     );
     let page = "https://github.com/alexgoller/illumio-tui/releases/tag/v0.5.9";
     for i in [Install::Msi, Install::Package, Install::Other] {
@@ -280,4 +364,117 @@ async fn a_failed_startup_check_shows_nothing_and_waits_a_day() {
     );
     let c = Cache::load(&path).unwrap();
     assert_eq!((c.fetched_at, c.latest), (None, None));
+}
+
+#[tokio::test]
+async fn a_failed_startup_check_still_shows_what_the_cache_knew() {
+    use wiremock::matchers::method;
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .respond_with(ResponseTemplate::new(500))
+        .expect(1)
+        .mount(&server)
+        .await;
+    let current = Version::current();
+    let up = Version(current.0, current.1, current.2 + 1);
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("update.json");
+    // Three days old: stale, so it asks, fails, and keeps the hint.
+    Cache::from_fetch(
+        &[rel(&up.to_string())],
+        jiff::Timestamp::now() - jiff::SignedDuration::from_hours(72),
+    )
+    .save(&path)
+    .unwrap();
+    assert_eq!(startup_check(&server.uri(), &path).await, Some(up));
+    assert_eq!(
+        Cache::load(&path).unwrap().releases,
+        vec![rel(&up.to_string())]
+    );
+}
+
+#[tokio::test]
+async fn a_rate_limited_github_says_so_and_keeps_the_cache() {
+    use wiremock::matchers::method;
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+    for status in [403, 429] {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .respond_with(ResponseTemplate::new(status).insert_header("x-ratelimit-remaining", "0"))
+            .expect(1)
+            .mount(&server)
+            .await;
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("update.json");
+        let old = Cache::from_fetch(&[rel("0.5.9")], ts("2026-10-01T10:00:00Z"));
+        old.save(&path).unwrap();
+        let e = fetch_and_record(&server.uri(), Some(&path))
+            .await
+            .unwrap_err();
+        assert!(e.rate_limited, "{status}");
+        assert_eq!(e.message, "GitHub rate limit reached; try again later");
+        let kept = Cache::load(&path).unwrap();
+        assert_eq!(
+            (kept.latest, kept.releases),
+            (old.latest.clone(), old.releases.clone())
+        );
+    }
+    // A 403 that is not the rate limit is just an answer.
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .respond_with(ResponseTemplate::new(403))
+        .mount(&server)
+        .await;
+    let e = fetch(&server.uri()).await.unwrap_err();
+    assert!(!e.rate_limited && e.message.contains("HTTP 403"), "{e}");
+}
+
+#[tokio::test]
+async fn one_odd_entry_does_not_lose_the_others() {
+    use wiremock::matchers::method;
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([
+            {"tag_name": null, "body": "x"},
+            {"body": "no tag"},
+            {"tag_name": "v0.5.9", "body": "nine", "draft": false, "prerelease": false}
+        ])))
+        .mount(&server)
+        .await;
+    let r = fetch(&server.uri()).await.unwrap();
+    assert_eq!(
+        r.iter().map(|r| r.version.as_str()).collect::<Vec<_>>(),
+        ["0.5.9"]
+    );
+}
+
+#[tokio::test]
+async fn an_answer_over_2_mb_is_refused() {
+    use wiremock::matchers::method;
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+    let server = MockServer::start().await;
+    let huge = format!(
+        "[{{\"tag_name\": \"v0.5.9\", \"body\": \"{}\"}}]",
+        "x".repeat(MAX_BODY)
+    );
+    Mock::given(method("GET"))
+        .respond_with(ResponseTemplate::new(200).set_body_string(huge))
+        .mount(&server)
+        .await;
+    let e = fetch(&server.uri()).await.unwrap_err();
+    assert!(e.message.contains("over 2 MB"), "{e}");
+}
+
+#[tokio::test]
+async fn an_unreachable_github_names_the_url_once() {
+    let e = fetch("http://127.0.0.1:9").await.unwrap_err();
+    assert!(!e.rate_limited);
+    assert!(
+        e.message
+            .starts_with("cannot reach GitHub (http://127.0.0.1:9/repos/"),
+        "{e}"
+    );
+    assert_eq!(e.message.matches("127.0.0.1:9").count(), 1, "{e}");
 }

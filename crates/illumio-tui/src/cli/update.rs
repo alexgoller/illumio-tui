@@ -85,7 +85,10 @@ pub async fn run_update(global: &GlobalArgs, cmd: &UpdateCmd) -> Result<(), CliE
     let path = updates::cache_path();
     let (releases, cache) = updates::fetch_and_record(&updates::base_url(), path.as_deref())
         .await
-        .map_err(CliError::Unreachable)?;
+        .map_err(|e| match e.rate_limited {
+            true => CliError::UpdateRateLimited(e.message),
+            false => CliError::Unreachable(e.message),
+        })?;
     let current = Version::current();
     let latest = releases.first().map(|r| r.version.clone());
     let newer = cache.update_for(current);

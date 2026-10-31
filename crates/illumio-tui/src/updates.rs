@@ -17,6 +17,8 @@ pub const CURRENT: &str = env!("CARGO_PKG_VERSION");
 /// Where releases are read, unless [`URL_ENV`] says otherwise.
 pub const DEFAULT_BASE_URL: &str = "https://api.github.com";
 pub const REPO: &str = "alexgoller/illumio-tui";
+/// The winget package id.
+pub const WINGET_ID: &str = "AlexGoller.IllumioTUI";
 /// Replaces [`DEFAULT_BASE_URL`] (tests point it at a mock server).
 pub const URL_ENV: &str = "ILLUMIO_TUI_UPDATE_URL";
 /// Set (to anything but a false value), the TUI checks nothing at startup.
@@ -24,6 +26,8 @@ pub const NO_CHECK_ENV: &str = "ILLUMIO_TUI_NO_UPDATE_CHECK";
 /// How long a fetch (or a failed attempt) stands.
 pub const FRESH_FOR: Duration = Duration::from_secs(24 * 60 * 60);
 pub const TIMEOUT: Duration = Duration::from_secs(3);
+/// The most of an answer read: 30 releases' notes are far less.
+pub const MAX_BODY: usize = 2 * 1024 * 1024;
 /// The CHANGELOG at build time: this version's notes and every older one.
 pub const CHANGELOG: &str = include_str!("../../../CHANGELOG.md");
 
@@ -88,7 +92,9 @@ pub fn release_url(version: &str) -> String {
 /// What GitHub's release list holds that we read.
 #[derive(Debug, Deserialize)]
 struct GithubRelease {
-    tag_name: String,
+    /// Optional: one odd entry must not lose the other 29.
+    #[serde(default)]
+    tag_name: Option<String>,
     #[serde(default)]
     body: Option<String>,
     #[serde(default)]
@@ -99,46 +105,99 @@ struct GithubRelease {
     published_at: Option<String>,
 }
 
+/// Why the release list could not be read: the message for the user,
+/// and whether GitHub's rate limit is why.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FetchError {
+    pub message: String,
+    pub rate_limited: bool,
+}
+
+impl FetchError {
+    fn new(message: String) -> Self {
+        Self {
+            message,
+            rate_limited: false,
+        }
+    }
+}
+
+impl std::fmt::Display for FetchError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.message)
+    }
+}
+
+pub const RATE_LIMITED: &str = "GitHub rate limit reached; try again later";
+
 /// The published releases at `base`, newest first; drafts, prereleases
-/// and tags that are no `vMAJOR.MINOR.PATCH` left out. The error is the
-/// message for the user.
-pub async fn fetch(base: &str) -> Result<Vec<Release>, String> {
+/// and tags that are no `vMAJOR.MINOR.PATCH` left out. At most
+/// [`MAX_BODY`] of the answer is read.
+pub async fn fetch(base: &str) -> Result<Vec<Release>, FetchError> {
     let http = reqwest::Client::builder()
         .timeout(TIMEOUT)
         .user_agent(concat!("illumio-tui/", env!("CARGO_PKG_VERSION")))
         .build()
-        .map_err(|e| format!("cannot reach GitHub: {e}"))?;
+        .map_err(|e| FetchError::new(format!("cannot reach GitHub: {e}")))?;
     let url = format!("{base}/repos/{REPO}/releases?per_page=30");
-    let resp = http
+    let unreachable = |e: reqwest::Error| {
+        FetchError::new(format!("cannot reach GitHub ({url}): {}", cause_of(e)))
+    };
+    let mut resp = http
         .get(&url)
         .header("Accept", "application/vnd.github+json")
         .send()
         .await
-        .map_err(|e| format!("cannot reach GitHub ({url}): {}", error_chain(&e)))?;
-    let status = resp.status();
-    if !status.is_success() {
-        return Err(format!(
-            "GitHub answered HTTP {} for {url}",
-            status.as_u16()
-        ));
+        .map_err(unreachable)?;
+    let status = resp.status().as_u16();
+    let exhausted = resp
+        .headers()
+        .get("x-ratelimit-remaining")
+        .is_some_and(|v| v.as_bytes() == b"0");
+    if status == 429 || (status == 403 && exhausted) {
+        return Err(FetchError {
+            message: RATE_LIMITED.into(),
+            rate_limited: true,
+        });
     }
-    let list: Vec<GithubRelease> = resp
-        .json()
-        .await
-        .map_err(|e| format!("unexpected answer from GitHub ({url}): {e}"))?;
+    if !(200..300).contains(&status) {
+        return Err(FetchError::new(format!(
+            "GitHub answered HTTP {status} for {url}"
+        )));
+    }
+    let too_big = || {
+        FetchError::new(format!(
+            "unexpected answer from GitHub ({url}): over {} MB",
+            MAX_BODY / (1024 * 1024)
+        ))
+    };
+    if resp.content_length().is_some_and(|n| n > MAX_BODY as u64) {
+        return Err(too_big());
+    }
+    let mut body = Vec::new();
+    while let Some(chunk) = resp.chunk().await.map_err(unreachable)? {
+        if body.len() + chunk.len() > MAX_BODY {
+            return Err(too_big());
+        }
+        body.extend_from_slice(&chunk);
+    }
+    let list: Vec<GithubRelease> = serde_json::from_slice(&body)
+        .map_err(|e| FetchError::new(format!("unexpected answer from GitHub ({url}): {e}")))?;
     Ok(from_github(list))
 }
 
-/// An error with its causes (reqwest's top line alone says little).
-fn error_chain(e: &dyn std::error::Error) -> String {
-    let mut s = e.to_string();
-    let mut cause = e.source();
-    while let Some(c) = cause {
-        s.push_str(": ");
-        s.push_str(&c.to_string());
-        cause = c.source();
+/// What went wrong, without reqwest's repeat of the URL: a timeout, else
+/// the innermost cause (`Connection refused (os error 61)`).
+fn cause_of(e: reqwest::Error) -> String {
+    if e.is_timeout() {
+        return format!("no answer within {} s", TIMEOUT.as_secs());
     }
-    s
+    let e = e.without_url();
+    let mut last: &dyn std::error::Error = &e;
+    while let Some(c) = last.source() {
+        last = c;
+    }
+    last.to_string()
 }
 
 fn from_github(list: Vec<GithubRelease>) -> Vec<Release> {
@@ -146,7 +205,7 @@ fn from_github(list: Vec<GithubRelease>) -> Vec<Release> {
         .into_iter()
         .filter(|r| !r.draft && !r.prerelease)
         .filter_map(|r| {
-            let v = Version::parse(&r.tag_name)?;
+            let v = Version::parse(r.tag_name.as_deref()?)?;
             Some(Release {
                 version: v.to_string(),
                 date: r
@@ -237,9 +296,11 @@ pub struct Cache {
     pub attempted_at: jiff::Timestamp,
     /// The newest published version the fetch saw.
     pub latest: Option<String>,
-    /// The releases newer than the binary that fetched, with their notes,
-    /// newest first.
-    pub newer: Vec<Release>,
+    /// Every release the fetch read, with its notes, newest first; each
+    /// reader takes those newer than itself (binaries of several versions
+    /// share the cache). `newer` in caches written before 0.5.9.
+    #[serde(alias = "newer")]
+    pub releases: Vec<Release>,
 }
 
 impl Cache {
@@ -255,19 +316,13 @@ impl Cache {
         write_atomic(path, &body)
     }
 
-    /// A fetch that answered: the newest version and what is newer than
-    /// this binary.
+    /// A fetch that answered: the newest version and every release.
     pub fn from_fetch(releases: &[Release], now: jiff::Timestamp) -> Self {
-        let current = Version::current();
         Self {
             fetched_at: Some(now),
             attempted_at: now,
             latest: releases.first().map(|r| r.version.clone()),
-            newer: releases
-                .iter()
-                .filter(|r| r.parsed().is_some_and(|v| v > current))
-                .cloned()
-                .collect(),
+            releases: releases.to_vec(),
         }
     }
 
@@ -282,7 +337,7 @@ impl Cache {
                 fetched_at: None,
                 attempted_at: now,
                 latest: None,
-                newer: Vec::new(),
+                releases: Vec::new(),
             },
         }
     }
@@ -297,10 +352,9 @@ impl Cache {
         self.fetched_at.is_some_and(|t| within_a_day(t, now))
     }
 
-    /// The releases newer than `current` (an older binary's cache may hold
-    /// some that are not).
+    /// The releases newer than `current`, the reader's version.
     pub fn newer_than(&self, current: Version) -> Vec<Release> {
-        self.newer
+        self.releases
             .iter()
             .filter(|r| r.parsed().is_some_and(|v| v > current))
             .cloned()
@@ -322,26 +376,10 @@ fn within_a_day(t: jiff::Timestamp, now: jiff::Timestamp) -> bool {
     (0..FRESH_FOR.as_secs() as i64).contains(&age)
 }
 
-/// `$XDG_CACHE_HOME/illumio-tui/update.json`, else
-/// `$HOME/.cache/illumio-tui/update.json`; on Windows without `HOME`, the
-/// local cache folder. `None` when there is none.
+/// `update.json` in the cache dir the names cache uses
+/// ([`crate::names::cache_root`]). `None` when there is none.
 pub fn cache_path() -> Option<PathBuf> {
-    let var = |name| {
-        std::env::var_os(name)
-            .filter(|v| !v.is_empty())
-            .map(PathBuf::from)
-    };
-    let home = var("HOME");
-    #[cfg(windows)]
-    if var("XDG_CACHE_HOME").is_none() && home.is_none() {
-        return dirs::cache_dir().map(|d| d.join("illumio-tui").join("update.json"));
-    }
-    let base = match (var("XDG_CACHE_HOME"), home) {
-        (Some(x), _) => x,
-        (None, Some(h)) => h.join(".cache"),
-        (None, None) => return None,
-    };
-    Some(base.join("illumio-tui").join("update.json"))
+    crate::names::cache_root().map(|r| r.join("update.json"))
 }
 
 /// `$XDG_DATA_HOME/illumio-tui/last-version` (else
@@ -351,19 +389,37 @@ pub fn last_version_path() -> Option<PathBuf> {
         .and_then(|snapshots| snapshots.parent().map(|d| d.join("last-version")))
 }
 
-/// The TUI's start as `current`: the version it last started as is
-/// replaced, and `Some(current)` returned when that was another one. A
-/// first start (no file) says nothing; a file that cannot be written is
-/// left as it is.
+/// The TUI's start as `current`: `Some(current)` when the version it last
+/// started as is an older one, the notice to show; the file is written
+/// only once it was shown ([`note_seen`]). A first start (no file), a
+/// downgrade or an unreadable version is recorded at once and says
+/// nothing. A file that cannot be rewritten (one attempt, rewriting what
+/// it holds) says nothing either: it would say it again at every start.
 pub fn note_start(path: &Path, current: &str) -> Option<String> {
-    let seen = std::fs::read_to_string(path).ok();
-    let changed = seen
-        .as_deref()
-        .is_some_and(|s| !s.trim().is_empty() && s.trim() != current);
-    if seen.as_deref().map(str::trim) != Some(current) {
-        let _ = write_atomic(path, format!("{current}\n").as_bytes());
+    let now = Version::parse(current)?;
+    let seen = match std::fs::read_to_string(path) {
+        Ok(s) => s,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            let _ = note_seen(path, current);
+            return None;
+        }
+        Err(_) => return None,
+    };
+    match Version::parse(&seen) {
+        Some(v) if v == now => None,
+        Some(v) if v < now => write_atomic(path, seen.as_bytes())
+            .ok()
+            .map(|_| current.to_string()),
+        _ => {
+            let _ = note_seen(path, current);
+            None
+        }
     }
-    changed.then(|| current.to_string())
+}
+
+/// `current` as the version the TUI last started as.
+pub fn note_seen(path: &Path, current: &str) -> std::io::Result<()> {
+    write_atomic(path, format!("{current}\n").as_bytes())
 }
 
 fn write_atomic(path: &Path, body: &[u8]) -> std::io::Result<()> {
@@ -373,7 +429,10 @@ fn write_atomic(path: &Path, body: &[u8]) -> std::io::Result<()> {
         .file_name()
         .map(|n| n.to_string_lossy().into_owned())
         .unwrap_or_default();
-    let tmp = dir.join(format!(".{name}.tmp-{}", std::process::id()));
+    // Unique within the process too: two fetches may write at once.
+    static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let seq = SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let tmp = dir.join(format!(".{name}.tmp-{}-{seq}", std::process::id()));
     let result = (|| {
         let mut f = std::fs::File::create(&tmp)?;
         f.write_all(body)?;
@@ -391,7 +450,7 @@ fn write_atomic(path: &Path, body: &[u8]) -> std::io::Result<()> {
 pub async fn fetch_and_record(
     base: &str,
     path: Option<&Path>,
-) -> Result<(Vec<Release>, Cache), String> {
+) -> Result<(Vec<Release>, Cache), FetchError> {
     let now = jiff::Timestamp::now();
     let result = fetch(base).await;
     let cache = match &result {
@@ -406,15 +465,17 @@ pub async fn fetch_and_record(
 
 /// The TUI's startup check: nothing when the cache was tried within a day;
 /// else one fetch, recorded. The newer version it knows of, from the
-/// fetch or the cache; `None` on any failure.
+/// fetch or, when it fails, what the cache knew.
 pub async fn startup_check(base: &str, path: &Path) -> Option<Version> {
     let now = jiff::Timestamp::now();
     let cached = Cache::load(path);
     if let Some(c) = cached.as_ref().filter(|c| c.attempted_recently(now)) {
         return c.update_for(Version::current());
     }
-    let (_, cache) = fetch_and_record(base, Some(path)).await.ok()?;
-    cache.update_for(Version::current())
+    match fetch_and_record(base, Some(path)).await {
+        Ok((_, cache)) => cache.update_for(Version::current()),
+        Err(_) => cached?.update_for(Version::current()),
+    }
 }
 
 /// The releases newer than this binary, for `news` and `:news`: the
@@ -605,8 +666,8 @@ impl Install {
         match self {
             Install::Homebrew => "brew upgrade illumio-tui".into(),
             Install::Scoop => "scoop update illumio-tui".into(),
-            Install::Winget => "winget upgrade illumio-tui".into(),
-            Install::Msi => format!("winget upgrade illumio-tui, or the MSI from {page}"),
+            Install::Winget => format!("winget upgrade {WINGET_ID}"),
+            Install::Msi => format!("winget upgrade {WINGET_ID}, or the MSI from {page}"),
             Install::Package => {
                 format!("the illumio-tui .deb or .rpm package for {version} from {page}")
             }

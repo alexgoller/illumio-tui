@@ -4,8 +4,9 @@
 //! (`policy impact --fail-on-blocked`), 8 a risky service exposed (`exposure
 //! --fail-on-exposed`), 9 snapshots differ (`snapshot diff
 //! --fail-on-change`), 10 a newer release exists (`update check
-//! --fail-if-outdated`); 5 also when GitHub cannot be reached (`update
-//! check`); 141 stdout closed by its reader (quiet).
+//! --fail-if-outdated`); `update check` exits 4 when GitHub cannot be
+//! reached, 5 when its rate limit is reached; 141 stdout closed by its
+//! reader (quiet).
 use crate::config::ConfigError;
 use crate::marks::MarksError;
 use pce::PceError;
@@ -62,9 +63,12 @@ pub enum CliError {
     #[error("{0}")]
     Outdated(String),
     /// `update check` could not read the releases (no network, a proxy,
-    /// GitHub's answer): exit 5, as a connection the PCE refuses for now.
+    /// GitHub's answer): exit 4, as a PCE connection error.
     #[error("{0}")]
     Unreachable(String),
+    /// `update check` hit GitHub's rate limit: exit 5, as a rate-limited PCE.
+    #[error("{0}")]
+    UpdateRateLimited(String),
     /// `marks.toml`: invalid (exit 2, every problem), locked by another
     /// writer (exit 3), a mark gone (exit 2), unreadable (exit 1).
     #[error("{}", .0.lines().join("; "))]
@@ -96,7 +100,8 @@ impl CliError {
             CliError::Exposed(_) => 8,
             CliError::Changed(_) => 9,
             CliError::Outdated(_) => 10,
-            CliError::Unreachable(_) => 5,
+            CliError::Unreachable(_) => 4,
+            CliError::UpdateRateLimited(_) => 5,
             CliError::Write(e) => write_exit_code(e),
             CliError::Io(_) if self.is_broken_pipe() => BROKEN_PIPE_EXIT,
             CliError::Io(_) | CliError::Other(_) => 1,
@@ -125,6 +130,7 @@ impl CliError {
             CliError::Changed(_) => "snapshots_differ".into(),
             CliError::Outdated(_) => "outdated".into(),
             CliError::Unreachable(_) => "network".into(),
+            CliError::UpdateRateLimited(_) => "rate_limited".into(),
             CliError::Marks(e) => match e {
                 MarksError::Parse(_) => "marks_invalid".into(),
                 MarksError::Locked => "marks_locked".into(),
@@ -212,7 +218,9 @@ mod tests {
         let o = CliError::Outdated("0.5.9 is available".into());
         assert_eq!((o.exit_code(), o.kind().as_str()), (10, "outdated"));
         let u = CliError::Unreachable("cannot reach GitHub".into());
-        assert_eq!((u.exit_code(), u.kind().as_str()), (5, "network"));
+        assert_eq!((u.exit_code(), u.kind().as_str()), (4, "network"));
+        let r = CliError::UpdateRateLimited("GitHub rate limit reached".into());
+        assert_eq!((r.exit_code(), r.kind().as_str()), (5, "rate_limited"));
         assert!(wrapped.to_string().contains("audit"));
     }
 
