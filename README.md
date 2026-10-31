@@ -550,17 +550,21 @@ the full tab row (69 columns) the tabs read `Traf`, `Pol`, `Obj`, `Wl`, `Ev`.
   group, heaviest first, with its full name, its connections (`b`: bytes), a bar and its
   blocked share, nothing folded into "other":
 
-  <!-- real output: illumio-tui, Traffic, v until Volume, Enter on the first source -->
+  <!-- real output from the demo PCE, 2026-10-31, 24h, at 96 columns; destinations cut -->
   ```
-    group                  conns  volume                        blocked
-    pos/Staging             1.8M  ████████████████▒▒▒▒▒▒▒▒▒▒▒▒  61% blocked
-      → ordering/Prod     671.8K  ██████████▒▒▒▒                 40% blocked
-      → payment/Prod      402.1K  ▒▒▒▒▒▒▒▒▒                      100% blocked
-    pos/PCI                 1.7M  ██████████████▓▒▒▒▒▒▒▒▒▒▒▒▒▒  58% blocked · 2% pb
-  ▸ ordering/Production     1.2M  ██████████████████████         0% blocked
+    group                                  conns  volume                            blocked
+  ▸ pos/Staging                             2.3M  ████████████████████████████▒▒▒▒  9% blocked
+      → pos/Staging                         1.5M  ██████████████████▒▒              8% blocked
+      → ad/Production                     537.2K  ██████▒                           1% blocked
+      → soc/Production                    100.0K  █                                 31% blocked
+      → ordering/Production                54.9K  █                                 15% blocked
+      …
+    pos/PCI                                 2.3M  █████████████████████████████▒▒▒  8% blocked
+    ordering/Production                     2.1M  █████████████████████████▒▒▒▒     12% blocked
+    vdi/Users                               2.1M  ███████████████████████████▒▒     5% blocked
   ```
 
-  (illustrative). Bars share one scale, the largest source's, so a destination compares
+  Bars share one scale, the largest source's, so a destination compares
   with the sources; each is split into allowed `█`, potentially blocked `▓` and blocked `▒`
   (unknown `░`) in the decision colours, by bytes when weighed by bytes, and takes the
   width the terminal leaves; `N% blocked` is the blocked share of the connections,
