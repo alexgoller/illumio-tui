@@ -4081,6 +4081,7 @@ fn news_model() -> illumio_tui::tui::model::Model {
             },
         ],
         note: None,
+        warning: None,
     };
     m.overlay = Overlay::News { scroll: 0 };
     m

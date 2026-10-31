@@ -10,9 +10,10 @@ use ratatui::layout::Rect;
 pub struct NewsView {
     /// Newest first.
     pub releases: Vec<Release>,
-    /// Where they came from when it matters: up to date, or GitHub
-    /// unreachable.
+    /// Where they came from, when it matters: up to date.
     pub note: Option<String>,
+    /// Why they may be incomplete (GitHub unreachable): a warning.
+    pub warning: Option<String>,
 }
 
 /// Where the runtime reads releases: `base_url` `None` when the update
@@ -37,13 +38,15 @@ pub async fn load(source: &UpdateSource) -> NewsView {
     let current = Version::current();
     let newer = updates::newer_releases(source.base_url.as_deref(), source.cache.as_deref()).await;
     let releases = updates::select(None, current, &updates::embedded(), &newer.releases);
-    let note = newer.warning.or_else(|| {
-        newer
-            .releases
-            .is_empty()
-            .then(|| format!("illumio-tui {current}: the notes of this version"))
-    });
-    NewsView { releases, note }
+    let note = newer
+        .releases
+        .is_empty()
+        .then(|| format!("illumio-tui {current}: the notes of this version"));
+    NewsView {
+        releases,
+        note,
+        warning: newer.warning,
+    }
 }
 
 /// How a line is drawn.
@@ -87,8 +90,10 @@ pub fn lines(view: &NewsView, width: usize) -> Vec<(LineKind, String)> {
             out.push((kind, format!("{lead}{w}")));
         }
     };
-    if let Some(note) = &view.note {
+    for note in [&view.warning, &view.note].into_iter().flatten() {
         push(LineKind::Dim, 0, "", note);
+    }
+    if view.warning.is_some() || view.note.is_some() {
         push(LineKind::Text, 0, "", "");
     }
     if view.releases.is_empty() && view.note.is_none() {
@@ -111,7 +116,11 @@ pub fn lines(view: &NewsView, width: usize) -> Vec<(LineKind, String)> {
                 continue;
             }
             if fence {
-                push(LineKind::Dim, 2, "  ", line.trim_end());
+                // Its own indentation kept (wrapping trims the text).
+                let code = line.trim_end();
+                let text = code.trim_start();
+                let indent = 2 + code.chars().count() - text.chars().count();
+                push(LineKind::Dim, indent, &" ".repeat(indent), text);
                 continue;
             }
             let trimmed = line.trim_start();
@@ -175,6 +184,7 @@ mod tests {
                 body: body.into(),
             }],
             note: None,
+            warning: None,
         }
     }
 
@@ -201,6 +211,25 @@ mod tests {
         assert_eq!(l[0].0, LineKind::Release);
         assert_eq!(l[1].0, LineKind::Heading);
         assert_eq!(l[6].0, LineKind::Dim);
+    }
+
+    #[test]
+    fn code_keeps_its_indentation() {
+        let v = view("```toml\n[profiles.x]\n    check_updates = false\n```");
+        let l = lines(&v, 60);
+        assert_eq!(l[1].1, "  [profiles.x]");
+        assert_eq!(l[2].1, "      check_updates = false");
+    }
+
+    #[test]
+    fn a_warning_comes_before_the_notes() {
+        let v = NewsView {
+            warning: Some("cannot reach GitHub".into()),
+            ..view("x")
+        };
+        let l = lines(&v, 60);
+        assert_eq!(l[0], (LineKind::Dim, "cannot reach GitHub".to_string()));
+        assert_eq!(l[2].0, LineKind::Release);
     }
 
     #[test]

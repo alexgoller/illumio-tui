@@ -162,6 +162,12 @@ pub fn on_command(model: &mut Model, cmd: Command) -> Vec<Cmd> {
         },
         Command::Snapshot(label) => save_snapshot(model, label),
         Command::News => {
+            // One at a time: a second would be a second request.
+            if model.news_loading {
+                model.status = StatusLine::info("news: still reading the release notes");
+                return Vec::new();
+            }
+            model.news_loading = true;
             model.status = StatusLine::info("news: reading the release notes…");
             vec![Cmd::LoadNews]
         }

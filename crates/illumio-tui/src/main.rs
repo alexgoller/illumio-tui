@@ -18,6 +18,9 @@ fn main() {
         None => rt.block_on(run_tui(cli.global)),
         Some(command) => rt.block_on(run(cli.global, command)),
     };
+    // Never wait for a background task (the TUI's update check, a DNS
+    // lookup with no answer) before exiting: its result is not needed.
+    rt.shutdown_background();
     if let Err(e) = result {
         // `| head` closed stdout: nothing to report, the reader is done.
         if !e.is_broken_pipe() {

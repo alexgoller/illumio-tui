@@ -341,6 +341,9 @@ pub struct Runtime {
     /// Where `:news` and the startup update check read releases. Empty in
     /// every runtime but `run`'s: no test runtime ever asks GitHub.
     pub updates: crate::tui::news::UpdateSource,
+    /// The `last-version` file `Cmd::RecordVersion` writes; `None` in every
+    /// runtime but `run`'s.
+    pub version_state: Option<std::path::PathBuf>,
 }
 
 impl Runtime {
@@ -397,6 +400,7 @@ impl Runtime {
                 switch_tx,
                 switch_rx,
                 updates: crate::tui::news::UpdateSource::default(),
+                version_state: None,
             },
             tx,
         )
@@ -773,6 +777,12 @@ impl Runtime {
                     let view = crate::tui::news::load(&source).await;
                     let _ = tx.send(Msg::NewsLoaded(view));
                 });
+            }
+            // A local file; no runtime but `run`'s has one.
+            Cmd::RecordVersion(version) => {
+                if let Some(path) = &self.version_state {
+                    let _ = crate::updates::note_seen(path, &version);
+                }
             }
             Cmd::SaveSnapshot {
                 dir,
@@ -1767,13 +1777,17 @@ pub async fn run(global: GlobalArgs) -> Result<(), CliError> {
     );
     // The profile's default filters, before anything loads (no request).
     crate::tui::update::apply_defaults(&mut model);
-    // A new version since the last start: said once, at the first `ready`.
-    model.updated_to = crate::updates::last_version_path()
-        .and_then(|p| crate::updates::note_start(&p, crate::updates::CURRENT));
+    // A newer version than at the last start: said once, at the first
+    // `ready`, and recorded then (`Cmd::RecordVersion`).
+    let version_state = crate::updates::last_version_path();
+    model.updated_to = version_state
+        .as_deref()
+        .and_then(|p| crate::updates::note_start(p, crate::updates::CURRENT));
     let check_updates = cfg.check_updates;
     let (mut rt, _tx) = Runtime::with_args(Arc::new(ctx.pce), model, global);
     rt.writer = writer.map(Arc::new);
     rt.write_inputs = Some(inputs);
+    rt.version_state = version_state;
     rt.updates = crate::tui::news::UpdateSource {
         base_url: check_updates.then(crate::updates::base_url),
         cache: crate::updates::cache_path(),

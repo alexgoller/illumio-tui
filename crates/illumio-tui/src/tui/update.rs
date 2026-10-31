@@ -307,20 +307,27 @@ fn on_msg(model: &mut Model, msg: Msg) -> Vec<Cmd> {
                 index_age_secs: age_secs,
             };
             let unresolved = saved::resolve_search(model);
+            // The version notice, once shown, is recorded (not before).
+            let mut shown = None;
             model.status = match model.saved.warning.take() {
                 Some(w) => StatusLine::warn(w),
                 None if !unresolved.is_empty() => {
                     StatusLine::warn(format!("ready · rule search: {}", unresolved.join(", ")))
                 }
                 None => match model.updated_to.take() {
-                    Some(v) => StatusLine::info(format!("updated to {v} · :news for what's new")),
+                    Some(v) => {
+                        let line =
+                            StatusLine::info(format!("updated to {v} · :news for what's new"));
+                        shown = Some(v);
+                        line
+                    }
                     None => StatusLine::info("ready"),
                 },
             };
             model.objects.index_failed = false;
             model.workloads.index_failed = false;
             model.refresh_label_warnings();
-            let mut cmds = Vec::new();
+            let mut cmds: Vec<Cmd> = shown.map(Cmd::RecordVersion).into_iter().collect();
             // Rulesets that arrived before the names could be resolved.
             if !model.policy.raw.is_empty()
                 && model.policy.rulesets.is_empty()
@@ -892,10 +899,11 @@ fn on_msg(model: &mut Model, msg: Msg) -> Vec<Cmd> {
             Vec::new()
         }
         Msg::NewsLoaded(view) => {
+            model.news_loading = false;
             // Never over another overlay (a confirm, a form): it waits.
-            model.status = match (&view.note, model.overlay == Overlay::None) {
+            model.status = match (&view.warning, model.overlay == Overlay::None) {
                 (_, false) => StatusLine::info("news loaded: close this, then :news"),
-                (Some(note), true) if note.contains("GitHub") => StatusLine::warn(note.clone()),
+                (Some(w), true) => StatusLine::warn(w.clone()),
                 _ => StatusLine::info("news · j/k scroll · Esc closes"),
             };
             if model.overlay == Overlay::None {

@@ -17,6 +17,7 @@ fn long_news() -> NewsView {
             body: (0..60).map(|i| format!("- item {i}\n")).collect(),
         }],
         note: None,
+        warning: None,
     }
 }
 
@@ -28,9 +29,36 @@ fn news_asks_the_runtime_and_opens_on_the_answer() {
         vec![Cmd::LoadNews]
     );
     assert!(m.status.text.contains("news"), "{}", m.status.text);
+    // A second one while the first is out asks nothing.
+    assert!(update(&mut m, Msg::Command(Command::News)).is_empty());
+    assert!(m.status.text.contains("still reading"), "{}", m.status.text);
     assert!(update(&mut m, Msg::NewsLoaded(long_news())).is_empty());
     assert_eq!(m.overlay, Overlay::News { scroll: 0 });
     assert_eq!(m.news, long_news());
+    assert!(!m.news_loading);
+    update(&mut m, kc(KeyCode::Esc));
+    assert_eq!(
+        update(&mut m, Msg::Command(Command::News)),
+        vec![Cmd::LoadNews]
+    );
+}
+
+#[test]
+fn a_note_is_information_and_help_lists_the_scroll_keys() {
+    let mut m = model_fixture();
+    let view = NewsView {
+        note: Some("illumio-tui 0.5.8: the notes of this version".into()),
+        ..long_news()
+    };
+    update(&mut m, Msg::NewsLoaded(view));
+    assert_eq!(m.status.kind, StatusKind::Info);
+    update(&mut m, kc(KeyCode::Char('?')));
+    assert_eq!(
+        crate::tui::help::HelpContext::of(&m),
+        crate::tui::help::HelpContext::News
+    );
+    let out = render_to_string(&m, 80, 24);
+    assert!(out.contains("scroll a long text"), "{out}");
 }
 
 #[test]
@@ -76,7 +104,8 @@ fn an_unreachable_github_is_a_warning() {
     let mut m = model_fixture();
     let view = NewsView {
         releases: Vec::new(),
-        note: Some("cannot reach GitHub: timeout; showing only the built-in notes".into()),
+        note: None,
+        warning: Some("cannot reach GitHub: timeout; showing only the built-in notes".into()),
     };
     update(&mut m, Msg::NewsLoaded(view));
     assert_eq!(m.status.kind, StatusKind::Warn);
@@ -102,9 +131,15 @@ fn updated_to_is_said_once_at_the_first_ready() {
         index: fixture_index(),
         age_secs: 0,
     };
-    update(&mut m, ready());
+    let cmds = update(&mut m, ready());
     assert_eq!(m.status.text, "updated to 0.5.8 · :news for what's new");
     assert_eq!(m.status.kind, StatusKind::Info);
-    update(&mut m, ready());
+    // Recorded once shown, not before.
+    assert!(
+        cmds.contains(&Cmd::RecordVersion("0.5.8".into())),
+        "{cmds:?}"
+    );
+    let cmds = update(&mut m, ready());
     assert_eq!(m.status.text, "ready");
+    assert!(!cmds.iter().any(|c| matches!(c, Cmd::RecordVersion(_))));
 }

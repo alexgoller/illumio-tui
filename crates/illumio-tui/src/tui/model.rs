@@ -928,6 +928,8 @@ pub struct Model {
     pub updated_to: Option<String>,
     /// `:news`' release notes.
     pub news: crate::tui::news::NewsView,
+    /// A `:news` is being read: another waits for it.
+    pub news_loading: bool,
 }
 
 impl Model {
@@ -1020,6 +1022,7 @@ impl Model {
             update_available: None,
             updated_to: None,
             news: crate::tui::news::NewsView::default(),
+            news_loading: false,
         }
     }
 

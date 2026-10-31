@@ -84,6 +84,7 @@ pub const HELP_GROUPS: &[HelpGroup] = &[
         lines: &[
             key("?", "this help"),
             key("Esc / q", "back"),
+            key("j/k g/G", "scroll a long text (:news): ^d/^u Space PgUp"),
             key("Ctrl-C", "quit"),
         ],
     },
@@ -690,6 +691,8 @@ pub enum HelpContext {
     Marks,
     /// `:readiness` and the enforcement overlay.
     Enforce,
+    /// `:news`: a long text, its scroll keys.
+    News,
 }
 
 impl HelpContext {
@@ -712,6 +715,7 @@ impl HelpContext {
             HelpContext::Pending => "Pending",
             HelpContext::Marks => "Marks",
             HelpContext::Enforce => "Enforce",
+            HelpContext::News => "News",
         }
     }
 
@@ -736,6 +740,7 @@ impl HelpContext {
             HelpContext::Pending => &[T::Pending, T::Overlay],
             HelpContext::Marks => &[T::Marks, T::Overlay],
             HelpContext::Enforce => &[T::Enforce, T::Overlay],
+            HelpContext::News => &[T::Overlay],
         }
     }
 
@@ -754,6 +759,7 @@ impl HelpContext {
             Overlay::Pending | Overlay::Impact => return HelpContext::Pending,
             Overlay::Marks => return HelpContext::Marks,
             Overlay::Readiness | Overlay::Enforce => return HelpContext::Enforce,
+            Overlay::News { .. } => return HelpContext::News,
             _ => {}
         }
         match model.screen {
@@ -1079,7 +1085,7 @@ mod tests {
         }
     }
 
-    const CONTEXTS: [(HelpContext, &str); 16] = [
+    const CONTEXTS: [(HelpContext, &str); 17] = [
         (HelpContext::Flows, "Flows"),
         (HelpContext::AppToApp, "App-to-app"),
         (HelpContext::Mesh, "Mesh"),
@@ -1096,6 +1102,7 @@ mod tests {
         (HelpContext::Pending, "Pending"),
         (HelpContext::Marks, "Marks"),
         (HelpContext::Enforce, "Enforce"),
+        (HelpContext::News, "Overlay"),
     ];
 
     #[test]
@@ -1110,7 +1117,13 @@ mod tests {
             });
             let overlay = matches!(
                 ctx,
-                C::EventDetail | C::AppOverlay | C::Generator | C::Pending | C::Marks | C::Enforce
+                C::EventDetail
+                    | C::AppOverlay
+                    | C::Generator
+                    | C::Pending
+                    | C::Marks
+                    | C::Enforce
+                    | C::News
             );
             let shared = if overlay { "Overlay" } else { "Everywhere" };
             assert_eq!(last_heading, Some(shared), "{ctx:?}");

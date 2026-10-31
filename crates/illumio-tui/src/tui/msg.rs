@@ -436,6 +436,9 @@ pub enum Cmd {
     /// (never the PCE), and the built-in CHANGELOG; answered with
     /// `Msg::NewsLoaded`.
     LoadNews,
+    /// The `updated to` notice was shown: record this version as the one
+    /// the TUI last started as (a local file, `Runtime::version_state`).
+    RecordVersion(String),
     /// `:snapshot`: the snapshot reads (cached), then the file in `dir`;
     /// answered with `Msg::SnapshotSaved`.
     SaveSnapshot {
@@ -543,6 +546,7 @@ impl PartialEq for Cmd {
             (Cmd::Connect, Cmd::Connect)
             | (Cmd::Quit, Cmd::Quit)
             | (Cmd::LoadNews, Cmd::LoadNews) => true,
+            (Cmd::RecordVersion(a), Cmd::RecordVersion(b)) => a == b,
             (Cmd::LoadIndex(a), Cmd::LoadIndex(b)) => a == b,
             (
                 Cmd::RunQuery {
