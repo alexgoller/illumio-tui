@@ -547,8 +547,8 @@ payment/Production,payment/Production,8080/tcp,7,70438,0,0,0,7,0,0,70438,0</code
             <tr><td>1</td><td>generic failure</td><td>I/O, a record that could not be rewritten</td></tr>
             <tr><td>2</td><td>arguments or configuration</td><td>an unknown label, a 30-day window without <code>--yes</code>, a missing <code>--confirm-count</code></td></tr>
             <tr><td>3</td><td>authentication</td><td>a wrong key or secret</td></tr>
-            <tr><td>4</td><td>PCE error</td><td>a failed request, an incomplete write</td></tr>
-            <tr><td>5</td><td>rate limited, or GitHub unreachable</td><td>429 / 503 after backoff; <code>update check</code> without a network</td></tr>
+            <tr><td>4</td><td>PCE error, or GitHub unreachable</td><td>a failed request, an incomplete write; <code>update check</code> without a network</td></tr>
+            <tr><td>5</td><td>rate limited</td><td>429 / 503 after backoff; GitHub&rsquo;s rate limit for <code>update check</code></td></tr>
             <tr><td>6</td><td>write refused</td><td>writes not enabled; <code>enforce</code> on an app that is not ready</td></tr>
             <tr><td>7</td><td>blocked since enforcement, or would block</td><td><code>enforce --watch</code> found blocked flows; <code>policy impact --fail-on-blocked</code> found flows the draft would newly block (<code>would_block</code>)</td></tr>
             <tr><td>8</td><td>exposed</td><td><code>exposure --fail-on-exposed</code> found a risky service allowed from outside its destination&rsquo;s group</td></tr>
@@ -1088,7 +1088,7 @@ upgrade: brew upgrade illumio-tui
 <span class="p">$ </span>illumio-tui update check --fail-if-outdated     <span class="c"># the cron or CI one-liner: exit 10 when a newer release is out</span>
 <span class="p">$ </span>illumio-tui news 0.5.6.. --json | jq -r '.data[].version'</code></pre>
       <!-- real output: illumio-tui update check -->
-      <p>A weekly mail with the notes, only when there is something new (exit 10; no network is exit 5 and stays quiet):</p>
+      <p>A weekly mail with the notes, only when there is something new (exit 10; no network, exit 4, stays quiet):</p>
 <pre class="wrap"><code>0 9 * * 1 illumio-tui update check --fail-if-outdated &gt;/dev/null 2&gt;&amp;1; [ $? -eq 10 ] &amp;&amp; illumio-tui news | mail -s "illumio-tui update" alex@ryte.de</code></pre>
       <p>One request, <code>GET https://api.github.com/repos/alexgoller/illumio-tui/releases?per_page=30</code>: unauthenticated, 3&nbsp;s, through your proxy variables, drafts and prereleases left out; never the PCE, never its credentials. The answer is cached for a day in <code>$XDG_CACHE_HOME/illumio-tui/update.json</code>: <code>update check</code> always asks, <code>news</code> reads the cache while it is fresh, and no other command goes online for this. <code>--json</code> follows the schemas <code>update-check</code> and <code>news</code>. The TUI&rsquo;s once-a-day check reads the same cache; turn it off with <code>check_updates = false</code> at the top of <code>config.toml</code> or <code>ILLUMIO_TUI_NO_UPDATE_CHECK=1</code>.</p>
     </article>

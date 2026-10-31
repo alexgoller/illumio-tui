@@ -336,8 +336,8 @@ integers (`--human` with `--json` is accepted and changes nothing). JSON is made
 | 1 | generic failure |
 | 2 | arguments or configuration (an unknown label, an expensive query without `--yes`, a missing `--confirm-count`) |
 | 3 | authentication |
-| 4 | PCE error (a failed request, an incomplete write) |
-| 5 | rate limited; GitHub unreachable (`update check`) |
+| 4 | PCE error (a failed request, an incomplete write); GitHub unreachable (`update check`) |
+| 5 | rate limited (the PCE, or GitHub for `update check`) |
 | 6 | write refused (writes not enabled; `enforce` on an app that is not ready) |
 | 7 | flows blocked since an enforcement (`enforce --watch`), or flows the draft would newly block (`policy impact --fail-on-blocked`) |
 | 8 | a risky service exposed (`exposure --fail-on-exposed`) |
@@ -1201,7 +1201,8 @@ app that is not ready), 7 flows blocked since an enforcement (`enforce --watch`,
 --fail-on-blocked`, `would_block`), 8 a risky service exposed (`exposure --fail-on-exposed`,
 `exposed`), 9 snapshots differ (`snapshot diff --fail-on-change`, `snapshots_differ`), 10 a newer
 release is out (`update check --fail-if-outdated`, `outdated`), 141 stdout closed by its reader
-(`| head`; quiet, no error). `update check` exits 5 (`network`) when GitHub cannot be reached.
+(`| head`; quiet, no error). `update check` exits 4 (`network`) when GitHub cannot be reached and 5 (`rate_limited`)
+when GitHub's rate limit is reached.
 
 `--csv` (beside `--table` and `--json`, exclusive with both) prints the same table as RFC 4180
 CSV for spreadsheets: a header row, `,` separators, quotes only around cells holding `,`, `"`
@@ -2090,17 +2091,18 @@ a profile from the config file: with `--env-file` or an env-only connection ther
 <!-- real output: illumio-tui update check -->
 or `illumio-tui 0.5.8 is the latest`. The upgrade line follows how this binary was installed,
 from its path: Homebrew `brew upgrade illumio-tui`, Scoop `scoop update illumio-tui`, winget
-`winget upgrade illumio-tui`, the MSI `winget upgrade illumio-tui` or the release page, a
+`winget upgrade AlexGoller.IllumioTUI`, the MSI `winget upgrade AlexGoller.IllumioTUI` or the release page, a
 `.deb`/`.rpm` package or anything else the release page. There is no self-update: the package
 manager installs it. `--json` prints `{current, latest, outdated, install, upgrade,
 release_url, checked_at}` (schema `update-check`, `--fields` works); `--fail-if-outdated` exits
-10 when a newer release is out, after the report; GitHub unreachable exits 5. The one-liner for
+10 when a newer release is out, after the report; GitHub unreachable exits 4, GitHub's rate limit (60 requests an hour without a token) exits 5
+with `GitHub rate limit reached; try again later`. The one-liner for
 cron or CI is
 
     illumio-tui update check --fail-if-outdated
 
 and a weekly mail with the notes, only when there is something new (exit 10; a network
-failure, exit 5, stays quiet):
+failure, exit 4, stays quiet):
 
     0 9 * * 1 illumio-tui update check --fail-if-outdated >/dev/null 2>&1; [ $? -eq 10 ] && illumio-tui news | mail -s "illumio-tui update" alex@ryte.de
 
