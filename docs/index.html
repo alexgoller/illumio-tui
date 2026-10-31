@@ -1087,7 +1087,7 @@ illumio-tui 0.5.9 is available (you have 0.5.8)
 upgrade: brew upgrade illumio-tui
 <span class="p">$ </span>illumio-tui update check --fail-if-outdated     <span class="c"># the cron or CI one-liner: exit 10 when a newer release is out</span>
 <span class="p">$ </span>illumio-tui news 0.5.6.. --json | jq -r '.data[].version'</code></pre>
-      <!-- real output: illumio-tui update check -->
+      <!-- checked against GitHub and a fake 0.5.9, 2026-10-31 -->
       <p>A weekly mail with the notes, only when there is something new (exit 10; no network, exit 4, stays quiet):</p>
 <pre class="wrap"><code>0 9 * * 1 illumio-tui update check --fail-if-outdated &gt;/dev/null 2&gt;&amp;1; [ $? -eq 10 ] &amp;&amp; illumio-tui news | mail -s "illumio-tui update" alex@ryte.de</code></pre>
       <p>One request, <code>GET https://api.github.com/repos/alexgoller/illumio-tui/releases?per_page=30</code>: unauthenticated, 3&nbsp;s, through your proxy variables, drafts and prereleases left out; never the PCE, never its credentials. The answer is cached for a day in <code>$XDG_CACHE_HOME/illumio-tui/update.json</code>: <code>update check</code> always asks, <code>news</code> reads the cache while it is fresh, and no other command goes online for this. <code>--json</code> follows the schemas <code>update-check</code> and <code>news</code>. The TUI&rsquo;s once-a-day check reads the same cache; turn it off with <code>check_updates = false</code> at the top of <code>config.toml</code> or <code>ILLUMIO_TUI_NO_UPDATE_CHECK=1</code>.</p>

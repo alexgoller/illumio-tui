@@ -2088,7 +2088,7 @@ a profile from the config file: with `--env-file` or an env-only connection ther
     illumio-tui 0.5.9 is available (you have 0.5.8)
     upgrade: brew upgrade illumio-tui
 
-<!-- real output: illumio-tui update check -->
+<!-- checked against GitHub and a fake 0.5.9, 2026-10-31 -->
 or `illumio-tui 0.5.8 is the latest`. The upgrade line follows how this binary was installed,
 from its path: Homebrew `brew upgrade illumio-tui`, Scoop `scoop update illumio-tui`, winget
 `winget upgrade AlexGoller.IllumioTUI`, the MSI `winget upgrade AlexGoller.IllumioTUI` or the release page, a
