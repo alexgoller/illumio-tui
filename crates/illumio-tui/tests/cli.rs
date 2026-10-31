@@ -613,6 +613,28 @@ async fn workloads_label_ignores_case_and_ambiguity_is_exit_2() {
     assert_eq!(out["meta"]["local_filter"], json!(["labels !ROLE=DB"]));
     server.verify().await;
     server.reset().await;
+    // Applied here alone, the filter is spelt from the answer's own labels:
+    // no labels list is read (none is mounted).
+    Mock::given(method("GET"))
+        .and(path("/api/v2/orgs/5/workloads"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_string(include_str!("../../../fixtures/workloads.json"))
+                .insert_header("Content-Type", "application/json"),
+        )
+        .expect(1)
+        .mount(&server)
+        .await;
+    let out = stdout_json(
+        cmd(&server)
+            .args(["workloads", "--label", "!ROLE=DB"])
+            .assert()
+            .success(),
+    );
+    assert_eq!(out["meta"]["api_calls"], 1);
+    assert_eq!(out["data"].as_array().unwrap().len(), 3);
+    server.verify().await;
+    server.reset().await;
     // Two labels differing in case under one key.
     let labels = r#"[
         {"href":"/orgs/5/labels/1","key":"app","value":"Web"},

@@ -882,9 +882,11 @@ pub async fn select_against(
     let labels = LabelFilter::from_terms(&args.labels)
         .map_err(|e| CliError::Args(format!("--label {e}")))?;
     // Names spelt as the labels are (`app=ordering` finds `Ordering`, #90),
-    // for the request and the local checks alike. The labels list alone
-    // does it (one read, cached); a filter with no value reads nothing.
-    // Values with nothing in common even without case need no list read.
+    // for the request and the local checks alike. The request's terms are
+    // looked up in the labels list (the one read, cached); a filter applied
+    // here alone reads nothing more: it is spelt after the answer, from the
+    // labels its workloads carry. Values with nothing in common even
+    // without case need no request.
     let never = {
         let mut lower = labels.clone();
         for t in &mut lower.terms {
@@ -893,7 +895,7 @@ pub async fn select_against(
         }
         lower.matches_nothing()
     };
-    let labels_idx = if !never && labels.terms.iter().any(|t| !t.values.is_empty()) {
+    let labels_idx = if !against && !never && labels.terms.iter().any(|t| !t.negate && !t.none) {
         let labels_list = ctx.pce.labels(ctx.cache_mode).await?.value;
         Some(pce::NameIndex::new(&labels_list, &[], &[], &[]))
     } else {
@@ -901,7 +903,7 @@ pub async fn select_against(
     };
     // The terms as typed are what `meta` names.
     let typed = labels;
-    let labels = match &labels_idx {
+    let mut labels = match &labels_idx {
         Some(idx) => typed
             .resolved(idx)
             .map_err(|e| CliError::Args(format!("--label {e}")))?,
@@ -909,7 +911,11 @@ pub async fn select_against(
     };
     // `app=shop app=crm`: no workload has both, so nothing is asked (an
     // empty labels parameter would mean every workload).
-    let nothing = labels.matches_nothing();
+    let nothing = if labels_idx.is_some() {
+        labels.matches_nothing()
+    } else {
+        never
+    };
     if let Some(idx) = &labels_idx
         && !against
         && !nothing
@@ -947,6 +953,12 @@ pub async fn select_against(
     } else {
         ctx.pce.workloads(&filter, mode).await?
     };
+    if labels_idx.is_none() && typed.terms.iter().any(|t| !t.values.is_empty()) {
+        let seen = workload_labels_index(c.value.iter().chain(base.iter().flat_map(|b| b.0)));
+        labels = typed
+            .resolved(&seen)
+            .map_err(|e| CliError::Args(format!("--label {e}")))?;
+    }
     let mut warnings = match &unlabeled {
         Some(keys) if keys.as_slice() != order.first() => {
             let seen: Vec<&str> = c
@@ -1520,6 +1532,28 @@ impl TableRows for VenSections<'_> {
             .map(|(section, name, n, note)| vec![section.to_string(), name, n.to_string(), note])
             .collect()
     }
+}
+
+/// A name index of the labels `workloads` carry: what a filter applied
+/// to them alone is spelt by (#90), without another read.
+fn workload_labels_index<'a>(workloads: impl Iterator<Item = &'a Workload>) -> pce::NameIndex {
+    let mut seen = std::collections::HashSet::new();
+    let labels: Vec<pce::models::Label> = workloads
+        .flat_map(|w| &w.labels)
+        .filter(|l| seen.insert(l.href.clone()))
+        .filter_map(|l| {
+            Some(pce::models::Label {
+                href: l.href.clone(),
+                key: l.key.clone()?,
+                value: l.value.clone()?,
+                deleted: None,
+                created_at: None,
+                updated_at: None,
+                usage: None,
+            })
+        })
+        .collect();
+    pce::NameIndex::new(&labels, &[], &[], &[])
 }
 
 /// `meta.local_filter`: the filters applied here after the one request,
