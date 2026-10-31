@@ -171,7 +171,9 @@ pub struct TrafficState {
     /// Blocked: App-to-app `in` with `blocked`, with its own cursor and folds.
     pub blocked: TableView<SectionRow>,
     pub blocked_folded: BTreeSet<Vec<String>>,
-    pub treemap: TreemapState,
+    /// Volume (#89): a row per source, its destinations unfolded under it.
+    pub volume: TableView<VolumeRow>,
+    pub volume_state: VolumeState,
     /// What the Flows view is narrowed to.
     pub drill: Option<Drill>,
     pub auto: AutoRefresh,
@@ -217,7 +219,7 @@ pub struct TrafficState {
     /// The baseline's flows as the views compare them: the focus keeps
     /// them, squelch hides them as it hides the recent ones (unless `M`),
     /// merged on their own. Computed at `rebuild_views`, never per draw.
-    baseline_view: Option<Vec<ResolvedFlow>>,
+    pub(super) baseline_view: Option<Vec<ResolvedFlow>>,
     /// Compare mode: the keys with a squelched record on either side, left
     /// out of both (`squelched_keys`), and `view_flows` without them when
     /// there are any (`shown_flows`).
@@ -262,8 +264,8 @@ pub const MESH_ALL: MeshColumns = MeshColumns {
 /// What `Enter` narrowed the Flows view to.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Drill {
-    /// An App-to-app or treemap pair: source and destination group keys,
-    /// and the decisions App-to-app's filter kept (`All` from the treemap).
+    /// An App-to-app or Volume pair: source and destination group keys,
+    /// and the decisions App-to-app's filter kept (`All` from Volume).
     Pair(Vec<String>, Vec<String>, Decisions),
     /// An App-to-app pair by service (`o`): the groups, the service and
     /// the decisions kept.
@@ -435,7 +437,8 @@ impl TrafficState {
                 .with_match_group(section_group)
                 .with_warn_cell(TRANSITION_COLUMN, changed_section_row),
             blocked_folded: BTreeSet::new(),
-            treemap: TreemapState::new(TreemapRect::default()),
+            volume: volume_table(),
+            volume_state: VolumeState::default(),
             drill: None,
             auto: AutoRefresh::new(auto_min_seconds),
             rule_form: None,
@@ -623,7 +626,6 @@ impl TrafficState {
         });
         self.focus = Some(focus);
         self.drill = None;
-        self.treemap.zoom = None;
         self.rebuild_views();
     }
 
@@ -668,10 +670,9 @@ impl TrafficState {
     /// The apps of the row under the cursor, in the order `F` takes them: a
     /// section header its app; a peer row its section's app, then the peer
     /// (so the destination first in an inbound section, App-to-app `in`
-    /// and `both` or Blocked); any other pair, flow, Mesh row or treemap
-    /// tile the source, then the destination. A flow
-    /// from an app to itself has one. Empty without a row (or on an `other
-    /// (N)` tile).
+    /// and `both` or Blocked); any other pair, flow, Mesh row or Volume
+    /// row the source, then the destination (a Volume source row its
+    /// source). A flow from an app to itself has one. Empty without a row.
     pub fn row_apps(&self) -> Vec<GroupKey> {
         let keys = &self.keys;
         let mut apps: Vec<GroupKey> = match self.view {
@@ -692,7 +693,7 @@ impl TrafficState {
                 .selected_item()
                 .map(|r| vec![r.src.clone(), r.dst.clone()])
                 .unwrap_or_default(),
-            TrafficView::Treemap => self.treemap_apps(),
+            TrafficView::Volume => self.volume_apps(),
             TrafficView::Exposure => self
                 .exposure_rows
                 .selected_item()
@@ -722,40 +723,6 @@ impl TrafficState {
                 }
             }
             RowKind::Header { .. } => vec![r.app.clone()],
-        }
-    }
-
-    fn treemap_apps(&self) -> Vec<GroupKey> {
-        let tm = &self.treemap;
-        let Some(target) = tm.current() else {
-            return Vec::new();
-        };
-        let tile = tm.tile(target);
-        if tile.is_other() {
-            return Vec::new();
-        }
-        let src_of = |text: &str| {
-            tm.groups
-                .iter()
-                .find(|g| g.src.join("/") == text)
-                .map(|g| g.src.clone())
-        };
-        let dst_of = |text: &str| {
-            tm.groups
-                .iter()
-                .find(|g| g.dst.join("/") == text)
-                .map(|g| g.dst.clone())
-        };
-        match (&tm.zoom, target.inner) {
-            (None, None) => src_of(&tile.label).into_iter().collect(),
-            (Some(z), _) => [Some(z.clone()), dst_of(&tile.label)]
-                .into_iter()
-                .flatten()
-                .collect(),
-            (None, Some(_)) => [src_of(&tm.tiles[target.outer].label), dst_of(&tile.label)]
-                .into_iter()
-                .flatten()
-                .collect(),
         }
     }
 
@@ -946,13 +913,14 @@ impl TrafficState {
             let mut mesh_rows = mesh(flows, keys, cols);
             let mut tree = tree;
             let counts = self.marks_ctx().map(|(a, mv)| {
-                annotate_groups(&mut tree, &mv.marked, &a, |f| group_by_labels(f, keys));
+                let pairs =
+                    annotate_groups(&mut tree, &mv.marked, &a, |f| group_by_labels(f, keys));
                 let gone = annotate_mesh(&mut mesh_rows, &mv.marked, &a, |f| mesh(f, keys, cols));
                 let flows = mv.marked.squelched_where(drilled);
                 (
                     Squelch { rows: flows, flows },
                     self.squelch(gone, |_| true),
-                    self.squelch(0, |_| true),
+                    self.squelch(pairs, |_| true),
                 )
             });
             let compared = self.baseline_view.as_ref().map(|b| {
@@ -967,10 +935,10 @@ impl TrafficState {
             });
             (shown, tree, mesh_rows, counts, compared)
         };
-        if let (Some(mv), Some((flows, mesh, treemap))) = (self.marked.as_mut(), counts) {
+        if let (Some(mv), Some((flows, mesh, volume))) = (self.marked.as_mut(), counts) {
             mv.flows = flows;
             mv.mesh = mesh;
-            mv.treemap = treemap;
+            mv.volume = volume;
         }
         let (mut shown, mut mesh_rows) = (shown, mesh_rows);
         if let (Some(cmp), Some((flows, mesh))) = (self.compare.as_mut(), compared) {
@@ -981,13 +949,12 @@ impl TrafficState {
             mesh_rows.retain(|r| show.keeps(r.change.as_ref()));
         }
         self.flows.set_rows(shown);
-        self.treemap.groups = tree;
         self.mesh.set_rows(mesh_rows);
         self.sync_flows_columns();
         self.sync_mesh_columns();
         self.rebuild_pairs();
         self.rebuild_sections();
-        self.relayout_treemap();
+        self.rebuild_volume(tree);
         self.rebuild_exposure();
     }
 
@@ -1576,7 +1543,7 @@ impl TrafficState {
                 let rows = flow_section_rows(&self.flows_cache, self.flows_state.folded());
                 self.flows_grouped.set_rows(rows);
             }
-            TrafficView::Mesh | TrafficView::Treemap | TrafficView::Exposure => {}
+            TrafficView::Mesh | TrafficView::Volume | TrafficView::Exposure => {}
         }
     }
 
@@ -1793,51 +1760,6 @@ impl TrafficState {
         })
     }
 
-    /// The treemap's tiles again from its (unfiltered) groups, zoom, weight and
-    /// area. A zoom whose source is gone is dropped; byte weight falls back
-    /// to connections when no flow carries bytes; the cursor is clamped.
-    pub fn relayout_treemap(&mut self) {
-        self.treemap.has_bytes = self.has_bytes();
-        if !self.treemap.has_bytes {
-            self.treemap.weight = Weight::Connections;
-        }
-        let tm = &mut self.treemap;
-        let groups = &tm.groups;
-        if tm
-            .zoom
-            .as_ref()
-            .is_some_and(|z| !groups.iter().any(|g| &g.src == z))
-        {
-            tm.zoom = None;
-        }
-        tm.tiles = match &tm.zoom {
-            Some(z) => layout_zoomed(groups, z, tm.area, tm.weight),
-            None => layout(groups, tm.area, tm.weight),
-        };
-        tm.cursor = tm.cursor.min(tm.targets().len().saturating_sub(1));
-        tm.highlights.clear();
-        tm.source_highlights.clear();
-        for g in &tm.groups {
-            let Some(m) = g
-                .marks
-                .as_ref()
-                .and_then(RowMarks::marker)
-                .filter(|m| m.action().is_some_and(|a| a.is_highlight()))
-            else {
-                continue;
-            };
-            let src = g.src.join("/");
-            tm.highlights.insert((src.clone(), g.dst.join("/")), m);
-            let strongest = |x: pce::marks::Marker| x.action();
-            match tm.source_highlights.get(&src) {
-                Some(old) if strongest(*old) <= strongest(m) => {}
-                _ => {
-                    tm.source_highlights.insert(src, m);
-                }
-            }
-        }
-    }
-
     /// `u` / `p` on the Mesh view: show or hide a column, regroup, and start
     /// again at the first row (a new table: sort and search reset too).
     pub fn toggle_mesh_column(&mut self, user: bool) {
@@ -1862,7 +1784,7 @@ impl TrafficState {
             TrafficView::Mesh => self.mesh.is_searching(),
             TrafficView::Blocked => self.blocked.is_searching(),
             TrafficView::Exposure => self.exposure_rows.is_searching(),
-            TrafficView::Treemap => false,
+            TrafficView::Volume => self.volume.is_searching(),
         }
     }
 

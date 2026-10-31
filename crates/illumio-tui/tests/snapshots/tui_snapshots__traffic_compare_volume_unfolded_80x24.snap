@@ -1,0 +1,28 @@
+---
+source: crates/illumio-tui/tests/tui_snapshots.rs
+expression: "render_to_string(&m, 80, 24)"
+---
+ illumio-tui pce.example · org 5 ●                            api 5 calls · 20K
+  1 Traffic  │  2 Policy  │  3 Objects  │  4 Workloads  │  5 Events
+╭ Filters ─────────────────────────────────── window 1d · cap 1000 · unbounded ╮
+│window 1d  src *  dst *  svc *  decision all                                  │
+╰──────────────────────────────────────────────────────────────────────────────╯
+╭ Result ─────────────── vs 7d before 10-09 08:00 · 0 new · 4 changed · 0 gone ╮
+│30 flows allowed 15 pot.blocked 7 blocked 7  █████████████████████████████████│
+╰──────────────────────────────────────────────────────────────────────────────╯
+╭ Volume ────────────────────────── by conns · b bytes · Enter unfolds · E all ╮
+│  Δ    group                       conns  volume          blocked             │
+│         → crm/prod                  520  ██████          0% blocked          │
+│         → hr/prod                    75  ▓               0% blocked · 100% pb│
+│         → erp/prod                    4  ▒               100% blocked        │
+│▸ CHG  shop/prod                    1.0K  ███████████     0% blocked          │
+│  CHG    → shop/prod                 821  █████████       0% blocked          │
+│         → crm/prod                  150  ██              0% blocked          │
+│         → api.partner.example/-      33  █               0% blocked          │
+│  CHG  crm/prod                      896  █████████▓      0% blocked · 5% pb  │
+│         → crm/prod                  850  █████████       0% blocked          │
+│  CHG    → erp/prod                   46  ▓               0% blocked · 100% pb│
+│       erp/prod                      626  ██████░         0% blocked          │
+│         → erp/prod                  590  ██████          0% blocked          │
+╰──────────────────────────────────────────────────────────────────────────────╯
+vs 7d before  f filter  r run  a auto  v view  g group  / search  : cmd  ? help

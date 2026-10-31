@@ -361,7 +361,7 @@ fn help_opens_on_the_keys_of_its_context() {
         (TrafficView::Aggregate, HelpContext::AppToApp),
         (TrafficView::Mesh, HelpContext::Mesh),
         (TrafficView::Blocked, HelpContext::Blocked),
-        (TrafficView::Treemap, HelpContext::Treemap),
+        (TrafficView::Volume, HelpContext::Volume),
     ] {
         m.traffic.view = view;
         update(&mut m, key('?'));
@@ -1766,7 +1766,7 @@ fn w_opens_the_flow_form_only_for_a_blocked_flow() {
         m.overlay
     );
     update(&mut m, kc(KeyCode::Esc));
-    for view in [TrafficView::Aggregate, TrafficView::Treemap] {
+    for view in [TrafficView::Aggregate, TrafficView::Volume] {
         m.traffic.view = view;
         assert!(update(&mut m, key('w')).is_empty());
         assert_eq!(

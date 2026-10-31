@@ -1,5 +1,5 @@
 //! The traffic result and its rows: the query state, flows, groups, the
-//! mesh, the treemap and the app sections, with their table columns.
+//! mesh and the app sections, with their table columns.
 use super::*;
 
 #[derive(Debug)]
@@ -451,22 +451,23 @@ pub enum TrafficView {
     Aggregate,
     Mesh,
     Blocked,
-    Treemap,
+    /// #89: one bar per source group, its destinations unfolded under it.
+    Volume,
     /// `:exposure` / `9` (#82): risky services per destination group, on
     /// the exposure query's result. Not in `v`'s cycle (`v` leaves it).
     Exposure,
 }
 
 impl TrafficView {
-    /// `v`: Flows, App-to-app, Mesh, Blocked, Treemap, then Flows again
+    /// `v`: Flows, App-to-app, Mesh, Blocked, Volume, then Flows again
     /// (from Exposure too).
     pub fn next(self) -> Self {
         match self {
             TrafficView::Flows => TrafficView::Aggregate,
             TrafficView::Aggregate => TrafficView::Mesh,
             TrafficView::Mesh => TrafficView::Blocked,
-            TrafficView::Blocked => TrafficView::Treemap,
-            TrafficView::Treemap | TrafficView::Exposure => TrafficView::Flows,
+            TrafficView::Blocked => TrafficView::Volume,
+            TrafficView::Volume | TrafficView::Exposure => TrafficView::Flows,
         }
     }
 
@@ -476,142 +477,8 @@ impl TrafficView {
             TrafficView::Aggregate => "App-to-app",
             TrafficView::Mesh => "Mesh",
             TrafficView::Blocked => "Blocked",
-            TrafficView::Treemap => "Treemap",
+            TrafficView::Volume => "Volume",
             TrafficView::Exposure => "Exposure",
-        }
-    }
-}
-
-/// A treemap tile the cursor can stand on: an outer (source) tile, or one
-/// of its destinations (`inner`).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct TreemapTarget {
-    pub outer: usize,
-    pub inner: Option<usize>,
-    pub rect: TreemapRect,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Dir {
-    Left,
-    Right,
-    Up,
-    Down,
-}
-
-/// The Treemap view: what the renderer draws, computed when the groups,
-/// the zoom, the weight or the terminal size change, never while drawing.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct TreemapState {
-    pub weight: Weight,
-    /// The source group zoomed into; its destinations fill the area.
-    pub zoom: Option<Vec<String>>,
-    /// Index into `targets()`.
-    pub cursor: usize,
-    pub tiles: Vec<Tile>,
-    /// The pairs the tiles are laid out from: every loaded flow, whatever
-    /// App-to-app's decision filter (`d`).
-    pub groups: Vec<FlowGroup>,
-    /// Some loaded flow carried byte counts: `b` may weigh by bytes, and
-    /// the meta draws `b bytes` dim when not.
-    pub has_bytes: bool,
-    /// Where the tiles go: the Traffic table area minus its border for the
-    /// terminal size (`ui::screens::traffic::treemap_area`).
-    pub area: TreemapRect,
-    /// The highlight (critical, important, revisit) of each pair with one,
-    /// by (source, destination) text, and of each source: the glyph its
-    /// tile shows before its label. Computed at relayout, never per draw.
-    pub highlights: BTreeMap<(String, String), pce::marks::Marker>,
-    pub source_highlights: BTreeMap<String, pce::marks::Marker>,
-}
-
-impl TreemapState {
-    pub fn new(area: TreemapRect) -> Self {
-        Self {
-            weight: Weight::Connections,
-            zoom: None,
-            cursor: 0,
-            tiles: Vec::new(),
-            groups: Vec::new(),
-            has_bytes: false,
-            area,
-            highlights: BTreeMap::new(),
-            source_highlights: BTreeMap::new(),
-        }
-    }
-
-    /// The highlight a tile shows: a destination by its pair, a source by
-    /// the strongest of its pairs.
-    pub fn highlight(&self, src: &str, dst: Option<&str>) -> Option<pce::marks::Marker> {
-        match dst {
-            Some(d) => self
-                .highlights
-                .get(&(src.to_string(), d.to_string()))
-                .copied(),
-            None => self.source_highlights.get(src).copied(),
-        }
-    }
-
-    /// Every tile in drawing order: each outer tile, then its destinations.
-    pub fn targets(&self) -> Vec<TreemapTarget> {
-        let mut out = Vec::new();
-        for (i, t) in self.tiles.iter().enumerate() {
-            out.push(TreemapTarget {
-                outer: i,
-                inner: None,
-                rect: t.rect,
-            });
-            out.extend(t.children.iter().enumerate().map(|(j, c)| TreemapTarget {
-                outer: i,
-                inner: Some(j),
-                rect: c.rect,
-            }));
-        }
-        out
-    }
-
-    pub fn current(&self) -> Option<TreemapTarget> {
-        self.targets().get(self.cursor).copied()
-    }
-
-    pub fn tile(&self, t: TreemapTarget) -> &Tile {
-        let outer = &self.tiles[t.outer];
-        t.inner.map_or(outer, |j| &outer.children[j])
-    }
-
-    /// Moves to the nearest tile whose centre lies in `dir`: distance along
-    /// `dir` plus twice the distance across it, a row counting as two
-    /// columns. Nothing in that direction: the cursor stays.
-    pub fn move_cursor(&mut self, dir: Dir) {
-        let targets = self.targets();
-        let Some(cur) = targets.get(self.cursor) else {
-            return;
-        };
-        let centre = |r: TreemapRect| {
-            (
-                2 * i32::from(r.x) + i32::from(r.w),
-                2 * (2 * i32::from(r.y) + i32::from(r.h)),
-            )
-        };
-        let (cx, cy) = centre(cur.rect);
-        let best = targets
-            .iter()
-            .enumerate()
-            .filter(|(i, _)| *i != self.cursor)
-            .filter_map(|(i, t)| {
-                let (x, y) = centre(t.rect);
-                let (dx, dy) = (x - cx, y - cy);
-                let (ahead, side) = match dir {
-                    Dir::Right => (dx, dy),
-                    Dir::Left => (-dx, dy),
-                    Dir::Down => (dy, dx),
-                    Dir::Up => (-dy, dx),
-                };
-                (ahead > 0).then_some((ahead + 2 * side.abs(), i))
-            })
-            .min();
-        if let Some((_, i)) = best {
-            self.cursor = i;
         }
     }
 }

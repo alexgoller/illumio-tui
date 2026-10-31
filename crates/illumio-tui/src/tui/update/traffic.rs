@@ -1,4 +1,4 @@
-//! The Traffic screen's transitions: queries, results, views, the treemap,
+//! The Traffic screen's transitions: queries, results, views, Volume,
 //! keys, focus, the window and cap steps, and the policy-decision drafts.
 use super::*;
 
@@ -438,8 +438,10 @@ pub(super) fn traffic_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
                 search_key(&mut t.exposure_rows, k);
                 t.exposure_rows.ensure_visible(page);
             }
-            // `is_searching` is false on the treemap: it has no table.
-            TrafficView::Treemap => {}
+            TrafficView::Volume => {
+                search_key(&mut t.volume, k);
+                t.volume.ensure_visible(page);
+            }
         }
         return Vec::new();
     }
@@ -503,8 +505,11 @@ pub(super) fn traffic_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
             model.status = model.traffic.auto.toggle();
         }
         KeyCode::Char('w') => return flow_rule_key(model),
-        // Which rule allows or blocks the flow: no request.
-        KeyCode::Char('E') => return explain_key(model),
+        // Which rule allows or blocks the flow: no request. (On Volume `E`
+        // folds or unfolds every source.)
+        KeyCode::Char('E') if model.traffic.view != TrafficView::Volume => {
+            return explain_key(model);
+        }
         // Squelched flows shown or left out: a rebuild, no request.
         KeyCode::Char('M') => model.status = model.traffic.toggle_squelched(),
         // The mark form for the row: marks.toml only, no request.
@@ -663,7 +668,7 @@ pub(super) fn traffic_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
                 model.traffic.flows.ensure_visible(page);
             }
             TrafficView::Blocked => {}
-            TrafficView::Treemap => treemap_enter(model),
+            TrafficView::Volume => volume_enter(model),
             TrafficView::Exposure => exposure_enter(model),
         },
         KeyCode::Esc | KeyCode::Backspace
@@ -672,7 +677,6 @@ pub(super) fn traffic_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
             model.traffic.drill = None;
             model.traffic.rebuild_views();
         }
-        KeyCode::Esc if model.traffic.view == TrafficView::Treemap => treemap_out(model),
         KeyCode::Esc if model.traffic.view == TrafficView::Exposure => {
             if model.traffic.leave_exposure() {
                 model.status =
@@ -683,17 +687,22 @@ pub(super) fn traffic_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
         KeyCode::Char('e') if model.traffic.view == TrafficView::Exposure => {
             return explain_key(model);
         }
-        KeyCode::Char('b') if model.traffic.view == TrafficView::Treemap => {
-            let t = &mut model.traffic;
-            if !t.treemap.has_bytes {
+        KeyCode::Char('b') if model.traffic.view == TrafficView::Volume => {
+            if !model.traffic.toggle_volume_weight() {
                 model.status = StatusLine::info("no byte counts in this result");
-            } else {
-                t.treemap.weight = match t.treemap.weight {
-                    Weight::Connections => Weight::Bytes,
-                    Weight::Bytes => Weight::Connections,
-                };
-                t.relayout_treemap();
             }
+        }
+        KeyCode::Char('E') if model.traffic.view == TrafficView::Volume => {
+            model.traffic.fold_all_volume();
+        }
+        KeyCode::Char('s') if model.traffic.view == TrafficView::Volume => {
+            model.status = StatusLine::info("Volume keeps its order (heaviest first)");
+        }
+        KeyCode::Char('l') | KeyCode::Right if model.traffic.view == TrafficView::Volume => {
+            model.traffic.fold_volume(Some(true));
+        }
+        KeyCode::Char('h') | KeyCode::Left if model.traffic.view == TrafficView::Volume => {
+            model.traffic.fold_volume(Some(false));
         }
         _ => {
             let t = &mut model.traffic;
@@ -707,18 +716,7 @@ pub(super) fn traffic_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
                 TrafficView::Mesh => table_key(&mut t.mesh, k, page),
                 TrafficView::Blocked => table_key(&mut t.blocked, k, page),
                 TrafficView::Exposure => table_key(&mut t.exposure_rows, k, page),
-                TrafficView::Treemap => {
-                    let dir = match k.code {
-                        KeyCode::Left | KeyCode::Char('h') => Some(Dir::Left),
-                        KeyCode::Right | KeyCode::Char('l') => Some(Dir::Right),
-                        KeyCode::Up | KeyCode::Char('k') => Some(Dir::Up),
-                        KeyCode::Down | KeyCode::Char('j') => Some(Dir::Down),
-                        _ => None,
-                    };
-                    if let Some(d) = dir {
-                        t.treemap.move_cursor(d);
-                    }
-                }
+                TrafficView::Volume => table_key(&mut t.volume, k, page),
             }
         }
     }
@@ -736,7 +734,7 @@ pub(super) fn traffic_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
         TrafficView::Mesh => t.mesh.ensure_visible(page),
         TrafficView::Blocked => t.blocked.ensure_visible(page),
         TrafficView::Exposure => t.exposure_rows.ensure_visible(page),
-        TrafficView::Treemap => {}
+        TrafficView::Volume => t.volume.ensure_visible(page),
     }
     Vec::new()
 }
@@ -773,65 +771,19 @@ pub(super) fn narrow_drill(old: &Drill, header: &Drill) -> Option<Drill> {
     }
 }
 
-/// Enter on the Treemap: an outer tile zooms into its source; a
-/// destination (or any tile while zoomed) opens the Flows view drilled to
-/// that pair. An `other (N)` tile only explains itself.
-pub(super) fn treemap_enter(model: &mut Model) {
+/// Enter on Volume: a source unfolds (or folds) its destinations; a
+/// destination opens the Flows view drilled to that pair.
+pub(super) fn volume_enter(model: &mut Model) {
     let t = &mut model.traffic;
-    let Some(target) = t.treemap.current() else {
-        return;
-    };
-    let tile = t.treemap.tile(target).clone();
-    if tile.is_other() {
-        model.status = StatusLine::info(format!(
-            "{}: too small to draw one by one; zoom in or widen the terminal",
-            tile.label
-        ));
-        return;
-    }
-    let groups = &t.treemap.groups;
-    let src_text = match (&t.treemap.zoom, target.inner) {
-        (None, None) => {
-            let src = groups
-                .iter()
-                .find(|g| g.src.join("/") == tile.label)
-                .map(|g| g.src.clone());
-            if let Some(src) = src {
-                t.treemap.zoom = Some(src);
-                t.treemap.cursor = 0;
-                t.relayout_treemap();
-            }
-            return;
+    match t.volume_drill() {
+        Some(drill) => {
+            t.drill = Some(drill);
+            t.view = TrafficView::Flows;
+            t.rebuild_views();
         }
-        (Some(z), _) => z.join("/"),
-        (None, Some(_)) => t.treemap.tiles[target.outer].label.clone(),
-    };
-    let pair = groups
-        .iter()
-        .find(|g| g.src.join("/") == src_text && g.dst.join("/") == tile.label)
-        .map(|g| (g.src.clone(), g.dst.clone()));
-    if let Some((src, dst)) = pair {
-        t.drill = Some(Drill::Pair(src, dst, Decisions::All));
-        t.view = TrafficView::Flows;
-        t.rebuild_views();
-    }
-}
-
-/// Esc on the Treemap: out of a zoom, the cursor back on that source.
-pub(super) fn treemap_out(model: &mut Model) {
-    let tm = &mut model.traffic.treemap;
-    let Some(z) = tm.zoom.take() else {
-        return;
-    };
-    model.traffic.relayout_treemap();
-    let tm = &mut model.traffic.treemap;
-    let label = z.join("/");
-    if let Some(i) = tm
-        .targets()
-        .iter()
-        .position(|t| t.inner.is_none() && tm.tiles[t.outer].label == label)
-    {
-        tm.cursor = i;
+        None => {
+            t.fold_volume(None);
+        }
     }
 }
 
@@ -864,7 +816,6 @@ pub(super) fn apply_group_keys(model: &mut Model, keys: Vec<String>, all: bool) 
     }
     let cleared = t.drop_focus();
     t.drill = None;
-    t.treemap.zoom = None;
     t.rebuild_views();
     let mut text = format!("grouped by {}", t.effective_keys().join(","));
     let keys = model.workload_group_keys();

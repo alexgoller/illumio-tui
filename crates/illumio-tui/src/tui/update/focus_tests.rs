@@ -37,7 +37,7 @@ fn x_and_esc_cycle_and_clear_the_focus_on_every_view_without_requests() {
         TrafficView::Aggregate,
         TrafficView::Mesh,
         TrafficView::Blocked,
-        TrafficView::Treemap,
+        TrafficView::Volume,
     ] {
         let mut m = model_with_rich_flows();
         m.traffic.view = view;
@@ -65,8 +65,14 @@ fn x_and_esc_cycle_and_clear_the_focus_on_every_view_without_requests() {
             TrafficView::Blocked => {
                 assert!(!t.blocked.is_empty() && t.blocked.rows().iter().all(|r| crm(&r.app)))
             }
-            TrafficView::Treemap => {
-                assert!(!t.treemap.tiles.is_empty() && t.treemap.groups.iter().all(|g| crm(&g.dst)))
+            TrafficView::Volume => {
+                let mut tree = t.volume.rows().to_vec();
+                tree.retain(|r| !r.is_source());
+                assert!(!t.volume.is_empty() && tree.is_empty(), "folded");
+                assert!(
+                    t.volume_state.tree_pairs().all(|(_, d)| crm(d)),
+                    "every pair into crm/prod"
+                );
             }
             TrafficView::Exposure => unreachable!("not in the list"),
         }
@@ -688,26 +694,33 @@ fn f_on_a_mesh_row_takes_the_source_then_the_destination() {
 }
 
 #[test]
-fn f_on_a_treemap_tile_takes_its_source_group() {
+fn f_on_a_volume_row_takes_its_source_then_its_destination() {
     let mut m = model_with_rich_flows();
-    m.traffic.view = TrafficView::Treemap;
-    let tm = &m.traffic.treemap;
-    let target = tm.current().expect("a tile under the cursor");
-    assert!(target.inner.is_none() && tm.zoom.is_none());
-    let label = tm.tile(target).label.clone();
-    assert!(!tm.tile(target).is_other(), "{label}");
+    m.traffic.view = TrafficView::Volume;
+    let r = m.traffic.volume.selected_item().expect("a row").clone();
+    assert!(r.is_source());
+    let label = r.name();
     quiet(&mut m, key('F'));
-    assert_eq!(
-        focused(&m).unwrap().0,
-        label,
-        "the outer tile is a source group"
-    );
+    assert_eq!(focused(&m).unwrap().0, label, "a source row: its source");
     assert!(
         m.traffic
-            .treemap
-            .groups
-            .iter()
-            .all(|g| g.src.join("/") == label || g.dst.join("/") == label),
-        "the treemap is narrowed to it"
+            .volume_state
+            .tree_pairs()
+            .all(|(s, d)| s.join("/") == label || d.join("/") == label),
+        "Volume is narrowed to it"
     );
+    // A destination row: its source, then (again) its destination.
+    quiet(&mut m, kc(KeyCode::Esc));
+    quiet(&mut m, kc(KeyCode::Enter));
+    quiet(&mut m, key('j'));
+    let r = m.traffic.volume.selected_item().expect("a row").clone();
+    let dst = r.dst().expect("a destination row").join("/");
+    quiet(&mut m, key('F'));
+    assert_eq!(focused(&m).unwrap().0, label);
+    m.traffic.view = TrafficView::Volume;
+    m.traffic
+        .volume
+        .select_where(|x| x.dst().is_some_and(|d| d.join("/") == dst));
+    quiet(&mut m, key('F'));
+    assert_eq!(focused(&m).unwrap().0, dst);
 }

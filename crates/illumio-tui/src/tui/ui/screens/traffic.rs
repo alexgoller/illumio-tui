@@ -1,20 +1,17 @@
 //! The Traffic screen: filter bar, result stats, flow table and detail pane.
-use crate::tui::model::{
-    By, Model, QueryState, SectionRow, TrafficView, TreemapState, is_gone as gone,
-};
+use crate::tui::model::{By, Model, QueryState, SectionRow, TrafficView, is_gone as gone};
 use crate::tui::table::TableView;
 use crate::tui::ui::theme::Theme;
 use crate::tui::ui::widgets::bars;
 use crate::tui::ui::widgets::panel::{panel, panel_spans};
 use pce::KeyOrder;
 use pce::models::PolicyDecision;
-use pce::traffic::treemap::{Rect as TreemapRect, Tile, Weight};
-use pce::traffic::{Decisions, ResolvedEndpoint, ResolvedFlow, SectionOrder, compact_count};
+use pce::traffic::{Decisions, ResolvedEndpoint, ResolvedFlow, SectionOrder};
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Paragraph, Wrap};
+use ratatui::widgets::{Paragraph, Wrap};
 use std::time::Instant;
 
 #[derive(Debug, Clone, Copy)]
@@ -58,7 +55,7 @@ pub fn detail_columns(body: Rect, d: DetailLines) -> bool {
 
 /// `layout` with the detail pane sized for `d`: the columns' taller pane,
 /// and a `mark` line while marks are active; the table gives the lines
-/// up, so the treemap's area (the two together) is the same.
+/// up, so the area the other views take (the two together) is the same.
 pub fn layout_with(body: Rect, d: DetailLines) -> TrafficLayout {
     let detail_h = if body.height < 20 {
         0
@@ -79,23 +76,6 @@ pub fn layout_with(body: Rect, d: DetailLines) -> TrafficLayout {
         stats: rows[1],
         table: rows[2],
         detail: rows[3],
-    }
-}
-
-/// The cells the treemap fills on a terminal of `size`: the table and
-/// detail area of `layout` minus the panel border, exactly where
-/// `render_treemap` draws.
-pub fn treemap_area(size: (u16, u16)) -> TreemapRect {
-    let Some(c) = crate::tui::ui::layout::chrome(Rect::new(0, 0, size.0, size.1)) else {
-        return TreemapRect::default();
-    };
-    let l = layout(c.body);
-    let r = l.table.union(l.detail);
-    TreemapRect {
-        x: r.x + 1,
-        y: r.y + 1,
-        w: r.width.saturating_sub(2),
-        h: r.height.saturating_sub(2),
     }
 }
 
@@ -133,7 +113,9 @@ pub fn render(model: &Model, f: &mut Frame, body: Rect) {
         // The detail pane belongs to the Flows view; the others use its space.
         TrafficView::Aggregate => render_groups(model, f, l.table.union(l.detail)),
         TrafficView::Mesh => render_mesh(model, f, l.table.union(l.detail)),
-        TrafficView::Treemap => render_treemap(model, f, l.table.union(l.detail)),
+        TrafficView::Volume => {
+            super::volume::render_volume(model, f, l.table.union(l.detail));
+        }
         TrafficView::Blocked => render_blocked(model, f, l.table.union(l.detail)),
         TrafficView::Exposure => render_exposure(model, f, l.table.union(l.detail)),
     }
@@ -490,155 +472,6 @@ fn render_mesh(model: &Model, f: &mut Frame, area: Rect) {
             theme.decision_style(r.dominant())
         }
     });
-}
-
-/// The tiles the model holds: each source a plain-bordered block titled
-/// with its group, its destinations filled with `▒` in their decision's
-/// colour, label and weight written over the fill where they fit; the
-/// cursor tile reversed.
-fn render_treemap(model: &Model, f: &mut Frame, area: Rect) {
-    let t = &model.theme;
-    let tm = &model.traffic.treemap;
-    let title = match &tm.zoom {
-        Some(z) => format!("{} ▸ {}", TrafficView::Treemap.title(), z.join("/")),
-        None => TrafficView::Treemap.title().to_string(),
-    };
-    let mut meta = treemap_meta(tm, t);
-    if let Some(m) = model.traffic.marks_meta(TrafficView::Treemap) {
-        meta.push(Span::styled(format!(" · {m}"), t.dim_style()));
-    }
-    let block = panel_spans(&title, meta, t, true);
-    let inner = block.inner(area);
-    f.render_widget(block, area);
-    if tm.tiles.is_empty() {
-        f.render_widget(
-            Paragraph::new(Line::from(Span::styled("no rows", t.dim_style()))),
-            inner,
-        );
-        return;
-    }
-    let cur = tm.current();
-    let is_cur = |outer: usize, inner_i: Option<usize>| {
-        cur.is_some_and(|c| c.outer == outer && c.inner == inner_i)
-    };
-    // A tile whose pair (or a source with a pair) has a highlight shows
-    // its glyph before the label. Zoomed, the tiles are the destinations.
-    let zoom = tm.zoom.as_ref().map(|z| z.join("/"));
-    for (i, tile) in tm.tiles.iter().enumerate() {
-        if tile.children.is_empty() {
-            let mark = match &zoom {
-                Some(z) => tm.highlight(z, Some(&tile.label)),
-                None => tm.highlight(&tile.label, None),
-            };
-            draw_fill(f, inner, tile, tm.weight, t, is_cur(i, None), mark);
-            continue;
-        }
-        let r = cells(tile.rect).intersection(inner);
-        if r.is_empty() {
-            continue;
-        }
-        let mut style = t.dim_style();
-        if is_cur(i, None) {
-            style = style.add_modifier(Modifier::REVERSED);
-        }
-        let label = match tm.highlight(&tile.label, None) {
-            Some(m) => format!("{} {}", m.glyph(), tile.label),
-            None => tile.label.clone(),
-        };
-        let label = clip_text(&label, r.width.saturating_sub(2) as usize);
-        f.render_widget(
-            Block::bordered()
-                .border_style(style)
-                .title(Span::styled(label, style)),
-            r,
-        );
-        for (j, c) in tile.children.iter().enumerate() {
-            let mark = tm.highlight(&tile.label, Some(&c.label));
-            draw_fill(f, inner, c, tm.weight, t, is_cur(i, Some(j)), mark);
-        }
-    }
-}
-
-/// `by conns · b bytes · Enter zoom · Esc out` (or `by bytes · b conns ·
-/// …`), dim like every panel meta; the `b` hint fainter still when no flow
-/// in the result carried bytes, since `b` then refuses.
-fn treemap_meta(tm: &TreemapState, t: &Theme) -> Vec<Span<'static>> {
-    let (by, toggle) = match tm.weight {
-        Weight::Connections => ("by conns · ", "b bytes"),
-        Weight::Bytes => ("by bytes · ", "b conns"),
-    };
-    let dim = t.dim_style();
-    let toggle_style = if tm.has_bytes {
-        dim
-    } else {
-        dim.add_modifier(Modifier::DIM)
-    };
-    vec![
-        Span::styled(by, dim),
-        Span::styled(toggle, toggle_style),
-        Span::styled(" · Enter zoom · Esc out", dim),
-    ]
-}
-
-fn cells(r: TreemapRect) -> Rect {
-    Rect::new(r.x, r.y, r.w, r.h)
-}
-
-fn clip_text(s: &str, n: usize) -> String {
-    s.chars().take(n).collect()
-}
-
-/// A filled tile: `▒` in the decision colour, the label on the first row
-/// when it fits with a cell either side (after the glyph of its
-/// highlight), the weight on the second.
-fn draw_fill(
-    f: &mut Frame,
-    clip: Rect,
-    tile: &Tile,
-    weight: Weight,
-    t: &Theme,
-    cursor: bool,
-    mark: Option<pce::marks::Marker>,
-) {
-    let r = cells(tile.rect).intersection(clip);
-    if r.is_empty() {
-        return;
-    }
-    let mut fill = t.decision_style(tile.decision);
-    let mut text = Style::new().fg(t.fg).add_modifier(Modifier::BOLD);
-    if cursor {
-        fill = fill.add_modifier(Modifier::REVERSED);
-        text = text.add_modifier(Modifier::REVERSED);
-    }
-    let w = r.width as usize;
-    let row = |label: Option<String>| -> Line<'static> {
-        match label {
-            Some(l) if l.chars().count() + 2 <= w => {
-                let n = l.chars().count();
-                Line::from(vec![
-                    Span::styled("▒", fill),
-                    Span::styled(l, text),
-                    Span::styled("▒".repeat(w - 1 - n), fill),
-                ])
-            }
-            _ => Line::from(Span::styled("▒".repeat(w), fill)),
-        }
-    };
-    let label = match mark {
-        Some(m) => format!("{} {}", m.glyph(), tile.label),
-        None => tile.label.clone(),
-    };
-    let mut lines = vec![row(Some(label))];
-    if r.height >= 2 {
-        lines.push(row(Some(match weight {
-            Weight::Bytes => pce::traffic::human_bytes(tile.weight),
-            _ => compact_count(tile.weight),
-        })));
-    }
-    while lines.len() < r.height as usize {
-        lines.push(row(None));
-    }
-    f.render_widget(Paragraph::new(lines), r);
 }
 
 /// App-to-app `in` with `blocked`: every peer row is blocked or
@@ -1195,10 +1028,6 @@ pub fn render_filter_bar(model: &Model, f: &mut Frame, area: Rect) {
 mod tests {
     use super::*;
 
-    fn meta_text(spans: &[Span]) -> String {
-        spans.iter().map(|s| s.content.as_ref()).collect()
-    }
-
     #[test]
     fn the_unit_joins_the_title_only_where_it_fits() {
         assert_eq!(unit_title("Flows", "", 80), "Flows · conns: lifetime");
@@ -1211,31 +1040,6 @@ mod tests {
         // Exactly full: 5 + 3 + 15 + 4 + 7 = 34.
         assert_eq!(unit_title("Flows", "abcd", 34), "Flows · conns: lifetime");
         assert_eq!(unit_title("Flows", "abcd", 33), "Flows");
-    }
-
-    #[test]
-    fn the_treemap_meta_dims_b_bytes_when_no_flow_has_bytes() {
-        let t = Theme::dark();
-        let mut tm = TreemapState::new(TreemapRect::default());
-        tm.has_bytes = true;
-        let with = treemap_meta(&tm, &t);
-        assert_eq!(
-            meta_text(&with),
-            "by conns · b bytes · Enter zoom · Esc out"
-        );
-        assert_eq!(with[1].content, "b bytes");
-        assert_eq!(with[1].style, t.dim_style());
-        tm.has_bytes = false;
-        let without = treemap_meta(&tm, &t);
-        assert_eq!(meta_text(&without), meta_text(&with));
-        assert_eq!(without[1].style, t.dim_style().add_modifier(Modifier::DIM));
-        assert_eq!(without[0].style, t.dim_style(), "only the b hint greys");
-        tm.has_bytes = true;
-        tm.weight = Weight::Bytes;
-        assert_eq!(
-            meta_text(&treemap_meta(&tm, &t)),
-            "by bytes · b conns · Enter zoom · Esc out"
-        );
     }
 
     fn ep(labels: &[(&str, &str)]) -> ResolvedEndpoint {

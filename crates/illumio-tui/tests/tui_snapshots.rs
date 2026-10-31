@@ -192,7 +192,7 @@ fn help_renders_at_every_terminal_size() {
         TrafficView::Aggregate,
         TrafficView::Mesh,
         TrafficView::Blocked,
-        TrafficView::Treemap,
+        TrafficView::Volume,
     ] {
         let mut m = ts::model_with_rich_flows();
         m.traffic.view = view;
@@ -2091,55 +2091,63 @@ fn traffic_mesh_80x24_160x48_and_light() {
 }
 
 #[test]
-fn traffic_treemap_80x24_160x48_zoomed_and_light() {
+fn traffic_volume_80x24_160x48_unfolded_and_light() {
     use illumio_tui::tui::model::TrafficView;
     use illumio_tui::tui::msg::Msg;
     use illumio_tui::tui::test_support::model_with_rich_flows;
     use illumio_tui::tui::update;
     let mut m = model_with_rich_flows();
-    m.traffic.view = TrafficView::Treemap;
+    m.traffic.view = TrafficView::Volume;
     assert!(update(&mut m, Msg::Resize(80, 24)).is_empty());
     let out = render_to_string(&m, 80, 24);
-    assert!(out.contains("Treemap"), "{out}");
+    assert!(out.contains("Volume"), "{out}");
     assert!(
-        out.contains("by conns · b bytes · Enter zoom · Esc out"),
+        out.contains("by conns · b bytes · Enter unfolds · E all"),
         "{out}"
     );
-    assert!(out.contains("ipl:Corp/-") && out.contains("▒"), "{out}");
-    insta::assert_snapshot!("traffic_treemap_80x24", out);
+    assert!(
+        out.contains("ipl:Corp/-") && out.contains("% blocked"),
+        "{out}"
+    );
+    insta::assert_snapshot!("traffic_volume_80x24", out);
     assert!(update(&mut m, Msg::Resize(160, 48)).is_empty());
+    m.traffic.fold_all_volume();
     let out = render_to_string(&m, 160, 48);
     assert!(
-        out.contains("702") && out.contains("821"),
-        "destination weights: {out}"
+        out.contains("→ crm/prod") && out.contains("→ api.partner.example/-"),
+        "destinations named: {out}"
     );
-    insta::assert_snapshot!("traffic_treemap_160x48", out);
+    insta::assert_snapshot!("traffic_volume_unfolded_160x48", out);
     m.set_theme("light");
-    insta::assert_snapshot!("light_traffic_treemap_160x48", render_styled(&m, 160, 48));
+    insta::assert_snapshot!(
+        "light_traffic_volume_unfolded_160x48",
+        render_styled(&m, 160, 48)
+    );
     m.set_theme("dark");
     assert!(update(&mut m, Msg::Resize(80, 24)).is_empty());
-    m.traffic.treemap.zoom = Some(vec!["shop".into(), "prod".into()]);
-    m.traffic.relayout_treemap();
     let out = render_to_string(&m, 80, 24);
-    assert!(out.contains("Treemap ▸ shop/prod"), "{out}");
+    insta::assert_snapshot!("traffic_volume_unfolded_80x24", out);
+    gen_key(&mut m, 'b');
+    let out = render_to_string(&m, 80, 24);
+    assert!(out.contains("by bytes · b conns"), "{out}");
     assert!(
-        out.contains("▒crm/prod▒") && out.contains("▒33▒"),
-        "the destinations: {out}"
+        out.contains("▸ shop/prod"),
+        "the cursor follows its row: {out}"
     );
-    insta::assert_snapshot!("traffic_treemap_zoomed_80x24", out);
+    insta::assert_snapshot!("traffic_volume_bytes_80x24", out);
 }
 
 #[test]
-fn an_empty_result_draws_the_treemap_like_an_empty_table() {
+fn an_empty_result_draws_volume_like_an_empty_table() {
     use illumio_tui::tui::model::TrafficView;
     let mut m = model_fixture();
-    m.traffic.view = TrafficView::Treemap;
+    m.traffic.view = TrafficView::Volume;
     let out = render_to_string(&m, 80, 24);
-    assert!(out.contains("Treemap") && out.contains("no rows"), "{out}");
+    assert!(out.contains("Volume") && out.contains("no rows"), "{out}");
 }
 
 #[test]
-fn mesh_and_treemap_keep_the_truncated_marker() {
+fn mesh_and_volume_keep_the_truncated_marker() {
     use illumio_tui::tui::model::TrafficView;
     use illumio_tui::tui::msg::Msg;
     use illumio_tui::tui::test_support::model_with_rich_flows;
@@ -2147,7 +2155,7 @@ fn mesh_and_treemap_keep_the_truncated_marker() {
     let mut m = model_with_rich_flows();
     m.traffic.data.as_mut().unwrap().truncated = true;
     assert!(update(&mut m, Msg::Resize(160, 48)).is_empty());
-    for view in [TrafficView::Mesh, TrafficView::Treemap] {
+    for view in [TrafficView::Mesh, TrafficView::Volume] {
         m.traffic.view = view;
         let out = render_to_string(&m, 160, 48);
         assert!(out.contains("⚠ truncated"), "{view:?}: {out}");
@@ -2342,6 +2350,13 @@ fn traffic_draft_flows_pairs_and_sections() {
     let out = render_to_string(&m, 120, 30);
     assert!(out.contains("would block"), "{out}");
     insta::assert_snapshot!("traffic_draft_mesh_120x30", out);
+    // Volume (#89): the draft's counts after the share, as `draft` cells.
+    m.traffic.view = TrafficView::Volume;
+    m.traffic.fold_all_volume();
+    let out = render_to_string(&m, 120, 30);
+    assert!(out.contains("· draft +"), "{out}");
+    insta::assert_snapshot!("traffic_draft_volume_120x30", out);
+    insta::assert_snapshot!("traffic_draft_volume_80x24", render_to_string(&m, 80, 24));
 }
 
 #[test]
@@ -2846,6 +2861,28 @@ fn traffic_marks_pairs_and_blocked_120x34() {
     );
 }
 
+/// Volume (#89) with marks: the gutter on its rows, a highlight's colour
+/// on the name, quiet rows dim, squelched rows counted.
+#[test]
+fn traffic_marks_volume_80x24_and_120x34() {
+    use illumio_tui::tui::model::TrafficView;
+    use illumio_tui::tui::test_support::{RICH_MARKS, model_with_marks};
+    let dir = tempfile::tempdir().unwrap();
+    let mut m = model_with_marks(dir.path(), RICH_MARKS);
+    m.traffic.view = TrafficView::Volume;
+    m.traffic.fold_all_volume();
+    let out = render_to_string(&m, 120, 34);
+    assert!(out.contains("4 rows (9 flows) squelched"), "{out}");
+    assert!(out.contains("◆ hr/prod"), "{out}");
+    insta::assert_snapshot!("traffic_marks_volume_120x34", out);
+    insta::assert_snapshot!("traffic_marks_volume_80x24", render_to_string(&m, 80, 24));
+    m.set_theme("light");
+    insta::assert_snapshot!(
+        "traffic_marks_volume_light_styled_80x24",
+        render_styled(&m, 80, 24)
+    );
+}
+
 #[test]
 fn mark_form_from_blocked_100x30() {
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
@@ -2939,7 +2976,7 @@ fn gen_header(m: &illumio_tui::tui::model::Model) -> String {
 fn screens_render_at_every_terminal_size() {
     use illumio_tui::tui::test_support as ts;
     let dir = tempfile::tempdir().unwrap(); // marks.toml for the marked models
-    let views = "vvvvv"; // Flows → App-to-app → Mesh → Blocked → Treemap → Flows
+    let views = "vvvvv"; // Flows → App-to-app → Mesh → Blocked → Volume → Flows
     let mut models: Vec<illumio_tui::tui::model::Model> = vec![
         ts::model_with_policy(),
         ts::model_with_objects(),
@@ -3018,7 +3055,7 @@ fn screens_render_at_every_terminal_size() {
             for c in typed.chars() {
                 gen_key(&mut mf, c);
             }
-            // The treemap (the fifth view) drills first: no form there.
+            // Volume (the fifth view) marks destination rows: none on a source.
             match &mf.overlay {
                 illumio_tui::tui::model::Overlay::MarkForm(f) => {
                     assert_eq!(f.form.error.is_some(), back > 0, "{:?}", f.form.error);
@@ -3643,7 +3680,7 @@ fn where_used_overlay_pairing_profile_120x40_80x24() {
 }
 
 /// Compare mode (#77): the `Δ` column and the header's counts in Flows,
-/// App-to-app, Mesh and Blocked, at 80x24 and 160x48; the prompt; a
+/// App-to-app, Mesh, Blocked and Volume, at 80x24 and 160x48; the prompt; a
 /// truncated baseline's warning.
 #[test]
 fn traffic_compare_80x24_and_160x48() {
@@ -3668,6 +3705,19 @@ fn traffic_compare_80x24_and_160x48() {
         );
         update(&mut m, key('v'));
     }
+    // Volume (#89): `Δ` on its sources, then on every destination too.
+    let out = render_to_string(&m, 80, 24);
+    assert!(out.contains("Volume") && out.contains("CHG"), "{out}");
+    insta::assert_snapshot!("traffic_compare_volume_80x24", out);
+    update(&mut m, key('E'));
+    insta::assert_snapshot!(
+        "traffic_compare_volume_unfolded_80x24",
+        render_to_string(&m, 80, 24)
+    );
+    insta::assert_snapshot!(
+        "traffic_compare_volume_unfolded_160x48",
+        render_to_string(&m, 160, 48)
+    );
     let mut m = model_with_window("1d");
     compare_with(&mut m, baseline_flows_rich(), true);
     update(&mut m, key('n'));

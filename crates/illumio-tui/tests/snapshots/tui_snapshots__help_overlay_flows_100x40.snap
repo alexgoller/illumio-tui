@@ -14,7 +14,7 @@ expression: "render_to_string(&m, 100, 40)"
 │  src    │s              order: conns ↓ · app A→Z · flows ↓ (App-to-app, Flows)        │          │
 │▸ host-1.│                                                                             │          │
 │  10.1.4.│TRAFFIC                                                                      │          │
-│  unmanag│v              cycle Flows · App-to-app · Mesh · Blocked · Treemap           │          │
+│  unmanag│v              cycle Flows · App-to-app · Mesh · Blocked · Volume            │          │
 │  host-1.│f              edit filter: window src dst svc decision transmission         │          │
 │         │+ / -          widen (re-runs the window) / narrow (no request)              │          │
 │         │B              re-run a truncated result at a larger cap                     │          │
@@ -38,7 +38,7 @@ expression: "render_to_string(&m, 100, 40)"
 │         │y / n          send / cancel a shown request                                 │          │
 │         │Esc            close overlay / cancel                                        │          │
 │         │q / Ctrl-C     quit                                                          │          │
-│         │more: Commands · App-to-app · Blocked · Mesh · Treemap · Exposure · Marks +11│          │
+│         │more: Commands · App-to-app · Blocked · Mesh · Volume · Exposure · Marks +11 │          │
 │         ╰─────────────────────────── Tab next · S-Tab prev · a all · j/k scroll · Esc ╯          │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ready                             f filter  r run  a auto  v view  g group  / search  : cmd  ? help

@@ -21,7 +21,7 @@ use pce::models::{
     Actor, DenyRule, Event, EventFilter, IpList, Label, LabelGroup, PendingChange, PolicyScope,
     Rule, RuleSet, Service, VenHealth, Workload,
 };
-use pce::traffic::treemap::{Rect as TreemapRect, Tile, Weight, layout, layout_zoomed};
+use pce::traffic::compact_count;
 use pce::traffic::{
     AppSection, Decisions, Direction, DraftCounts, ExposureRow, ExposureStatus, FlowGroup, Focus,
     FocusDirection, GroupKey, MeshColumns, MeshKey, MeshRow, PeerRow, ResolvedFlow, RiskyService,
@@ -46,6 +46,7 @@ mod flows;
 mod objects;
 mod policy;
 mod traffic;
+mod volume;
 mod wl_compare;
 mod workloads;
 
@@ -55,6 +56,7 @@ pub use flows::*;
 pub use objects::*;
 pub use policy::*;
 pub use traffic::*;
+pub use volume::*;
 pub use wl_compare::*;
 pub use workloads::*;
 
@@ -933,7 +935,6 @@ impl Model {
             auto_refresh_min_seconds,
             &scope_keys,
         );
-        traffic.treemap.area = crate::tui::ui::screens::traffic::treemap_area(size);
         traffic.set_key_order(&KeyOrder::new(&scope_keys, crate::config::DEFAULT_TIER_KEY));
         traffic.marks_pce = PceId {
             host: profile.host.clone(),
@@ -1195,7 +1196,6 @@ impl Model {
         );
         traffic.set_key_order(&self.limits.key_order());
         traffic.seq = self.traffic.seq + 1; // a late result of the old query is stale
-        traffic.treemap.area = crate::tui::ui::screens::traffic::treemap_area(self.size);
         // The marks file and `M` are the session's; their PCE the new profile's.
         traffic.marks = std::mem::replace(&mut self.traffic.marks, MarksStore::none());
         traffic.marks_announced = self.traffic.marks_announced;

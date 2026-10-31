@@ -1662,7 +1662,7 @@ where
 
 /// The model starts at 80x24 and otherwise learns the size only from
 /// `Event::Resize`: tell it the real one before the first draw, through
-/// `update` like any resize, so the treemap fills the panel it is drawn in.
+/// `update` like any resize, so page sizes fit the panels drawn.
 fn learn_size<B: ratatui::backend::Backend>(rt: &mut Runtime, terminal: &ratatui::Terminal<B>) {
     if let Ok(size) = terminal.size() {
         rt.apply(Msg::Resize(size.width, size.height));
@@ -2043,15 +2043,12 @@ mod tests {
     #[tokio::test]
     async fn the_model_learns_the_terminal_size_before_the_first_draw_and_keeps_it_across_a_switch()
     {
-        use crate::tui::ui::screens::traffic::treemap_area;
         let model = crate::tui::test_support::model_fixture();
         let (mut rt, _tx) = Runtime::new(Arc::new(test_pce()), model);
         assert_eq!(rt.model.size, (80, 24));
         let terminal = ratatui::Terminal::new(ratatui::backend::TestBackend::new(200, 50)).unwrap();
         learn_size(&mut rt, &terminal);
         assert_eq!(rt.model.size, (200, 50));
-        assert_eq!(rt.model.traffic.treemap.area, treemap_area((200, 50)));
-        assert_eq!(rt.model.traffic.treemap.area.w, 198);
         // A profile switch resets the data but not the terminal.
         rt.model.switching = true;
         rt.finish_switch(Ok((
@@ -2061,7 +2058,6 @@ mod tests {
             inputs(false, None),
         )));
         assert_eq!(rt.model.size, (200, 50));
-        assert_eq!(rt.model.traffic.treemap.area, treemap_area((200, 50)));
     }
 
     #[tokio::test]

@@ -55,7 +55,15 @@ pub(super) fn mark_key(model: &mut Model) -> Vec<Cmd> {
             .blocked
             .selected_item()
             .and_then(|r| section_prefill(t, r, true)),
-        TrafficView::Treemap | TrafficView::Exposure => {
+        // A destination row is a pair; a source holds many.
+        TrafficView::Volume => match t.volume.selected_item() {
+            Some(r) if r.is_source() => {
+                model.status = StatusLine::info("m: on a destination row (Enter unfolds)");
+                return Vec::new();
+            }
+            r => r.map(|r| pair_prefill_as(t, &r.node.group, Decisions::All, "Volume")),
+        },
+        TrafficView::Exposure => {
             model.status = StatusLine::info("m: Enter drills to the flows, mark there");
             return Vec::new();
         }
@@ -162,7 +170,12 @@ fn flow_prefill(t: &TrafficState, r: &FlowRow) -> Prefill {
 }
 
 fn pair_prefill(t: &TrafficState, g: &FlowGroup) -> Prefill {
-    let d = t.apps_state.decisions;
+    pair_prefill_as(t, g, t.apps_state.decisions, "App-to-app pairs")
+}
+
+/// A pair's prefill under `d`, its view named `view`: App-to-app's under
+/// its decision filter, Volume's under every decision.
+fn pair_prefill_as(t: &TrafficState, g: &FlowGroup, d: Decisions, view: &str) -> Prefill {
     let drill = match &g.service {
         Some(s) => Drill::Service(g.src.clone(), g.dst.clone(), s.clone(), d),
         None => Drill::Pair(g.src.clone(), g.dst.clone(), d),
@@ -172,7 +185,7 @@ fn pair_prefill(t: &TrafficState, g: &FlowGroup) -> Prefill {
     let service = g.service.clone().unwrap_or_default();
     Prefill {
         what: format!(
-            "App-to-app pairs · {} → {} {service}",
+            "{view} · {} → {} {service}",
             g.src.join("/"),
             g.dst.join("/")
         )

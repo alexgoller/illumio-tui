@@ -1,7 +1,7 @@
 //! Compare mode on the Traffic screen (#77): `c` and its prompt, the cost
 //! guard, the `Δ` column and the header's counts per view, `n`, `C`, `r`
 //! keeping the baseline, a filter or window change ending it, truncation
-//! and `B`, the Treemap. Every request is the user's: no `Cmd` where none
+//! and `B`, Volume. Every request is the user's: no `Cmd` where none
 //! should be.
 use super::*;
 use crate::tui::model::{Model, Overlay, PendingAction, ShowChanges, StatusKind};
@@ -160,7 +160,7 @@ fn delta(cols: &[crate::tui::table::Column<impl Sized>]) -> bool {
 }
 
 #[test]
-fn every_view_but_the_treemap_gains_the_delta_and_the_header_its_counts() {
+fn every_view_gains_the_delta_and_the_header_its_counts() {
     let mut m = compared();
     let t = &m.traffic;
     assert!(delta(&t.flows.columns));
@@ -214,15 +214,24 @@ fn every_view_but_the_treemap_gains_the_delta_and_the_header_its_counts() {
         let out = render_to_string(&m, 160, 48);
         assert!(out.contains(" Δ "), "{view}: {out}");
     }
-    // The Treemap: no Δ.
+    // Volume (#89): Δ on its sources, and on the destinations unfolded.
     quiet(&mut m, key('v'));
-    assert_eq!(m.traffic.view, TrafficView::Treemap);
-    assert_eq!(
-        m.traffic.compare_meta().as_deref(),
-        Some("vs 7d before 10-09 08:00 · no Δ here")
+    assert_eq!(m.traffic.view, TrafficView::Volume);
+    let counts = m.traffic.view_counts().unwrap();
+    assert!(
+        counts.new + counts.changed + counts.gone >= 1,
+        "Volume: {counts:?}"
     );
+    let meta = m.traffic.compare_meta().unwrap();
+    assert!(!meta.contains("no Δ here"), "{meta}");
     let out = render_to_string(&m, 160, 48);
-    assert!(!out.contains("GONE") && !out.contains("CHG"), "{out}");
+    assert!(out.contains(" Δ ") && out.contains("CHG"), "{out}");
+    quiet(&mut m, key('E'));
+    let unfolded = m.traffic.view_counts().unwrap();
+    assert!(
+        unfolded.new + unfolded.changed + unfolded.gone > counts.new + counts.changed + counts.gone,
+        "the destinations count once shown: {counts:?} {unfolded:?}"
+    );
 }
 
 #[test]
@@ -910,18 +919,20 @@ fn shown_with(m: &Model, c: Change) -> u64 {
             .filter(|r| is(r.change.as_ref()))
             .count(),
         TrafficView::Blocked => t.blocked.rows().iter().filter(|r| is(r.change())).count(),
-        TrafficView::Treemap | TrafficView::Exposure => 0,
+        TrafficView::Volume => t.volume.rows().iter().filter(|r| is(r.change())).count(),
+        TrafficView::Exposure => 0,
     };
     n as u64
 }
 
 /// #79: the header counts the rows the view shows, in every view, App-to-app
-/// with `o` off (pair rows) and on (service rows), under every `n`.
+/// with `o` off (pair rows) and on (service rows), Volume folded and
+/// unfolded, under every `n`.
 #[test]
 fn the_header_counts_equal_the_rows_each_view_shows_under_every_n() {
     let mut m = compared();
     let mut seen = Vec::new();
-    for step in 0..6 {
+    for step in 0..8 {
         match step {
             0 => {}
             // App-to-app pairs, then by service, then the sections.
@@ -931,6 +942,8 @@ fn the_header_counts_equal_the_rows_each_view_shows_under_every_n() {
                 quiet(&mut m, key('o'));
                 quiet(&mut m, key('x'));
             }
+            // Volume (#89): its sources, then every destination unfolded.
+            7 => quiet(&mut m, key('E')),
             _ => quiet(&mut m, key('v')),
         }
         let what = format!(
@@ -963,7 +976,7 @@ fn the_header_counts_equal_the_rows_each_view_shows_under_every_n() {
         }
         seen.push(what);
     }
-    assert_eq!(seen.len(), 6, "{seen:?}");
+    assert_eq!(seen.len(), 8, "{seen:?}");
 }
 
 /// The foreground of the first cell of `text` at `w`×`h`, if it is on
@@ -1021,11 +1034,12 @@ fn transitions(m: &Model) -> (Vec<String>, bool, usize) {
         TrafficView::Aggregate => of(t.pairs_table(), |r| r.change.as_ref()),
         TrafficView::Mesh => of(&t.mesh, |r| r.change.as_ref()),
         TrafficView::Blocked => of(&t.blocked, |r| r.change()),
-        TrafficView::Treemap | TrafficView::Exposure => (Vec::new(), false, 0),
+        // Volume has `Δ` only: its rows are bars.
+        TrafficView::Volume | TrafficView::Exposure => (Vec::new(), false, 0),
     }
 }
 
-/// #79 (fix round 1): in compare mode every view but the Treemap has a
+/// #79 (fix round 1): in compare mode every view but Volume has a
 /// `was→now` column after `Δ`, filled on CHG rows only with the short
 /// decisions (`allow→pot.bl`), in the warning colour, fitting at 80
 /// columns; the decision cells stay as they are; compare off, no column.
@@ -1191,10 +1205,10 @@ comment = "look again"
             TrafficView::Aggregate => fits(t.pairs_table(), 80),
             TrafficView::Mesh => fits(&t.mesh, 80),
             TrafficView::Blocked => fits(&t.blocked, 80),
-            TrafficView::Treemap | TrafficView::Exposure => (true, 0),
+            TrafficView::Volume | TrafficView::Exposure => (true, 0),
         };
         assert!(ok, "{what}: {used} cells at 80");
-        if t.view != TrafficView::Treemap {
+        if t.view != TrafficView::Volume {
             assert!(transitions(&m).1, "{what}: was→now shown");
         }
     }

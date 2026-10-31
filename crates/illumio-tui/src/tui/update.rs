@@ -9,10 +9,9 @@ use crate::tui::form::{Completing, FieldKind, Form, FormEvent};
 use crate::tui::help::{HelpContext, HelpPage};
 use crate::tui::label_editor::LabelFilterEditor;
 use crate::tui::model::{
-    By, Connection, Dir, Drill, EventsFilterEdit, Model, ObjectKind, ObjectsState, Overlay,
-    PceUsage, PendingAction, PolicyPane, PolicyState, QueryState, Range, Screen, SectionRow,
-    StatusKind, StatusLine, TrafficData, TrafficState, TrafficView, WritesState, queries_text,
-    rule_line,
+    By, Connection, Drill, EventsFilterEdit, Model, ObjectKind, ObjectsState, Overlay, PceUsage,
+    PendingAction, PolicyPane, PolicyState, QueryState, Range, Screen, SectionRow, StatusKind,
+    StatusLine, TrafficData, TrafficState, TrafficView, WritesState, queries_text, rule_line,
 };
 use crate::tui::msg::{
     Cmd, CutList, DraftFailure, DraftOutcome, FocusedOutcome, Msg, ObjectsPayload, QueryOutcome,
@@ -24,7 +23,6 @@ use crate::tui::ui::widgets::overlay::{
 };
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use pce::models::{EventFilter, PolicyDecision, PolicyScope, Workload};
-use pce::traffic::treemap::Weight;
 use pce::traffic::{Decisions, Direction, Focus, FocusDirection, GroupKey, QueryProgress};
 use pce::write::{
     Outcome, Plan, ProvisionRequest, ProvisionSubset, RevertRequest, WriteError, provision_counts,
@@ -188,11 +186,6 @@ fn on_msg(model: &mut Model, msg: Msg) -> Vec<Cmd> {
         Msg::Mouse(me) => on_mouse(model, me),
         Msg::Resize(w, h) => {
             model.size = (w, h);
-            let area = crate::tui::ui::screens::traffic::treemap_area(model.size);
-            if area != model.traffic.treemap.area {
-                model.traffic.treemap.area = area;
-                model.traffic.relayout_treemap();
-            }
             Vec::new()
         }
         Msg::Tick(now) => {
@@ -464,7 +457,6 @@ fn on_msg(model: &mut Model, msg: Msg) -> Vec<Cmd> {
                     }
                     model.traffic.data = Some(data);
                     model.traffic.drill = None;
-                    model.traffic.treemap.zoom = None;
                     model.traffic.rebuild_views();
                     model.traffic.show_detail = false;
                     model.traffic.query = QueryState::Idle;

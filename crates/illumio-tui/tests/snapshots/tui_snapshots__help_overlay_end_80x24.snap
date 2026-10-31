@@ -24,5 +24,5 @@ expression: out
 │y / n          send / cancel a shown request                                 ││
 │Esc            close overlay / cancel                                        ││
 │q / Ctrl-C     quit                                                          ││
-│more: Commands · App-to-app · Blocked · Mesh · Treemap · Exposure · Marks +11│╯
+│more: Commands · App-to-app · Blocked · Mesh · Volume · Exposure · Marks +11 │╯
 ╰─────────────────────────── Tab next · S-Tab prev · a all · j/k scroll · Esc ╯

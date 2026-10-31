@@ -14,7 +14,6 @@ pub mod resolved;
 pub mod sections;
 pub mod steps;
 pub mod transition;
-pub mod treemap;
 pub mod volume;
 
 pub use aggregate::{

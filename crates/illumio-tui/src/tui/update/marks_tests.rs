@@ -65,7 +65,7 @@ fn m_toggles_squelched_rows_in_every_view_without_a_request() {
         TrafficView::Aggregate,
         TrafficView::Mesh,
         TrafficView::Blocked,
-        TrafficView::Treemap,
+        TrafficView::Volume,
     ] {
         m.traffic.view = view;
         let before = m.traffic.show_squelched;
@@ -250,11 +250,25 @@ fn m_opens_the_form_prefilled_from_the_row_in_every_view() {
         )
     );
     quiet(&mut m, kc(KeyCode::Esc));
-    // The treemap drills first.
-    m.traffic.view = TrafficView::Treemap;
+    // Volume: a source holds many pairs, a destination row is one.
+    m.traffic.view = TrafficView::Volume;
     quiet(&mut m, key('m'));
-    assert_eq!(m.status.text, "m: Enter drills to the flows, mark there");
+    assert_eq!(m.status.text, "m: on a destination row (Enter unfolds)");
     assert_eq!(m.overlay, Overlay::None);
+    quiet(&mut m, kc(KeyCode::Enter));
+    quiet(&mut m, key('j'));
+    quiet(&mut m, key('m'));
+    assert_eq!(
+        values(&m),
+        fields(
+            "reviewed",
+            "app=shop env=prod",
+            "app=crm env=prod",
+            "",
+            "",
+            "30d"
+        )
+    );
 }
 
 #[test]

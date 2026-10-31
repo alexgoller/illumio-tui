@@ -945,8 +945,7 @@ pub(super) fn scroll_focused(model: &mut Model, down: bool) {
                 TrafficView::Mesh => step(&mut t.mesh, down, page),
                 TrafficView::Blocked => step(&mut t.blocked, down, page),
                 TrafficView::Exposure => step(&mut t.exposure_rows, down, page),
-                // The wheel moves table rows; the treemap has none.
-                TrafficView::Treemap => {}
+                TrafficView::Volume => step(&mut t.volume, down, page),
             }
         }
         Screen::Policy if model.policy.search.is_some() => {

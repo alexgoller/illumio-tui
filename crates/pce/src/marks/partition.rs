@@ -351,7 +351,7 @@ fn group_key(g: &FlowGroup) -> GroupKey {
     (g.src.clone(), g.dst.clone(), g.service.clone())
 }
 
-/// Pairs (plain or by service; the treemap's groups): `agg` is the view's
+/// Pairs (plain or by service; the Volume view's groups): `agg` is the view's
 /// own aggregator, applied to the flows `rows` came from.
 pub fn annotate_groups(
     rows: &mut [FlowGroup],

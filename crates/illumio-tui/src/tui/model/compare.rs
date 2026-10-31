@@ -1,6 +1,6 @@
 //! Compare mode on the Traffic screen (`c`): the baseline result, which
 //! rows each view shows (`n`), the counts the Result header names, and the
-//! `Δ` column of every view but the Treemap.
+//! `Δ` column of every view.
 use super::*;
 use pce::traffic::{Change, ChangeSet, CompareCounts, RowChange};
 
@@ -66,6 +66,8 @@ pub struct ViewCounts {
     pub apps: CompareCounts,
     pub mesh: CompareCounts,
     pub blocked: CompareCounts,
+    /// Volume's sources and unfolded destinations.
+    pub volume: CompareCounts,
 }
 
 /// Compare mode: on from `c` until `C`, a filter or window change, or a
@@ -94,8 +96,7 @@ impl CompareState {
     }
 }
 
-/// The title of the column every view but the Treemap gains in compare
-/// mode.
+/// The title of the column every view gains in compare mode.
 pub const DELTA_COLUMN: &str = "Δ";
 
 fn delta_cell(c: Option<&RowChange>) -> String {
@@ -366,6 +367,10 @@ pub fn delta_mesh_column() -> Column<MeshRow> {
     delta_column!(MeshRow, mesh_change)
 }
 
+pub fn delta_volume_column() -> Column<VolumeRow> {
+    delta_column!(VolumeRow, VolumeRow::change)
+}
+
 /// The Flows columns with `src` and `dst` narrowed to make room for the
 /// `Δ` column (5 cells with its gap).
 pub(super) fn make_room_for_delta<T>(mut cols: Vec<Column<T>>, on: bool) -> Vec<Column<T>> {
@@ -399,8 +404,8 @@ pub fn is_gone(c: Option<&RowChange>) -> bool {
 }
 
 impl TrafficState {
-    /// The rows per change of the view on screen; `None` on the Treemap
-    /// (it has no `Δ`).
+    /// The rows per change of the view on screen; `None` on Exposure (it
+    /// has no `Δ`).
     pub fn view_counts(&self) -> Option<CompareCounts> {
         let c = &self.compare.as_ref()?.counts;
         Some(match self.view {
@@ -410,13 +415,14 @@ impl TrafficState {
             TrafficView::Aggregate => c.pairs,
             TrafficView::Mesh => c.mesh,
             TrafficView::Blocked => c.blocked,
-            TrafficView::Treemap | TrafficView::Exposure => return None,
+            TrafficView::Volume => c.volume,
+            TrafficView::Exposure => return None,
         })
     }
 
     /// The Result header's compare part: `vs 7d before · 12 new · 3
     /// changed · 5 gone` (`· gone only` while `n` narrows), `vs 7d before
-    /// · baseline running`, or on the Treemap `vs 7d before · no Δ here`.
+    /// · baseline running`, or on Exposure `vs 7d before · no Δ here`.
     pub fn compare_meta(&self) -> Option<String> {
         self.compare_meta_with(true)
     }

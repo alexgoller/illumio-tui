@@ -314,6 +314,46 @@ pub fn render_spanning_spans<T>(
     row_style: &dyn Fn(&T) -> Style,
     spanning: &dyn Fn(&T, usize) -> Option<SpanningRow>,
 ) {
+    render_spanning_inner(f, area, view, theme, block, row_style, spanning, None);
+}
+
+/// `render_spanning_spans` for a table whose every row is laid out by
+/// `spanning`: its header line is `header(width)`, not the columns'
+/// titles (Volume's bars).
+#[allow(clippy::too_many_arguments)]
+pub fn render_spanning_header<T>(
+    f: &mut Frame,
+    area: Rect,
+    view: &TableView<T>,
+    theme: &Theme,
+    block: Block,
+    row_style: &dyn Fn(&T) -> Style,
+    spanning: &dyn Fn(&T, usize) -> Option<SpanningRow>,
+    header: &dyn Fn(usize) -> String,
+) {
+    render_spanning_inner(
+        f,
+        area,
+        view,
+        theme,
+        block,
+        row_style,
+        spanning,
+        Some(header),
+    );
+}
+
+#[allow(clippy::too_many_arguments)]
+fn render_spanning_inner<T>(
+    f: &mut Frame,
+    area: Rect,
+    view: &TableView<T>,
+    theme: &Theme,
+    block: Block,
+    row_style: &dyn Fn(&T) -> Style,
+    spanning: &dyn Fn(&T, usize) -> Option<SpanningRow>,
+    header_of: Option<&dyn Fn(usize) -> String>,
+) {
     let inner = block.inner(area);
     f.render_widget(block, area);
     if inner.height == 0 || inner.width == 0 || render_empty(f, inner, view, theme) {
@@ -333,12 +373,15 @@ pub fn render_spanning_spans<T>(
     let line_of = |cells: Vec<String>| -> String {
         clip_width(&cells.join(" "), avail).trim_end().to_string()
     };
-    let header = line_of(
-        cols.iter()
-            .zip(&widths)
-            .map(|(&(ci, _, _), &w)| fit(view.columns[ci].title, w, false))
-            .collect(),
-    );
+    let header = match header_of {
+        Some(h) => clip_width(&h(avail), avail).trim_end().to_string(),
+        None => line_of(
+            cols.iter()
+                .zip(&widths)
+                .map(|(&(ci, _, _), &w)| fit(view.columns[ci].title, w, false))
+                .collect(),
+        ),
+    };
     let mut lines = vec![Line::from(Span::styled(
         format!("{}{header}", if gutter { "    " } else { "  " }),
         theme.header_style(),

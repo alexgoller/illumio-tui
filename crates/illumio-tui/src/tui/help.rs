@@ -116,7 +116,7 @@ pub const HELP_GROUPS: &[HelpGroup] = &[
     HelpGroup {
         title: "Traffic",
         lines: &[
-            key("v", "cycle Flows · App-to-app · Mesh · Blocked · Treemap"),
+            key("v", "cycle Flows · App-to-app · Mesh · Blocked · Volume"),
             key("f", "edit filter: window src dst svc decision transmission"),
             more("", "in f: , and · | or · ! excludes from the whole field"),
             more("", "svc 8000-8100/tcp · svc:NAME its ports · src: no fqdn:"),
@@ -154,7 +154,7 @@ pub const HELP_GROUPS: &[HelpGroup] = &[
                 "compare with a baseline before the window (default 7d)",
             ),
             more("", "Ctrl-N Ctrl-P step its length; > 7d or cap > 10k asks"),
-            more("", "Δ: NEW CHG GONE (dim) · not in the Treemap"),
+            more("", "Δ: NEW CHG GONE (dim)"),
             more("", "was→now: a CHG row's decisions (allow→pot.bl)"),
             more("", "a pair's: what changed (+1 svc · allow→block)"),
             key("n / C", "show all · new · changed · gone / compare off"),
@@ -246,11 +246,11 @@ pub const HELP_GROUPS: &[HelpGroup] = &[
         lines: &[key("u / p", "show or hide the user · process columns")],
     },
     HelpGroup {
-        title: "Treemap",
-        lines: &[key(
-            "hjkl Enter b",
-            "move · zoom, then drill · conns/bytes · Esc out",
-        )],
+        title: "Volume",
+        lines: &[
+            key("Enter l / h", "unfold a source · fold (on → its source)"),
+            key("Enter E b", "on → its flows · all sources · conns/bytes"),
+        ],
     },
     HelpGroup {
         title: "Marks",
@@ -571,7 +571,7 @@ pub enum HelpTopic {
     Blocked,
     Sections,
     Mesh,
-    Treemap,
+    Volume,
     Exposure,
     Marks,
     AppOverlay,
@@ -597,7 +597,7 @@ impl HelpTopic {
         HelpTopic::Blocked,
         HelpTopic::Sections,
         HelpTopic::Mesh,
-        HelpTopic::Treemap,
+        HelpTopic::Volume,
         HelpTopic::Exposure,
         HelpTopic::Marks,
         HelpTopic::AppOverlay,
@@ -624,7 +624,7 @@ impl HelpTopic {
             HelpTopic::Blocked => "Blocked",
             HelpTopic::Sections => "Sections",
             HelpTopic::Mesh => "Mesh",
-            HelpTopic::Treemap => "Treemap",
+            HelpTopic::Volume => "Volume",
             HelpTopic::Exposure => "Exposure",
             HelpTopic::Marks => "Marks",
             HelpTopic::AppOverlay => "App overlay",
@@ -672,7 +672,7 @@ pub enum HelpContext {
     AppToApp,
     Mesh,
     Blocked,
-    Treemap,
+    Volume,
     Exposure,
     Policy,
     Objects,
@@ -695,7 +695,7 @@ impl HelpContext {
             HelpContext::AppToApp => "App-to-app",
             HelpContext::Mesh => "Mesh",
             HelpContext::Blocked => "Blocked",
-            HelpContext::Treemap => "Treemap",
+            HelpContext::Volume => "Volume",
             HelpContext::Exposure => "Exposure",
             HelpContext::Policy => "Policy",
             HelpContext::Objects => "Objects",
@@ -719,7 +719,7 @@ impl HelpContext {
             HelpContext::AppToApp => &[T::AppToApp, T::Sections, T::Traffic, T::Everywhere],
             HelpContext::Blocked => &[T::Blocked, T::Sections, T::Traffic, T::Everywhere],
             HelpContext::Mesh => &[T::Mesh, T::Traffic, T::Everywhere],
-            HelpContext::Treemap => &[T::Treemap, T::Traffic, T::Everywhere],
+            HelpContext::Volume => &[T::Volume, T::Traffic, T::Everywhere],
             HelpContext::Exposure => &[T::Exposure, T::Traffic, T::Everywhere],
             HelpContext::Policy => &[T::Policy, T::Pending, T::Writes, T::Everywhere],
             HelpContext::Objects => &[T::Objects, T::Writes, T::Everywhere],
@@ -757,7 +757,7 @@ impl HelpContext {
                 TrafficView::Aggregate => HelpContext::AppToApp,
                 TrafficView::Mesh => HelpContext::Mesh,
                 TrafficView::Blocked => HelpContext::Blocked,
-                TrafficView::Treemap => HelpContext::Treemap,
+                TrafficView::Volume => HelpContext::Volume,
                 TrafficView::Exposure => HelpContext::Exposure,
             },
             Screen::Policy => HelpContext::Policy,
@@ -934,7 +934,7 @@ mod tests {
         ("/", "search in the current table (Enter keep, Esc clear)"),
         ("r", "refresh the current screen (bypasses the cache)"),
         ("a", "toggle auto-refresh for the current screen"),
-        ("v", "cycle Flows · App-to-app · Mesh · Blocked · Treemap"),
+        ("v", "cycle Flows · App-to-app · Mesh · Blocked · Volume"),
         ("f", "edit filter: window src dst svc decision transmission"),
         ("+ / -", "widen (re-runs the window) / narrow (no request)"),
         ("", "window steps 1h 6h 12h 1d 2d 3d 1w 2w 4w 90d"),
@@ -1000,10 +1000,8 @@ mod tests {
             "order: conns ↓ · app A→Z · flows ↓ (App-to-app, Flows)",
         ),
         ("u / p", "show or hide the user · process columns"),
-        (
-            "hjkl Enter b",
-            "move · zoom, then drill · conns/bytes · Esc out",
-        ),
+        // Was the Treemap's `hjkl Enter b`: Volume (#89) took its place.
+        ("Enter l / h", "unfold a source · fold (on → its source)"),
         ("w", "draft allow rule from a blocked flow or row (writes)"),
         (
             "m",
@@ -1081,7 +1079,7 @@ mod tests {
         (HelpContext::AppToApp, "App-to-app"),
         (HelpContext::Mesh, "Mesh"),
         (HelpContext::Blocked, "Blocked"),
-        (HelpContext::Treemap, "Treemap"),
+        (HelpContext::Volume, "Volume"),
         (HelpContext::Exposure, "Exposure"),
         (HelpContext::Policy, "Policy"),
         (HelpContext::Objects, "Objects"),
@@ -1177,10 +1175,10 @@ mod tests {
 
     #[test]
     fn fit_names_never_cuts_a_name() {
-        let names = ["Commands", "Mesh", "Treemap"];
+        let names = ["Commands", "Mesh", "Volume"];
         assert_eq!(
             fit_names("more: ", &names, 80).as_deref(),
-            Some("more: Commands · Mesh · Treemap")
+            Some("more: Commands · Mesh · Volume")
         );
         assert_eq!(
             fit_names("more: ", &names, 25).as_deref(),
@@ -1208,7 +1206,7 @@ mod tests {
             let HelpPage::Group(t) = p else { panic!() };
             seen.push(t);
         }
-        assert_eq!(seen[0], HelpTopic::Treemap, "the group after Mesh");
+        assert_eq!(seen[0], HelpTopic::Volume, "the group after Mesh");
         assert_eq!(*seen.last().unwrap(), HelpTopic::Mesh, "round to Mesh");
         for t in HelpTopic::ALL {
             assert!(seen.contains(&t), "{t:?}");

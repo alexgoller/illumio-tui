@@ -687,7 +687,7 @@ fn one_flow_answer(m: &Model) -> Msg {
 }
 
 #[test]
-fn a_on_pairs_mesh_and_treemap_opens_the_rows_app() {
+fn a_on_pairs_mesh_and_volume_opens_the_rows_app() {
     let mut m = everything();
     quiet(&mut m, key('v'));
     assert_eq!(m.traffic.apps_state.by, crate::tui::model::By::Pairs);
@@ -713,15 +713,14 @@ fn a_on_pairs_mesh_and_treemap_opens_the_rows_app() {
     let mut m = with_policy(with_workloads(
         crate::tui::test_support::model_with_rich_flows(),
     ));
-    m.traffic.view = TrafficView::Treemap;
-    let tm = &m.traffic.treemap;
-    let label = tm.tile(tm.current().expect("a tile")).label.clone();
+    m.traffic.view = TrafficView::Volume;
+    let label = m.traffic.volume.selected_item().expect("a row").name();
     let cmds = update(&mut m, key('A'));
     assert_eq!(m.overlay, Overlay::App);
     assert_eq!(
         view(&m).focus.app_text(),
         label,
-        "a treemap tile: its source group"
+        "a Volume source row: its source group"
     );
     assert!(requests(&cmds) <= 2);
     assert_eq!(requests(&cmds), view(&m).requests);

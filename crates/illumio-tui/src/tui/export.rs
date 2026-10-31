@@ -30,9 +30,8 @@ pub fn current_table(model: &Model) -> Result<Csv, String> {
                 (TrafficView::Flows, _) => without_transition(t.flows.export()),
                 (TrafficView::Mesh, _) => without_transition(t.mesh.export()),
                 (TrafficView::Exposure, _) => t.exposure_rows.export(),
-                (TrafficView::Treemap, _) => {
-                    return Err("the treemap has no table to export".into());
-                }
+                // The tree as shown: sources, and the unfolded destinations.
+                (TrafficView::Volume, _) => t.volume.export(),
                 // App-to-app by pairs as `traffic groups --csv`; by service (`o`) as
                 // `traffic groups --services --csv`.
                 (_, None) if t.apps_state.by_service => service_pairs(&t.services),

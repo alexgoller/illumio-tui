@@ -2,7 +2,9 @@
 //! rebuild (one `stat` of a local file, never a request), the result on
 //! screen split by them (squelched flows left out of every view unless
 //! `M`), and what each view's meta says about them.
-use crate::tui::model::{FlowRow, RowKind, SectionRow, StatusLine, TrafficState, TrafficView};
+use crate::tui::model::{
+    FlowRow, RowKind, SectionRow, StatusLine, TrafficState, TrafficView, VolumeRow,
+};
 use pce::marks::{Action, ActiveMarks, Hit, Marked, Marker, RowMarks, partition};
 use pce::traffic::{FlowGroup, MeshRow, ResolvedFlow};
 use std::borrow::Cow;
@@ -19,7 +21,7 @@ pub struct Squelch {
 impl Squelch {
     /// `37 rows (412 flows) squelched · M shows them`, or with `M` on
     /// `37 rows (412 flows) squelched, shown ~ · M hides them`; flows only
-    /// for the treemap (`412 flows squelched`). `None` without a squelch hit.
+    /// for Exposure (`412 flows squelched`). `None` without a squelch hit.
     pub fn meta(self, shown: bool, rows: bool) -> Option<String> {
         if self.flows == 0 {
             return None;
@@ -49,14 +51,15 @@ pub struct MarkedView {
     /// Marks waiting for draft decisions (`D`) to apply.
     pub waiting: usize,
     /// Each view's squelched counts (`Squelch`): Flows, App-to-app's pairs,
-    /// by service and sections, Blocked, Mesh, the treemap.
+    /// by service and sections, Blocked, Mesh, Volume (its pairs; Exposure
+    /// says its flows).
     pub flows: Squelch,
     pub pairs: Squelch,
     pub services: Squelch,
     pub sections: Squelch,
     pub blocked: Squelch,
     pub mesh: Squelch,
-    pub treemap: Squelch,
+    pub volume: Squelch,
     /// Blocked: flow records still blocked or potentially blocked.
     pub blocked_open: u64,
     /// Blocked: flow records accepted as blocked (not problems).
@@ -79,6 +82,12 @@ pub fn row_marker(rm: &RowMarks) -> Option<Marker> {
 /// App-to-app pairs' (and by service) gutter.
 pub fn group_marker(g: &FlowGroup) -> Option<Marker> {
     g.marks.as_ref().and_then(row_marker)
+}
+
+/// Volume's gutter: a destination its pair's marks, a source its pairs'
+/// summed.
+pub fn volume_marker(r: &VolumeRow) -> Option<Marker> {
+    r.node.group.marks.as_ref().and_then(row_marker)
 }
 
 /// The Mesh view's gutter.
@@ -266,6 +275,7 @@ impl TrafficState {
         self.apps.marker = sections;
         self.blocked.marker = sections;
         self.flows_grouped.marker = sections;
+        self.volume.marker = on.then_some(volume_marker as fn(&VolumeRow) -> Option<Marker>);
         self.sync_marks_columns();
     }
 
@@ -313,8 +323,8 @@ impl TrafficState {
             TrafficView::Aggregate => mv.pairs,
             TrafficView::Mesh => mv.mesh,
             TrafficView::Blocked => mv.blocked,
-            // Exposure counts the squelched flows only, as the treemap.
-            TrafficView::Treemap | TrafficView::Exposure => mv.treemap,
+            // Exposure counts the squelched flows only.
+            TrafficView::Volume | TrafficView::Exposure => mv.volume,
         };
         let mut parts: Vec<String> = Vec::new();
         if view == TrafficView::Blocked && mv.accepted > 0 {
@@ -323,7 +333,7 @@ impl TrafficState {
                 mv.blocked_open, mv.accepted
             ));
         }
-        let rows = !matches!(view, TrafficView::Treemap | TrafficView::Exposure);
+        let rows = view != TrafficView::Exposure;
         parts.extend(sq.meta(self.show_squelched, rows));
         if mv.waiting > 0 {
             parts.push(format!(
@@ -387,7 +397,7 @@ pub(crate) mod tests {
         assert_eq!(t.flows.rows().len(), 21, "30 flows, 9 squelched");
         assert_eq!(mv.flows, Squelch { rows: 9, flows: 9 });
         assert_eq!(mv.pairs, Squelch { rows: 4, flows: 9 });
-        assert_eq!(mv.treemap.flows, 9);
+        assert_eq!(mv.volume, Squelch { rows: 4, flows: 9 }, "as the pairs");
         assert_eq!(mv.blocked, Squelch { rows: 2, flows: 2 });
         assert_eq!((mv.blocked_open, mv.accepted), (10, 2));
         let shown: u64 = t.groups.rows().iter().map(|g| g.flows).sum();
@@ -432,8 +442,8 @@ pub(crate) mod tests {
             Some("10 blocked flows · 2 accepted · 2 rows (2 flows) squelched · M shows them")
         );
         assert_eq!(
-            t.marks_meta(TrafficView::Treemap).as_deref(),
-            Some("9 flows squelched · M shows them")
+            t.marks_meta(TrafficView::Volume).as_deref(),
+            Some("4 rows (9 flows) squelched · M shows them")
         );
     }
 
@@ -678,20 +688,27 @@ pub(crate) mod tests {
         let out = render_to_string(&m, 160, 40);
         assert!(out.contains("10 blocked flows · 2 accepted"), "{out}");
         assert!(out.contains("· 2 pot.blocked · 2 accepted"), "{out}");
-        m.traffic.view = TrafficView::Treemap;
+        m.traffic.view = TrafficView::Volume;
+        m.traffic.fold_all_volume();
         let out = render_to_string(&m, 160, 40);
-        assert!(out.contains("9 flows squelched · M shows them"), "{out}");
+        assert!(
+            out.contains("4 rows (9 flows) squelched · M shows them"),
+            "{out}"
+        );
+        let marker = |m: &crate::tui::model::Model, src: &str, dst: Option<&str>| {
+            let r = m.traffic.volume.rows().iter().find(|r| {
+                r.src().join("/") == src && r.dst().map(|d| d.join("/")).as_deref() == dst
+            });
+            r.and_then(volume_marker)
+        };
         assert_eq!(
-            m.traffic.treemap.highlight("shop/dev", Some("shop/prod")),
+            marker(&m, "shop/dev", Some("shop/prod")),
             Some(Marker::Critical)
         );
-        assert_eq!(
-            m.traffic.treemap.highlight("hr/prod", None),
-            Some(Marker::Revisit)
-        );
-        assert_eq!(
-            m.traffic.treemap.highlight("erp/prod", None),
-            None,
+        assert_eq!(marker(&m, "hr/prod", None), Some(Marker::Revisit));
+        assert!(
+            !marker(&m, "erp/prod", None)
+                .is_some_and(|x| x.action().is_some_and(|a| a.is_highlight())),
             "reviewed is no highlight"
         );
         assert!(out.contains("◆ hr/"), "{out}");

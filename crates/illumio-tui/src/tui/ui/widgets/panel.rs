@@ -15,7 +15,7 @@ pub fn panel<'a>(title: &'a str, meta: &'a str, theme: &Theme, focused: bool) ->
 }
 
 /// `panel` with the meta given as styled spans, for a meta part of which
-/// reads differently (the Treemap's `b bytes` when no flow has bytes).
+/// reads differently (Volume's `b bytes` when no flow has bytes).
 pub fn panel_spans<'a>(
     title: &'a str,
     meta: Vec<Span<'a>>,

@@ -36,7 +36,14 @@ fn the_focus_narrows_every_view_and_clearing_brings_them_back() {
     assert!(t.flows.rows().iter().all(|r| &*r.dst_group == "crm/prod"));
     assert!(!t.groups.is_empty() && t.groups.rows().iter().all(|g| g.dst == crm));
     assert!(!t.mesh.is_empty() && t.mesh.rows().iter().all(|r| r.dst == crm));
-    assert!(t.treemap.groups.iter().all(|g| g.dst == crm));
+    assert!(t.volume_state.unfolded.is_empty());
+    t.fold_all_volume();
+    assert!(
+        t.volume
+            .rows()
+            .iter()
+            .all(|r| r.dst().is_none_or(|d| d == crm.as_slice()))
+    );
     assert!(
         !t.blocked.is_empty() && t.blocked.rows().iter().all(|r| r.app == crm),
         "flow 6 is blocked into crm/prod"
