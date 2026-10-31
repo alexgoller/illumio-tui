@@ -15,6 +15,7 @@ pub mod sections;
 pub mod steps;
 pub mod transition;
 pub mod treemap;
+pub mod volume;
 
 pub use aggregate::{
     ConnsByDecision, Dominant, DraftCounts, FlowGroup, compact_count, dominant, group_by_labels,
@@ -24,7 +25,7 @@ pub use aggregate::{
 pub use compare::{
     Change, ChangeSet, CompareCounts, Compared, DecisionSet, FlowKey, PairDelta, RowChange, Sides,
     compare_by, compare_flows, compare_groups, compare_mesh, compare_pairs, compare_sections,
-    flow_key, keep_changes, keep_section_changes, squelched_keys, without_keys,
+    flow_key, join_changes, keep_changes, keep_section_changes, squelched_keys, without_keys,
 };
 pub use duration::compact_duration;
 pub use exposure::{

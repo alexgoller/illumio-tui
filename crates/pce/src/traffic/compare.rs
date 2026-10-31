@@ -547,6 +547,51 @@ pub fn compare_groups(rows: &mut Vec<FlowGroup>, sides: Sides<'_, FlowGroup>) ->
     )
 }
 
+/// The change of a row made of other rows (a pair of its service keys,
+/// a Volume source of its pairs): new when every part is, gone when
+/// every part is, changed when any is new, gone or changed, else the
+/// same; the decisions the union of the parts', and the parts that came,
+/// went and changed as a `PairDelta`. `cs` is never empty.
+pub fn join_changes(cs: &[RowChange]) -> RowChange {
+    let all = |c: Change| cs.iter().all(|x| x.change == c);
+    let change = if all(Change::New) {
+        Change::New
+    } else if all(Change::Gone) {
+        Change::Gone
+    } else if cs.iter().any(|x| x.change != Change::Same) {
+        Change::Changed
+    } else {
+        Change::Same
+    };
+    let union = |f: fn(&RowChange) -> Option<DecisionSet>| {
+        cs.iter().filter_map(f).reduce(DecisionSet::union)
+    };
+    // #80: the keys that came and went, and the decisions of those on
+    // both sides.
+    let count = |c: Change| cs.iter().filter(|x| x.change == c).count() as u32;
+    let both = cs
+        .iter()
+        .filter(|x| matches!(x.change, Change::Changed | Change::Same));
+    let pair = PairDelta {
+        added: count(Change::New),
+        removed: count(Change::Gone),
+        changed: count(Change::Changed),
+        baseline: both
+            .clone()
+            .filter_map(|x| x.baseline_decision)
+            .fold(DecisionSet::default(), DecisionSet::union),
+        recent: both
+            .filter_map(|x| x.recent_decision)
+            .fold(DecisionSet::default(), DecisionSet::union),
+    };
+    RowChange {
+        change,
+        baseline_decision: union(|c| c.baseline_decision),
+        recent_decision: union(|c| c.recent_decision),
+        pair: Some(pair),
+    }
+}
+
 /// Plain pairs (no service) from their service keys: `services` are the
 /// same view's pairs by service, already compared (`compare_groups`, gone
 /// ones included). A pair is new when every one of its service keys is,
@@ -570,54 +615,15 @@ pub fn compare_pairs(
                 .push(c);
         }
     }
-    let join = |cs: &[RowChange]| -> RowChange {
-        let all = |c: Change| cs.iter().all(|x| x.change == c);
-        let change = if all(Change::New) {
-            Change::New
-        } else if all(Change::Gone) {
-            Change::Gone
-        } else if cs.iter().any(|x| x.change != Change::Same) {
-            Change::Changed
-        } else {
-            Change::Same
-        };
-        let union = |f: fn(&RowChange) -> Option<DecisionSet>| {
-            cs.iter().filter_map(f).reduce(DecisionSet::union)
-        };
-        // #80: the keys that came and went, and the decisions of those on
-        // both sides.
-        let count = |c: Change| cs.iter().filter(|x| x.change == c).count() as u32;
-        let both = cs
-            .iter()
-            .filter(|x| matches!(x.change, Change::Changed | Change::Same));
-        let pair = PairDelta {
-            added: count(Change::New),
-            removed: count(Change::Gone),
-            changed: count(Change::Changed),
-            baseline: both
-                .clone()
-                .filter_map(|x| x.baseline_decision)
-                .fold(DecisionSet::default(), DecisionSet::union),
-            recent: both
-                .filter_map(|x| x.recent_decision)
-                .fold(DecisionSet::default(), DecisionSet::union),
-        };
-        RowChange {
-            change,
-            baseline_decision: union(|c| c.baseline_decision),
-            recent_decision: union(|c| c.recent_decision),
-            pair: Some(pair),
-        }
-    };
     for p in pairs.iter_mut() {
         if let Some(cs) = by_pair.remove(&(p.src.clone(), p.dst.clone())) {
-            p.change = Some(join(&cs));
+            p.change = Some(join_changes(&cs));
         }
     }
     for b in kept_baseline_pairs {
         if let Some(cs) = by_pair.remove(&(b.src.clone(), b.dst.clone())) {
             let mut g = b.clone();
-            g.change = Some(join(&cs));
+            g.change = Some(join_changes(&cs));
             g.marks = None;
             pairs.push(g);
         }
