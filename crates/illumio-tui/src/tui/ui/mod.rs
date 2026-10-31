@@ -77,6 +77,7 @@ pub fn view(model: &Model, f: &mut Frame) {
         Overlay::Hygiene => screens::objects::render_hygiene(model, f, area),
         Overlay::Pending => widgets::overlay::render_pending(model, f, area),
         Overlay::Impact => widgets::overlay::render_impact(model, f, area),
+        Overlay::News { scroll } => widgets::overlay::render_news(model, *scroll, f, area),
         Overlay::Error(text) => widgets::overlay::render_error(model, text, f, area),
         Overlay::EventsEditor(e) => widgets::overlay::render_events_editor(model, e, f, area),
         Overlay::EventTypes { selected, actors } => {
@@ -143,6 +144,12 @@ fn render_header(model: &Model, f: &mut Frame, area: Rect) {
         model.stats.calls,
         pce::traffic::human_bytes(model.stats.bytes)
     );
+    // A newer release (the update check, never a PCE call), before the counter.
+    let update = model
+        .update_available
+        .as_ref()
+        .map(|v| format!("↑ {v}"))
+        .unwrap_or_default();
     let mut spans = vec![Span::styled(" illumio-tui ", t.title_style())];
     // Before the host: a long hostname must never push the safety marker off.
     if model.writes.enabled {
@@ -156,14 +163,18 @@ fn render_header(model: &Model, f: &mut Frame, area: Rect) {
     spans.push(conn);
     let left = Line::from(spans);
     let left_w = left.width() as u16;
-    let right_w = Line::from(right.as_str()).width() as u16;
+    let mut right_spans = Vec::new();
+    if !update.is_empty() {
+        right_spans.push(Span::styled(update, Style::new().fg(t.accent)));
+        right_spans.push(Span::styled(" · ", t.dim_style()));
+    }
+    right_spans.push(Span::styled(right, t.dim_style()));
+    let right = Line::from(right_spans);
+    let right_w = right.width() as u16;
     f.render_widget(Paragraph::new(left).style(t.base()), area);
     if area.width > left_w + right_w {
         let r = Rect::new(area.x + area.width - right_w, area.y, right_w, 1);
-        f.render_widget(
-            Paragraph::new(Line::from(Span::styled(right, t.dim_style()))).style(t.base()),
-            r,
-        );
+        f.render_widget(Paragraph::new(right).style(t.base()), r);
     }
 }
 

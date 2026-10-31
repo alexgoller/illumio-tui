@@ -338,6 +338,9 @@ pub struct Runtime {
     /// because the runtime, not `update`, swaps the client.
     switch_tx: UnboundedSender<SwitchResult>,
     switch_rx: UnboundedReceiver<SwitchResult>,
+    /// Where `:news` and the startup update check read releases. Empty in
+    /// every runtime but `run`'s: no test runtime ever asks GitHub.
+    pub updates: crate::tui::news::UpdateSource,
 }
 
 impl Runtime {
@@ -393,6 +396,7 @@ impl Runtime {
                 rx,
                 switch_tx,
                 switch_rx,
+                updates: crate::tui::news::UpdateSource::default(),
             },
             tx,
         )
@@ -759,6 +763,16 @@ impl Runtime {
                 let me = crate::snapshot::Identity::of(&self.model.profile.name, self.pce.client());
                 let result = crate::snapshot::baseline::load_trend(&dir, &me);
                 self.apply(Msg::TrendLoaded(result));
+            }
+            // GitHub's release list at most (never the PCE, not counted).
+            Cmd::LoadNews => {
+                self.model.busy += 1;
+                let source = self.updates.clone();
+                let tx = self.tx.clone();
+                tokio::spawn(async move {
+                    let view = crate::tui::news::load(&source).await;
+                    let _ = tx.send(Msg::NewsLoaded(view));
+                });
             }
             Cmd::SaveSnapshot {
                 dir,
@@ -1432,6 +1446,7 @@ impl Runtime {
                 | Msg::RollbackRead { .. }
                 | Msg::WatchDone { .. }
                 | Msg::SnapshotSaved(_)
+                | Msg::NewsLoaded(_)
         );
         let cmds = update(&mut self.model, msg);
         if task_result {
@@ -1440,6 +1455,23 @@ impl Runtime {
         for c in cmds {
             self.execute(c);
         }
+    }
+
+    /// The once-a-day update check, in the background: nothing unless
+    /// `updates` has a base URL and a cache (only `run` sets them, with
+    /// the check on); a newer release arrives as `Msg::UpdateFound`, a
+    /// failure as nothing. Never delays startup, never counted as a PCE call.
+    pub fn start_update_check(&self) {
+        let Some((base, cache)) = self.updates.checks() else {
+            return;
+        };
+        let (base, cache) = (base.to_string(), cache.to_path_buf());
+        let tx = self.tx.clone();
+        tokio::spawn(async move {
+            if let Some(v) = crate::updates::startup_check(&base, &cache).await {
+                let _ = tx.send(Msg::UpdateFound(v.to_string()));
+            }
+        });
     }
 
     /// Tick period, or None when idle (no CPU use while nothing happens).
@@ -1735,10 +1767,19 @@ pub async fn run(global: GlobalArgs) -> Result<(), CliError> {
     );
     // The profile's default filters, before anything loads (no request).
     crate::tui::update::apply_defaults(&mut model);
+    // A new version since the last start: said once, at the first `ready`.
+    model.updated_to = crate::updates::last_version_path()
+        .and_then(|p| crate::updates::note_start(&p, crate::updates::CURRENT));
+    let check_updates = cfg.check_updates;
     let (mut rt, _tx) = Runtime::with_args(Arc::new(ctx.pce), model, global);
     rt.writer = writer.map(Arc::new);
     rt.write_inputs = Some(inputs);
+    rt.updates = crate::tui::news::UpdateSource {
+        base_url: check_updates.then(crate::updates::base_url),
+        cache: crate::updates::cache_path(),
+    };
     rt.execute(Cmd::Connect);
+    rt.start_update_check();
 
     let mut terminal = ratatui::init();
     learn_size(&mut rt, &terminal);

@@ -312,7 +312,10 @@ fn on_msg(model: &mut Model, msg: Msg) -> Vec<Cmd> {
                 None if !unresolved.is_empty() => {
                     StatusLine::warn(format!("ready · rule search: {}", unresolved.join(", ")))
                 }
-                None => StatusLine::info("ready"),
+                None => match model.updated_to.take() {
+                    Some(v) => StatusLine::info(format!("updated to {v} · :news for what's new")),
+                    None => StatusLine::info("ready"),
+                },
             };
             model.objects.index_failed = false;
             model.workloads.index_failed = false;
@@ -884,6 +887,23 @@ fn on_msg(model: &mut Model, msg: Msg) -> Vec<Cmd> {
             };
             Vec::new()
         }
+        Msg::UpdateFound(version) => {
+            model.update_available = Some(version);
+            Vec::new()
+        }
+        Msg::NewsLoaded(view) => {
+            // Never over another overlay (a confirm, a form): it waits.
+            model.status = match (&view.note, model.overlay == Overlay::None) {
+                (_, false) => StatusLine::info("news loaded: close this, then :news"),
+                (Some(note), true) if note.contains("GitHub") => StatusLine::warn(note.clone()),
+                _ => StatusLine::info("news · j/k scroll · Esc closes"),
+            };
+            if model.overlay == Overlay::None {
+                model.overlay = Overlay::News { scroll: 0 };
+            }
+            model.news = view;
+            Vec::new()
+        }
         Msg::BaselinesListed(result) => {
             wl_compare::baselines_listed(model, result);
             Vec::new()
@@ -1310,6 +1330,8 @@ mod label_filter_tests;
 /// `I` on Policy: the workloads behind a rule's impact (issue #53).
 #[cfg(test)]
 mod matched_tests;
+#[cfg(test)]
+mod news_tests;
 #[cfg(test)]
 mod rule_form_ruleset_tests;
 /// `f` on Policy: the rule search across rulesets (issue #51).

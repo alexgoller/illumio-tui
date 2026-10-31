@@ -331,6 +331,11 @@ pub enum Overlay {
     /// `I` in the pending overlay, `:impact`: what provisioning the draft
     /// would change; its state is `PolicyState::impact`.
     Impact,
+    /// `:news`: the release notes in `Model::news`; `scroll` is the first
+    /// line shown.
+    News {
+        scroll: usize,
+    },
 }
 
 impl PartialEq for Overlay {
@@ -420,6 +425,7 @@ impl PartialEq for Overlay {
                 },
             ) => a == b && x == y,
             (Overlay::Ven { selected: a }, Overlay::Ven { selected: b }) => a == b,
+            (Overlay::News { scroll: a }, Overlay::News { scroll: b }) => a == b,
             (
                 Overlay::SnapshotPicker {
                     items: a,
@@ -915,6 +921,13 @@ pub struct Model {
     pub enforce_send: Option<Box<crate::tui::enforce::EnforceSend>>,
     pub quit: bool,
     pub started: Instant,
+    /// A newer release the update check knows of: `↑ x.y.z` in the header.
+    pub update_available: Option<String>,
+    /// The version this start is the first of (the last start was another
+    /// one): the first `ready` says so, once.
+    pub updated_to: Option<String>,
+    /// `:news`' release notes.
+    pub news: crate::tui::news::NewsView,
 }
 
 impl Model {
@@ -1004,6 +1017,9 @@ impl Model {
             enforce_send: None,
             quit: false,
             started: Instant::now(),
+            update_available: None,
+            updated_to: None,
+            news: crate::tui::news::NewsView::default(),
         }
     }
 

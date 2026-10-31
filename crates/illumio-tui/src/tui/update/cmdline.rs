@@ -161,6 +161,10 @@ pub fn on_command(model: &mut Model, cmd: Command) -> Vec<Cmd> {
             }
         },
         Command::Snapshot(label) => save_snapshot(model, label),
+        Command::News => {
+            model.status = StatusLine::info("news: reading the release notes…");
+            vec![Cmd::LoadNews]
+        }
         Command::Draft => show_policy(model, PolicyScope::Draft),
         Command::Active => show_policy(model, PolicyScope::Active),
     }

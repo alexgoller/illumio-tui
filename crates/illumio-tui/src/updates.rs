@@ -169,7 +169,7 @@ fn from_github(list: Vec<GithubRelease>) -> Vec<Release> {
 }
 
 fn sort_newest_first(list: &mut [Release]) {
-    list.sort_by(|a, b| b.parsed().cmp(&a.parsed()));
+    list.sort_by_key(|r| std::cmp::Reverse(r.parsed()));
 }
 
 /// The releases in the built-in CHANGELOG, newest first: every
@@ -415,6 +415,58 @@ pub async fn startup_check(base: &str, path: &Path) -> Option<Version> {
     }
     let (_, cache) = fetch_and_record(base, Some(path)).await.ok()?;
     cache.update_for(Version::current())
+}
+
+/// The releases newer than this binary, for `news` and `:news`: the
+/// cache while its answer is under a day old; else one fetch from `base`
+/// (recorded), or, with no `base` (the TUI with the check off), the cache
+/// as it is. A failed fetch falls back to an older answer in the cache.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Newer {
+    pub releases: Vec<Release>,
+    /// The meta's cache word: `hit` (the cache), `miss` (a fetch), `none`.
+    pub cache: &'static str,
+    /// Why they may be incomplete (GitHub unreachable).
+    pub warning: Option<String>,
+}
+
+pub async fn newer_releases(base: Option<&str>, path: Option<&Path>) -> Newer {
+    let current = Version::current();
+    let cached = path
+        .and_then(Cache::load)
+        .filter(|c| c.fetched_at.is_some());
+    let from_cache = |c: &Cache, warning| Newer {
+        releases: c.newer_than(current),
+        cache: "hit",
+        warning,
+    };
+    match (base, &cached) {
+        (_, Some(c)) if c.fetched_recently(jiff::Timestamp::now()) => from_cache(c, None),
+        (None, Some(c)) => from_cache(c, None),
+        (None, None) => Newer {
+            releases: Vec::new(),
+            cache: "none",
+            warning: None,
+        },
+        (Some(base), _) => match fetch_and_record(base, path).await {
+            Ok((_, c)) => Newer {
+                releases: c.newer_than(current),
+                cache: "miss",
+                warning: None,
+            },
+            Err(e) => match &cached {
+                Some(c) => {
+                    let at = c.fetched_at.map(|t| t.to_string()).unwrap_or_default();
+                    from_cache(c, Some(format!("{e}; showing the releases cached at {at}")))
+                }
+                None => Newer {
+                    releases: Vec::new(),
+                    cache: "none",
+                    warning: Some(format!("{e}; showing only the built-in notes")),
+                },
+            },
+        },
+    }
 }
 
 /// `news`' range: `A..` or `A..B`, as git's: after A, up to B included.

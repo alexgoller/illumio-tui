@@ -6,7 +6,7 @@
 use super::GlobalArgs;
 use super::error::CliError;
 use super::output::{Meta, OutputFormat, choose_format, write_json};
-use crate::updates::{self, Cache, Install, Range, Release, Version};
+use crate::updates::{self, Install, Range, Version};
 use clap::{Args, Subcommand};
 use serde::Serialize;
 use std::io::Write;
@@ -114,36 +114,6 @@ pub async fn run_update(global: &GlobalArgs, cmd: &UpdateCmd) -> Result<(), CliE
     }
 }
 
-/// `news`' releases newer than this binary: the cache while fresh, else
-/// one fetch (recorded); a failed fetch falls back to an older cache, with
-/// a warning. The meta's cache word with them.
-async fn newer_releases(warnings: &mut Vec<String>) -> (Vec<Release>, &'static str) {
-    let current = Version::current();
-    let path = updates::cache_path();
-    let cached = path.as_deref().and_then(Cache::load);
-    if let Some(c) = cached
-        .as_ref()
-        .filter(|c| c.fetched_recently(jiff::Timestamp::now()))
-    {
-        return (c.newer_than(current), "hit");
-    }
-    match updates::fetch_and_record(&updates::base_url(), path.as_deref()).await {
-        Ok((_, cache)) => (cache.newer_than(current), "miss"),
-        Err(e) => {
-            let fallback = cached.filter(|c| c.fetched_at.is_some());
-            let what = match fallback.as_ref().and_then(|c| c.fetched_at) {
-                Some(at) => format!("the releases cached at {at}"),
-                None => "only the built-in notes".to_string(),
-            };
-            warnings.push(format!("{e}; showing {what}"));
-            match fallback {
-                Some(c) => (c.newer_than(current), "hit"),
-                None => (Vec::new(), "none"),
-            }
-        }
-    }
-}
-
 pub async fn run_news(global: &GlobalArgs, args: &NewsArgs) -> Result<(), CliError> {
     let started = std::time::Instant::now();
     if !global.json && !global.fields.is_empty() {
@@ -166,7 +136,11 @@ pub async fn run_news(global: &GlobalArgs, args: &NewsArgs) -> Result<(), CliErr
         }
         (Vec::new(), "none")
     } else {
-        newer_releases(&mut warnings).await
+        let newer =
+            updates::newer_releases(Some(&updates::base_url()), updates::cache_path().as_deref())
+                .await;
+        warnings.extend(newer.warning);
+        (newer.releases, newer.cache)
     };
     let releases = updates::select(range.as_ref(), current, &updates::embedded(), &newer);
     for w in &warnings {

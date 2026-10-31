@@ -4037,3 +4037,108 @@ async fn impact_loads_once_and_reopening_costs_nothing() {
     assert!(!model.policy.impact.loading);
     assert_eq!(model.busy, 0);
 }
+
+// ---- update check and :news (#91) ----
+
+#[tokio::test]
+async fn a_test_runtime_never_asks_github_and_news_comes_from_the_built_in_notes() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v2/health"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"status": "normal"})))
+        .expect(1)
+        .mount(&server)
+        .await;
+    mount_objects(&server).await;
+    let (mut rt, _tx) = Runtime::new(pce_for(&server), model());
+    // Built without a source: the startup check has nothing to ask.
+    assert_eq!(rt.updates, illumio_tui::tui::news::UpdateSource::default());
+    rt.execute(Cmd::Connect);
+    rt.start_update_check();
+    rt.execute(Cmd::LoadNews);
+    let events = stream::iter([
+        Event::Key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)),
+        Event::Key(KeyEvent::new(KeyCode::Char('q'), KeyModifiers::NONE)),
+    ])
+    .then(|e| async move {
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        e
+    });
+    let model = run_loop(&mut rt, Box::pin(events), &mut |_| {}).await;
+    assert!(model.quit);
+    assert_eq!(model.update_available, None);
+    let current = illumio_tui::updates::CURRENT;
+    assert_eq!(model.news.releases.len(), 1);
+    assert_eq!(model.news.releases[0].version, current);
+    assert_eq!(model.stats.calls, 5, "health + four lists, nothing else");
+    let paths: Vec<String> = server
+        .received_requests()
+        .await
+        .unwrap()
+        .iter()
+        .map(|r| r.url.path().to_string())
+        .collect();
+    assert!(paths.iter().all(|p| p.starts_with("/api/v2/")), "{paths:?}");
+    assert_eq!(model.busy, 0);
+}
+
+#[tokio::test]
+async fn the_startup_check_asks_once_and_the_header_shows_the_newer_release() {
+    let github = MockServer::start().await;
+    let c = illumio_tui::updates::Version::current();
+    let next = illumio_tui::updates::Version(c.0, c.1, c.2 + 1).to_string();
+    Mock::given(method("GET"))
+        .and(path("/repos/alexgoller/illumio-tui/releases"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!([
+            {"tag_name": format!("v{next}"), "body": "## New\n\n- more", "draft": false, "prerelease": false}
+        ])))
+        .expect(1)
+        .mount(&github)
+        .await;
+    // No PCE request at all: the check is not the PCE's.
+    let pce = MockServer::start().await;
+    Mock::given(wiremock::matchers::any())
+        .respond_with(ResponseTemplate::new(500))
+        .expect(0)
+        .mount(&pce)
+        .await;
+    let dir = tempfile::tempdir().unwrap();
+    let (mut rt, _tx) = Runtime::new(pce_for(&pce), model());
+    rt.updates = illumio_tui::tui::news::UpdateSource {
+        base_url: Some(github.uri()),
+        cache: Some(dir.path().join("update.json")),
+    };
+    rt.start_update_check();
+    // `:news` after the check: the fresh cache, no second request (a
+    // second start within the day is the same: `updates::startup_check`).
+    let events = stream::once(async {
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        Event::Key(KeyEvent::new(KeyCode::Char(':'), KeyModifiers::NONE))
+    })
+    .chain(stream::iter(
+        "news\n"
+            .chars()
+            .map(|c| match c {
+                '\n' => Event::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)),
+                c => Event::Key(KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE)),
+            })
+            .collect::<Vec<_>>(),
+    ))
+    .chain(stream::once(async {
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        Event::Key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE))
+    }))
+    .chain(stream::once(async {
+        Event::Key(KeyEvent::new(KeyCode::Char('q'), KeyModifiers::NONE))
+    }));
+    let model = run_loop(&mut rt, Box::pin(events), &mut |_| {}).await;
+    assert_eq!(model.update_available.as_deref(), Some(next.as_str()));
+    assert_eq!(model.news.releases[0].version, next, ":news from the cache");
+    assert_eq!(model.stats.calls, 0, "not counted as a PCE call");
+    let header = illumio_tui::tui::test_support::render_to_string(&model, 120, 30);
+    let first = header.lines().next().unwrap();
+    assert!(
+        first.contains(&format!("↑ {next} · api 0 calls")),
+        "{first}"
+    );
+}

@@ -367,6 +367,10 @@ pub(super) fn on_key(model: &mut Model, k: KeyEvent) -> Vec<Cmd> {
         Overlay::EventsEditor(e) => events_editor_key(model, e, k),
         Overlay::EventTypes { selected, actors } => event_types_key(model, selected, actors, k),
         Overlay::Ven { selected } => ven_key(model, selected, k),
+        Overlay::News { scroll } => {
+            news_key(model, scroll, k);
+            Vec::new()
+        }
         Overlay::SnapshotPicker { items, selected } => {
             wl_compare::picker_key(model, items, selected, k)
         }
@@ -839,6 +843,39 @@ pub(super) fn table_key<T>(table: &mut crate::tui::table::TableView<T>, k: KeyEv
     }
 }
 
+/// `:news`' keys: the scroll keys of a long text, `?` the help, `Esc` /
+/// `q` / `Enter` close it.
+fn news_key(model: &mut Model, scroll: usize, k: KeyEvent) {
+    let last = crate::tui::news::last_scroll(&model.news, model.size);
+    let page = crate::tui::news::inner(model.size)
+        .1
+        .saturating_sub(1)
+        .max(1);
+    let ctrl = k.modifiers.contains(KeyModifiers::CONTROL);
+    let next = match k.code {
+        KeyCode::Esc | KeyCode::Enter | KeyCode::Char('q') => {
+            model.overlay = Overlay::None;
+            return;
+        }
+        KeyCode::Char('?') => {
+            open_help(model);
+            return;
+        }
+        KeyCode::Char('d') if ctrl => scroll + page / 2,
+        KeyCode::Char('u') if ctrl => scroll.saturating_sub(page / 2),
+        KeyCode::Down | KeyCode::Char('j') => scroll + 1,
+        KeyCode::Up | KeyCode::Char('k') => scroll.saturating_sub(1),
+        KeyCode::PageDown | KeyCode::Char(' ') => scroll + page,
+        KeyCode::PageUp => scroll.saturating_sub(page),
+        KeyCode::Home | KeyCode::Char('g') => 0,
+        KeyCode::End | KeyCode::Char('G') => last,
+        _ => scroll,
+    };
+    model.overlay = Overlay::News {
+        scroll: next.min(last),
+    };
+}
+
 /// `?` / `:help`: the help at its top, on the keys of where it was opened
 /// (`help::HelpContext::of`). Opened over the app view, the generator, an
 /// event's detail, the pending changes or the marks, closing it goes back there.
@@ -859,6 +896,7 @@ pub(super) fn open_help(model: &mut Model) {
         | Overlay::WhereUsed
         | Overlay::Hygiene
         | Overlay::Impact
+        | Overlay::News { .. }
         | Overlay::RuleFilter(_)) => o.clone(),
         _ => Overlay::None,
     };

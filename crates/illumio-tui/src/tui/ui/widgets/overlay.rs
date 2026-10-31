@@ -1679,3 +1679,46 @@ pub fn screen_hint_more(screen: Screen, view: TrafficView) -> &'static str {
         (Screen::Objects, _) => "W where used",
     }
 }
+
+/// `:news`: the release notes, laid out plainly (`crate::tui::news`),
+/// from line `scroll`; the box stays full at the end.
+pub fn render_news(model: &Model, scroll: usize, f: &mut Frame, area: Rect) {
+    use crate::tui::news::{LineKind, lines, rect};
+    let t = &model.theme;
+    let r = rect(area);
+    f.render_widget(Clear, r);
+    let width = r.width.saturating_sub(2) as usize;
+    let rows = r.height.saturating_sub(2) as usize;
+    let all = lines(&model.news, width);
+    let total = all.len();
+    let first = scroll.min(total.saturating_sub(rows));
+    let shown: Vec<Line> = all
+        .into_iter()
+        .skip(first)
+        .take(rows)
+        .map(|(kind, text)| {
+            let style = match kind {
+                LineKind::Release => Style::new().fg(t.accent).add_modifier(Modifier::BOLD),
+                LineKind::Heading => t.header_style(),
+                LineKind::Text => t.base(),
+                LineKind::Dim => t.dim_style(),
+            };
+            Line::from(Span::styled(clip(&plain(&text), width), style))
+        })
+        .collect();
+    let meta = if total > rows {
+        format!(
+            "j/k scroll · lines {}-{}/{total} · Esc closes",
+            first + 1,
+            (first + rows).min(total)
+        )
+    } else {
+        "Esc closes".to_string()
+    };
+    f.render_widget(
+        Paragraph::new(shown)
+            .block(panel("What's new", &meta, t, true))
+            .style(t.base()),
+        r,
+    );
+}

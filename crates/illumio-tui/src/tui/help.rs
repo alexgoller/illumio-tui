@@ -104,6 +104,7 @@ pub const HELP_GROUPS: &[HelpGroup] = &[
             key("", ":snapshot [label]  policy, labels, workloads to a file"),
             key("", ":hygiene  unused objects, workloads missing labels"),
             key("", ":impact  what provisioning the draft would change"),
+            key("", ":news  what's new since this version (↑ x.y.z: newer)"),
             key("", ":writes [on|off]  :export[!] <path>  :batch"),
             key("", "(the table on screen as CSV; ! overwrites)"),
             key("", ":save <name>  the screen's filter, in the profile"),

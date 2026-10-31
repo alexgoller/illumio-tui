@@ -1,0 +1,28 @@
+---
+source: crates/illumio-tui/tests/tui_snapshots.rs
+expression: "render_to_string(&news_model(), 80, 24)"
+---
+ illumio-tui pce.example · org 5 ●                  ↑ 0.5.9 · api 5 calls · 20K
+╭ What's new ────────────────────────────────────────────────────── Esc closes ╮
+│v0.5.9 — 2026-11-02                                                           │
+│New                                                                           │
+│                                                                              │
+│• What's new (#91). illumio-tui news and :news show the release notes; the    │
+│  header shows ↑ 0.5.9 when a newer release is out.                           │
+│  ◦ Once a day, in the background; check_updates = false turns it off.        │
+│• update check --fail-if-outdated exits 10.                                   │
+│                                                                              │
+│Fixed                                                                         │
+│                                                                              │
+│• A fix.                                                                      │
+│                                                                              │
+│v0.5.8 — 2026-10-31                                                           │
+│New                                                                           │
+│                                                                              │
+│• Provision impact (#86).                                                     │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+╰──────────────────────────────────────────────────────────────────────────────╯
+ready         f filter  r run  a auto  v view  g group  / search  : cmd  ? help

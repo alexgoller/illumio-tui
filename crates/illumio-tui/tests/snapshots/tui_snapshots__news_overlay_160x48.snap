@@ -1,0 +1,52 @@
+---
+source: crates/illumio-tui/tests/tui_snapshots.rs
+expression: "render_to_string(&news_model(), 160, 48)"
+---
+ illumio-tui pce.example · org 5 ●                                                                                                  ↑ 0.5.9 · api 5 calls · 20K
+  1 Traffic  │  2 Policy  │  3╭ What's new ────────────────────────────────────────────────────────────────────────── Esc closes ╮
+╭ Filters ────────────────────│v0.5.9 — 2026-11-02                                                                               │w 24h · cap 1000 · unbounded ╮
+│window 24h  src *  dst *  svc│New                                                                                               │                             │
+╰─────────────────────────────│                                                                                                  │─────────────────────────────╯
+╭ Result ─────────────────────│• What's new (#91). illumio-tui news and :news show the release notes; the header shows ↑ 0.5.9   │───── no query yet · press r ╮
+│run a query with r, edit the │  when a newer release is out.                                                                    │                             │
+╰─────────────────────────────│  ◦ Once a day, in the background; check_updates = false turns it off.                            │─────────────────────────────╯
+╭ Flows · conns: lifetime ────│• update check --fail-if-outdated exits 10.                                                       │─────────────────────────────╮
+│no rows                      │                                                                                                  │                             │
+│                             │Fixed                                                                                             │                             │
+│                             │                                                                                                  │                             │
+│                             │• A fix.                                                                                          │                             │
+│                             │                                                                                                  │                             │
+│                             │v0.5.8 — 2026-10-31                                                                               │                             │
+│                             │New                                                                                               │                             │
+│                             │                                                                                                  │                             │
+│                             │• Provision impact (#86).                                                                         │                             │
+│                             │                                                                                                  │                             │
+│                             │                                                                                                  │                             │
+│                             │                                                                                                  │                             │
+│                             │                                                                                                  │                             │
+│                             │                                                                                                  │                             │
+│                             │                                                                                                  │                             │
+│                             │                                                                                                  │                             │
+│                             │                                                                                                  │                             │
+│                             │                                                                                                  │                             │
+│                             │                                                                                                  │                             │
+│                             │                                                                                                  │                             │
+│                             │                                                                                                  │                             │
+│                             │                                                                                                  │                             │
+│                             │                                                                                                  │                             │
+│                             │                                                                                                  │                             │
+│                             │                                                                                                  │                             │
+│                             │                                                                                                  │                             │
+│                             │                                                                                                  │                             │
+│                             │                                                                                                  │                             │
+│                             │                                                                                                  │                             │
+╰─────────────────────────────│                                                                                                  │─────────────────────────────╯
+╭ Detail ─────────────────────│                                                                                                  │──────────────── Enter shows ╮
+│select a flow and press Enter│                                                                                                  │                             │
+│                             │                                                                                                  │                             │
+│                             │                                                                                                  │                             │
+│                             │                                                                                                  │                             │
+│                             │                                                                                                  │                             │
+│                             │                                                                                                  │                             │
+╰─────────────────────────────╰──────────────────────────────────────────────────────────────────────────────────────────────────╯─────────────────────────────╯
+ready                                     f filter  r run  a auto  v view  g group  / search  +/- window  ]/[ cap  D draft  c compare  :fl saved  : cmd  ? help

@@ -282,6 +282,11 @@ pub enum Msg {
     Exported(Result<String, String>),
     /// `:snapshot`'s file written (the status line text) or why not.
     SnapshotSaved(Result<String, String>),
+    /// The startup update check (or its cache) knows of this newer
+    /// release. Never sent on a failure: the check shows nothing then.
+    UpdateFound(String),
+    /// `:news`' release notes (`Cmd::LoadNews`).
+    NewsLoaded(crate::tui::news::NewsView),
     /// `b` on Workloads (`Cmd::ListBaselines`): the profile's snapshots
     /// that hold workloads, oldest first, or why they cannot be listed.
     BaselinesListed(Result<Vec<crate::snapshot::SnapshotMeta>, String>),
@@ -426,6 +431,11 @@ pub enum Cmd {
         headers: Vec<&'static str>,
         rows: Vec<Vec<String>>,
     },
+    /// `:news`: the release notes, from the update cache, one request to
+    /// GitHub's release list when the check is on and the cache is stale
+    /// (never the PCE), and the built-in CHANGELOG; answered with
+    /// `Msg::NewsLoaded`.
+    LoadNews,
     /// `:snapshot`: the snapshot reads (cached), then the file in `dir`;
     /// answered with `Msg::SnapshotSaved`.
     SaveSnapshot {
@@ -530,7 +540,9 @@ pub enum Cmd {
 impl PartialEq for Cmd {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
-            (Cmd::Connect, Cmd::Connect) | (Cmd::Quit, Cmd::Quit) => true,
+            (Cmd::Connect, Cmd::Connect)
+            | (Cmd::Quit, Cmd::Quit)
+            | (Cmd::LoadNews, Cmd::LoadNews) => true,
             (Cmd::LoadIndex(a), Cmd::LoadIndex(b)) => a == b,
             (
                 Cmd::RunQuery {

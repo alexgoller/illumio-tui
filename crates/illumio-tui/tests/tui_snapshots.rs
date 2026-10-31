@@ -4059,3 +4059,53 @@ fn traffic_filter_editor_wraps_a_long_error_over_three_rows() {
     assert!(out.contains("fqdn:NAME"), "{out}");
     insta::assert_snapshot!("traffic_filter_editor_long_error_80x24", out);
 }
+
+/// `:news` (#91) over a fixed release, with the header's `↑` hint.
+fn news_model() -> illumio_tui::tui::model::Model {
+    use illumio_tui::tui::model::Overlay;
+    use illumio_tui::tui::news::NewsView;
+    use illumio_tui::updates::Release;
+    let mut m = model_fixture();
+    m.update_available = Some("0.5.9".into());
+    m.news = NewsView {
+        releases: vec![
+            Release {
+                version: "0.5.9".into(),
+                date: Some("2026-11-02".into()),
+                body: "## New\n\n- **What's new** (#91). `illumio-tui news` and `:news` show the release notes; the header shows `↑ 0.5.9` when a newer release is out.\n  - Once a day, in the background; `check_updates = false` turns it off.\n- `update check --fail-if-outdated` exits 10.\n\n## Fixed\n\n- A fix.".into(),
+            },
+            Release {
+                version: "0.5.8".into(),
+                date: Some("2026-10-31".into()),
+                body: "## New\n\n- **Provision impact** (#86).".into(),
+            },
+        ],
+        note: None,
+    };
+    m.overlay = Overlay::News { scroll: 0 };
+    m
+}
+
+#[test]
+fn news_overlay_80x24() {
+    insta::assert_snapshot!(
+        "news_overlay_80x24",
+        render_to_string(&news_model(), 80, 24)
+    );
+}
+
+#[test]
+fn news_overlay_160x48() {
+    insta::assert_snapshot!(
+        "news_overlay_160x48",
+        render_to_string(&news_model(), 160, 48)
+    );
+}
+
+#[test]
+fn news_overlay_styled_80x24() {
+    insta::assert_snapshot!(
+        "news_overlay_styled_80x24",
+        render_styled(&news_model(), 80, 24)
+    );
+}

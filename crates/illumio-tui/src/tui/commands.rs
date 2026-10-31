@@ -59,6 +59,9 @@ pub enum Command {
     /// `:snapshot [label]`: the policy, labels and workloads saved to a
     /// local snapshot file (`illumio-tui snapshot save`'s reads).
     Snapshot(Option<String>),
+    /// `:news`: what's new in the releases after this one (else this one's
+    /// notes), as `illumio-tui news`.
+    News,
     Quit,
     Help,
 }
@@ -129,6 +132,7 @@ pub fn parse(input: &str) -> Result<Command, String> {
         "used" | "where-used" => no_arg(Command::Used),
         "hygiene" => no_arg(Command::Hygiene),
         "impact" => no_arg(Command::Impact),
+        "news" => no_arg(Command::News),
         "marks" => Ok(Command::Marks((!arg.is_empty()).then(|| arg.to_string()))),
         "save" => with_arg(Command::Save, "save <name>"),
         "filters" | "fl" => no_arg(Command::Filters),
@@ -213,6 +217,8 @@ mod tests {
         assert_eq!(parse("q").unwrap(), Command::Quit);
         assert_eq!(parse("batch").unwrap(), Command::Batch);
         assert_eq!(parse("snapshot").unwrap(), Command::Snapshot(None));
+        assert_eq!(parse("news").unwrap(), Command::News);
+        assert!(parse("news 0.5.6..").is_err());
         assert_eq!(
             parse("snap before Q4").unwrap(),
             Command::Snapshot(Some("before Q4".into()))
