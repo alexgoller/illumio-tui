@@ -16,8 +16,8 @@ use pce::NameIndex;
 use pce::models::{ActorMatch, PolicyScope, Transmission, WorkloadFilter};
 use pce::readiness::{AppReadiness, Gap, ReadinessInput, readiness};
 use pce::traffic::{
-    DraftSummary, GroupKey, TrafficQueryBuilder, app_labels, keys_or_default, parse_app,
-    parse_window, resolve_flows,
+    DraftSummary, GroupKey, TrafficQueryBuilder, app_labels, canonical_app, keys_or_default,
+    parse_app, parse_window, resolve_flows,
 };
 use serde::Serialize;
 use std::sync::Arc;
@@ -414,12 +414,22 @@ pub(crate) async fn evaluate(ctx: &Context, args: &ReadinessArgs) -> Result<Eval
     }
     let narrowed = !apps.is_empty();
     guard(ctx, args)?;
+    let mut apps = apps;
     // The apps' labels, checked before any traffic request (exit 2 with
     // the closest values), and the workload filter they make.
     let mut label_groups = Vec::new();
     let mut app_labels_ = Vec::new();
     let fetched = if narrowed {
         let idx = ctx.pce.name_index(ctx.cache_mode).await?;
+        // Spelt as the labels are (`shop` finds `Shop`), as the flows carry them.
+        let mut spelt: Vec<GroupKey> = Vec::new();
+        for app in &apps {
+            let app = canonical_app(app, &keys, &idx).map_err(CliError::Args)?;
+            if !spelt.contains(&app) {
+                spelt.push(app);
+            }
+        }
+        apps = spelt;
         for app in &apps {
             let m = app_labels(app, &keys, &idx).map_err(CliError::Args)?;
             label_groups.push(pce::app::label_hrefs(&m));

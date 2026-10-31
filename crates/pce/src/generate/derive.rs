@@ -292,10 +292,11 @@ fn scope_of(flows: &[ResolvedFlow], f: &Focus, idx: &NameIndex) -> TargetScope {
         .iter()
         .zip(&f.app)
         .map(|(k, v)| {
-            input.1.label_href(k, v).map(|h| ResolvedLabel {
-                href: h.to_string(),
-                key: k.clone(),
-                value: v.clone(),
+            let l = input.1.find_label(k, v).ok().flatten()?;
+            Some(ResolvedLabel {
+                href: l.href.to_string(),
+                key: l.key.to_string(),
+                value: l.value.to_string(),
             })
         })
         .collect();

@@ -33,8 +33,8 @@ pub use exposure::{
 };
 pub use filter::{FilterExpr, ServiceExpr, parse_service, resolve_actor, resolve_service};
 pub use focus::{
-    Focus, FocusDirection, FocusedTraffic, GroupKey, app_labels, apps_in, closest, focus_flows,
-    focus_query, parse_app, queries_text, union_flows,
+    Focus, FocusDirection, FocusedTraffic, GroupKey, app_labels, apps_in, canonical_app, closest,
+    focus_flows, focus_query, parse_app, queries_text, union_flows,
 };
 pub use merge::{RecordKey, merge_flows, record_key};
 pub use mesh::{MeshColumns, MeshKey, MeshRow, mesh, mesh_key, process_sides};

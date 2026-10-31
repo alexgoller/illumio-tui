@@ -574,8 +574,8 @@ pub async fn run(ctx: &Context, args: &GenArgs) -> Result<(), CliError> {
             }
         }
     };
-    let focus = focus.focus;
     let idx = fetched.index.clone();
+    let focus = focus.focus.resolved(&idx).map_err(CliError::Args)?;
     if global.is_all() && idx.all_services_href().is_none() {
         return Err(CliError::Args(format!(
             "--granularity {}: the PCE has no All Services object; use app-ports or role-ports",

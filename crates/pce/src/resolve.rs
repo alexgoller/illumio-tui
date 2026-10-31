@@ -25,6 +25,14 @@ pub struct ResolvedLabel {
     pub value: String,
 }
 
+/// A label found by [`NameIndex::find_label`], in its real spelling.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LabelRef<'a> {
+    pub href: &'a str,
+    pub key: &'a str,
+    pub value: &'a str,
+}
+
 #[derive(Debug, Default)]
 pub struct NameIndex {
     labels: HashMap<String, Label>,
@@ -169,6 +177,49 @@ impl NameIndex {
         self.label_by_kv
             .get(&(key.to_string(), value.to_string()))
             .map(String::as_str)
+    }
+
+    /// The label a filter term names (#90), in any case: the exact
+    /// `key=value` wins, else the one label that matches without case;
+    /// `None` when no label does; an error naming them when several do
+    /// (`Web` and `web` under one key). Filters use this, write forms keep
+    /// the exact [`Self::label_href`].
+    pub fn find_label(&self, key: &str, value: &str) -> Result<Option<LabelRef<'_>>, String> {
+        let at = |k: &str, v: &str| {
+            self.label_by_kv
+                .get_key_value(&(k.to_string(), v.to_string()))
+                .map(|((k, v), href)| LabelRef {
+                    href,
+                    key: k,
+                    value: v,
+                })
+        };
+        if let Some(found) = at(key, value) {
+            return Ok(Some(found));
+        }
+        let mut hits: Vec<LabelRef<'_>> = Vec::new();
+        for (k, values) in &self.keys {
+            if k.eq_ignore_ascii_case(key) {
+                for v in values.iter().filter(|v| v.eq_ignore_ascii_case(value)) {
+                    hits.extend(at(k, v));
+                }
+            }
+        }
+        match hits.len() {
+            0 => Ok(None),
+            1 => Ok(hits.pop()),
+            _ => {
+                let names: Vec<String> = hits
+                    .iter()
+                    .map(|h| format!("{}={}", h.key, h.value))
+                    .collect();
+                let (last, rest) = names.split_last().expect("several hits");
+                Err(format!(
+                    "{key}={value} matches {} and {last}; write one exactly",
+                    rest.join(", ")
+                ))
+            }
+        }
     }
 
     /// Every label key, in the index's [`KeyOrder`].
@@ -731,6 +782,44 @@ mod tests {
         assert_eq!(idx.label_href("app", "nope"), None);
         assert_eq!(idx.label_keys(), vec!["app", "env", "loc", "role"]);
         assert_eq!(idx.values_for_key("role"), vec!["db", "web"]);
+    }
+
+    #[test]
+    fn find_label_ignores_case_but_an_exact_match_wins_and_several_are_an_error() {
+        let label = |n: u32, k: &str, v: &str| -> Label {
+            serde_json::from_value(serde_json::json!({
+                "href": format!("/orgs/5/labels/{n}"), "key": k, "value": v
+            }))
+            .unwrap()
+        };
+        let idx = NameIndex::new(
+            &[
+                label(1, "app", "Ordering"),
+                label(2, "app", "Web"),
+                label(3, "app", "web"),
+                label(4, "app", "WEB"),
+                label(5, "Role", "DB"),
+            ],
+            &[],
+            &[],
+            &[],
+        );
+        let at = |k: &str, v: &str| idx.find_label(k, v).map(|f| f.map(|l| l.href.to_string()));
+        assert_eq!(at("app", "ordering"), Ok(Some("/orgs/5/labels/1".into())));
+        assert_eq!(at("APP", "ORDERING"), Ok(Some("/orgs/5/labels/1".into())));
+        assert_eq!(at("role", "db"), Ok(Some("/orgs/5/labels/5".into())));
+        // Exact wins.
+        assert_eq!(at("app", "web"), Ok(Some("/orgs/5/labels/3".into())));
+        assert_eq!(at("app", "Web"), Ok(Some("/orgs/5/labels/2".into())));
+        assert_eq!(at("app", "nope"), Ok(None));
+        let found = idx.find_label("app", "ordering").unwrap().unwrap();
+        assert_eq!((found.key, found.value), ("app", "Ordering"));
+        assert_eq!(
+            at("app", "wEb"),
+            Err("app=wEb matches app=WEB, app=Web and app=web; write one exactly".into())
+        );
+        // The write path stays exact.
+        assert_eq!(idx.label_href("app", "ordering"), None);
     }
 
     #[test]

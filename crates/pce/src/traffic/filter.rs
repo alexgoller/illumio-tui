@@ -226,22 +226,24 @@ pub fn resolve_actor(
     workloads: &[Workload],
 ) -> Result<ActorMatch> {
     match expr {
-        FilterExpr::Label { key, value } => match idx.label_href(key, value) {
-            Some(href) => Ok(ActorMatch::Label {
-                label: Ref::new(href),
-            }),
-            None => {
-                let known = idx.values_for_key(key);
-                let hint = if known.is_empty() {
-                    format!("known keys: {}", idx.label_keys().join(", "))
-                } else {
-                    format!("known values for {key}: {}", known.join(", "))
-                };
-                Err(PceError::Invalid(format!(
-                    "unknown label {key}={value}; {hint}"
-                )))
+        FilterExpr::Label { key, value } => {
+            match idx.find_label(key, value).map_err(PceError::Invalid)? {
+                Some(l) => Ok(ActorMatch::Label {
+                    label: Ref::new(l.href),
+                }),
+                None => {
+                    let known = idx.values_for_key(key);
+                    let hint = if known.is_empty() {
+                        format!("known keys: {}", idx.label_keys().join(", "))
+                    } else {
+                        format!("known values for {key}: {}", known.join(", "))
+                    };
+                    Err(PceError::Invalid(format!(
+                        "unknown label {key}={value}; {hint}"
+                    )))
+                }
             }
-        },
+        }
         FilterExpr::IpList(name) => idx
             .ip_list_href(name)
             .map(|h| ActorMatch::IpList {

@@ -277,8 +277,8 @@ pub async fn run(ctx: &Context, args: &AppArgs) -> Result<(), CliError> {
     let Some(fetched) = fetch(ctx, &filter, Some(&focus)).await? else {
         return Ok(()); // a dry run; `app` has none, kept for completeness
     };
-    let focus = focus.focus;
     let idx = fetched.index.clone();
+    let focus = focus.focus.resolved(&idx).map_err(CliError::Args)?;
     let hrefs = label_hrefs(&focus.label_matches(&idx).map_err(CliError::Args)?);
     let wl = ctx
         .pce

@@ -143,6 +143,16 @@ impl Focus {
                 .all(|v| !v.is_empty() && v != "-" && !v.starts_with("ipl:"))
     }
 
+    /// The same focus with each label value in the spelling the PCE has
+    /// (#90: `shop/prod` finds `Shop/Prod`), so `keeps` compares what the
+    /// flows carry; see [`canonical_app`].
+    pub fn resolved(&self, idx: &NameIndex) -> Result<Focus, String> {
+        Ok(Focus {
+            app: canonical_app(&self.app, &self.keys, idx)?,
+            ..self.clone()
+        })
+    }
+
     /// The app's labels as one AND group, in key order.
     pub fn label_matches(&self, idx: &NameIndex) -> Result<Vec<ActorMatch>, String> {
         app_labels(&self.app, &self.keys, idx)
@@ -181,6 +191,24 @@ fn plural(n: usize, one: &str, many: &str) -> String {
     format!("{n} {}", if n == 1 { one } else { many })
 }
 
+/// `app` with each label value spelt as the PCE has it (#90). A slot no
+/// label has stays as typed, for [`app_labels`] to name; `-` and `ipl:`
+/// slots stay; several labels differing only in case are an error.
+pub fn canonical_app(app: &[String], keys: &[String], idx: &NameIndex) -> Result<GroupKey, String> {
+    let mut out = app.to_vec();
+    if app.len() == keys.len() {
+        for (v, k) in out.iter_mut().zip(keys) {
+            if v != "-"
+                && !v.starts_with("ipl:")
+                && let Some(l) = idx.find_label(k, v)?
+            {
+                *v = l.value.to_string();
+            }
+        }
+    }
+    Ok(out)
+}
+
 /// The label of each of `app`'s values under `keys`, as actor matches. An
 /// unknown value is named with up to three of the key's values closest to
 /// it; a `-` slot (a missing label) cannot be queried.
@@ -207,11 +235,12 @@ pub fn app_labels(
             misses.push(format!("no {key} label: a - slot cannot be queried"));
             continue;
         }
-        match idx.label_href(key, value) {
-            Some(href) => labels.push(ActorMatch::Label {
-                label: Ref::new(href),
+        match idx.find_label(key, value) {
+            Err(e) => misses.push(e),
+            Ok(Some(l)) => labels.push(ActorMatch::Label {
+                label: Ref::new(l.href),
             }),
-            None => {
+            Ok(None) => {
                 let near = closest(value, &idx.values_for_key(key), 3);
                 misses.push(if near.is_empty() {
                     format!("no {key}={value} label")

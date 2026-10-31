@@ -734,7 +734,10 @@ fn pending_for(
         .iter()
         .zip(app)
         .filter(|(_, v)| v.as_str() != "-")
-        .filter_map(|(k, v)| input.idx.label_href(k, v).map(str::to_string))
+        .filter_map(|(k, v)| {
+            let found = input.idx.find_label(k, v).ok().flatten();
+            found.map(|l| l.href.to_string())
+        })
         .collect();
     let scoped: HashSet<String> = app_policy(input.rule_sets, &hrefs, input.idx)
         .into_iter()

@@ -45,8 +45,8 @@ pub use iplist_size::{IpListSize, ip_list_contains, ip_list_size};
 pub use key_order::KeyOrder;
 pub use label_filter::{LabelFilter, LabelTerm};
 pub use resolve::{
-    NameIndex, ResolvedActor, ResolvedLabel, ResolvedService, RuleKind, RuleSetView, RuleView,
-    describe_actor, describe_ingress_service, pane_order,
+    LabelRef, NameIndex, ResolvedActor, ResolvedLabel, ResolvedService, RuleKind, RuleSetView,
+    RuleView, describe_actor, describe_ingress_service, pane_order,
 };
 pub use rule_filter::{ActorTerm, Position, RuleFilter, RuleRef, RuleTerm};
 
@@ -679,6 +679,7 @@ impl Pce {
         cancel: &tokio_util::sync::CancellationToken,
         progress: Option<&tokio::sync::mpsc::UnboundedSender<traffic::QueryProgress>>,
     ) -> Result<traffic::FocusedTraffic> {
+        let focus = &focus.resolved(idx).map_err(PceError::Invalid)?;
         let queries = focus.queries(base, idx).map_err(PceError::Invalid)?;
         let mut merged: Option<Vec<traffic::ResolvedFlow>> = None;
         let mut out = traffic::FocusedTraffic {
