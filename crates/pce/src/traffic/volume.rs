@@ -8,6 +8,7 @@ use super::compare::{ChangeSet, RowChange, join_changes};
 use super::resolved::ResolvedFlow;
 use crate::models::PolicyDecision;
 use std::collections::BTreeMap;
+use std::sync::Arc;
 
 /// What a row and its bar weigh: connections or bytes (`b`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -62,9 +63,13 @@ impl Split {
     }
 
     /// `61% blocked`, with `· 12% pb` when some is potentially blocked.
-    /// A share that is neither none nor all never reads `0%` or `100%`.
+    /// A share that is neither none nor all never reads `0%` or `100%`;
+    /// with nothing to share, `-`.
     pub fn blocked_text(&self) -> String {
         let total = self.total();
+        if total == 0 {
+            return "-".into();
+        }
         let mut s = format!("{}% blocked", percent(self.blocked, total));
         if self.potentially_blocked > 0 {
             s.push_str(&format!(
@@ -125,11 +130,27 @@ impl VolumeNode {
     }
 }
 
-/// A source group and its destinations.
+impl VolumeNode {
+    /// Compare mode: the node holds only baseline traffic.
+    pub fn is_gone(&self) -> bool {
+        self.group
+            .change
+            .is_some_and(|c| c.change == super::compare::Change::Gone)
+    }
+
+    /// The share line: `61% blocked · 12% pb` of the connections,
+    /// whatever the weight (blocked flows often report no bytes).
+    pub fn blocked_text(&self) -> String {
+        self.split(Weight::Connections).blocked_text()
+    }
+}
+
+/// A source group and its destinations, shared (`Arc`): a relayout copies
+/// reference counts, not nodes.
 #[derive(Debug, Clone, PartialEq)]
 pub struct VolumeSource {
-    pub node: VolumeNode,
-    pub dsts: Vec<VolumeNode>,
+    pub node: Arc<VolumeNode>,
+    pub dsts: Vec<Arc<VolumeNode>>,
 }
 
 /// Each pair's bytes per decision under `keys`, by (source, destination)
@@ -154,7 +175,8 @@ pub fn byte_splits(flows: &[ResolvedFlow], keys: &[String]) -> ByteSplits {
 /// baseline). A source sums its pairs (marks are left to the caller) and
 /// joins their changes when they carry one.
 pub fn tree(pairs: &[FlowGroup], bytes: &ByteSplits, fallback: &ByteSplits) -> Vec<VolumeSource> {
-    let mut out: Vec<VolumeSource> = Vec::new();
+    let mut out: Vec<(Vec<String>, Vec<VolumeNode>)> = Vec::new();
+    let mut at: BTreeMap<&[String], usize> = BTreeMap::new();
     for g in pairs {
         let key = (g.src.clone(), g.dst.clone());
         let node = VolumeNode {
@@ -165,25 +187,25 @@ pub fn tree(pairs: &[FlowGroup], bytes: &ByteSplits, fallback: &ByteSplits) -> V
                 .copied()
                 .unwrap_or_default(),
         };
-        match out.iter_mut().find(|s| s.node.group.src == g.src) {
-            Some(s) => s.dsts.push(node),
-            // The source's own node is summed once its pairs are in.
-            None => out.push(VolumeSource {
-                node: VolumeNode {
-                    group: g.clone(),
-                    bytes: Split::default(),
-                },
-                dsts: vec![node],
-            }),
+        match at.get(g.src.as_slice()) {
+            Some(&i) => out[i].1.push(node),
+            None => {
+                at.insert(&g.src, out.len());
+                out.push((g.src.clone(), vec![node]));
+            }
         }
     }
-    for s in &mut out {
-        s.node = source_node(&s.node.group.src, &s.dsts);
-    }
-    out
+    out.into_iter()
+        .map(|(src, dsts)| VolumeSource {
+            node: Arc::new(source_node(&src, &dsts)),
+            dsts: dsts.into_iter().map(Arc::new).collect(),
+        })
+        .collect()
 }
 
-/// A source's own row: its pairs summed.
+/// A source's own row: its pairs summed, compare mode's gone pairs left
+/// out (baseline traffic is not the result's) unless every pair is gone;
+/// its change joined from every pair's.
 fn source_node(src: &[String], dsts: &[VolumeNode]) -> VolumeNode {
     let mut g = FlowGroup {
         src: src.to_vec(),
@@ -201,7 +223,8 @@ fn source_node(src: &[String], dsts: &[VolumeNode]) -> VolumeNode {
         change: None,
     };
     let mut bytes = Split::default();
-    for d in dsts {
+    let all_gone = dsts.iter().all(VolumeNode::is_gone);
+    for d in dsts.iter().filter(|d| all_gone || !d.is_gone()) {
         let p = &d.group;
         g.flows += p.flows;
         g.connections += p.connections;
@@ -234,7 +257,7 @@ fn source_node(src: &[String], dsts: &[VolumeNode]) -> VolumeNode {
 /// Sources by `w`, heaviest first, and each source's destinations the same
 /// way; ties by name.
 pub fn sort(sources: &mut [VolumeSource], w: Weight) {
-    let by = |a: &VolumeNode, b: &VolumeNode| {
+    let by = |a: &Arc<VolumeNode>, b: &Arc<VolumeNode>| {
         b.weight(w)
             .cmp(&a.weight(w))
             .then_with(|| a.group.src.cmp(&b.group.src))
@@ -257,9 +280,23 @@ pub fn keep_changes(sources: &mut Vec<VolumeSource>, show: ChangeSet) {
     sources.retain(|s| show.keeps(s.node.group.change.as_ref()) || !s.dsts.is_empty());
     for s in sources.iter_mut() {
         if !show.keeps(s.node.group.change.as_ref()) {
-            s.node.group.change = None;
+            Arc::make_mut(&mut s.node).group.change = None;
         }
     }
+}
+
+/// The scale every bar shares: the heaviest source in `w`, a source
+/// holding only baseline traffic (gone) counted only when no other is
+/// left.
+pub fn scale(sources: &[VolumeSource], w: Weight) -> u64 {
+    let max = |gone: bool| {
+        sources
+            .iter()
+            .filter(|s| gone || !s.node.is_gone())
+            .map(|s| s.node.weight(w))
+            .max()
+    };
+    max(false).or_else(|| max(true)).unwrap_or(0)
 }
 
 /// The cells of a bar for `split` on a scale where `scale` fills `width`:
@@ -338,7 +375,7 @@ mod tests {
         assert_eq!(total, 4_109, "every connection, nothing folded");
         for s in &t {
             assert!(s.node.group.dst.is_empty());
-            let sum = |f: fn(&VolumeNode) -> u64| s.dsts.iter().map(f).sum::<u64>();
+            let sum = |f: fn(&VolumeNode) -> u64| s.dsts.iter().map(|d| f(d)).sum::<u64>();
             assert_eq!(sum(|d| d.group.connections), s.node.group.connections);
             assert_eq!(sum(|d| d.group.bytes), s.node.group.bytes);
             assert_eq!(sum(|d| d.group.flows), s.node.group.flows);
@@ -417,7 +454,7 @@ mod tests {
         assert_eq!(s(1, 0, 999).blocked_text(), "99% blocked");
         assert_eq!(s(999, 0, 1).blocked_text(), "1% blocked");
         assert_eq!(s(50, 12, 38).blocked_text(), "38% blocked · 12% pb");
-        assert_eq!(Split::default().blocked_text(), "0% blocked");
+        assert_eq!(Split::default().blocked_text(), "-", "nothing to share");
     }
 
     #[test]
@@ -513,5 +550,72 @@ mod tests {
             t.iter()
                 .all(|s| s.node.group.change.map(|c| c.change) == Some(Change::Gone))
         );
+    }
+
+    #[test]
+    fn a_gone_pair_never_weighs_in_its_source_nor_the_scale() {
+        let pair = |dst: &str, conns: u64, blocked: u64, c: Change| FlowGroup {
+            src: vec!["pos".into(), "Staging".into()],
+            dst: vec![dst.into()],
+            service: None,
+            flows: 1,
+            connections: conns,
+            bytes: conns * 10,
+            allowed: u64::from(blocked == 0),
+            potentially_blocked: 0,
+            blocked: u64::from(blocked > 0),
+            conns: crate::traffic::aggregate::ConnsByDecision {
+                allowed_conns: conns - blocked,
+                blocked_conns: blocked,
+                ..Default::default()
+            },
+            draft: None,
+            marks: None,
+            change: Some(change(c)),
+        };
+        let other = FlowGroup {
+            src: vec!["ordering".into(), "Prod".into()],
+            ..pair("x", 500, 0, Change::Same)
+        };
+        let pairs = vec![
+            pair("ordering", 100, 0, Change::Same),
+            pair("payment", 900, 900, Change::Gone),
+            other,
+        ];
+        let mut t = tree(&pairs, &ByteSplits::new(), &ByteSplits::new());
+        sort(&mut t, Weight::Connections);
+        let pos = &t[1];
+        assert_eq!(
+            pos.node.group.src,
+            ["pos", "Staging"],
+            "the result's 100 under 500"
+        );
+        assert_eq!(pos.node.weight(Weight::Connections), 100);
+        assert_eq!(pos.node.blocked_text(), "0% blocked");
+        assert_eq!(
+            pos.node.group.change.map(|c| c.change),
+            Some(Change::Changed)
+        );
+        assert_eq!(pos.dsts.len(), 2, "the gone pair still shows, on its own");
+        assert_eq!(scale(&t, Weight::Connections), 500);
+        // Every pair gone: the source is gone, with its baseline traffic,
+        // and sets the scale only when no other source is left.
+        let gone = vec![pair("payment", 900, 900, Change::Gone)];
+        let g = tree(&gone, &ByteSplits::new(), &ByteSplits::new());
+        assert_eq!(g[0].node.weight(Weight::Connections), 900);
+        assert!(g[0].node.is_gone());
+        assert_eq!(scale(&g, Weight::Connections), 900);
+        let mut both = t.clone();
+        both.extend(g);
+        assert_eq!(scale(&both, Weight::Connections), 500);
+    }
+
+    #[test]
+    fn the_share_is_of_the_connections_in_either_weight() {
+        let t = rich();
+        for s in &t {
+            let conns = s.node.split(Weight::Connections).blocked_text();
+            assert_eq!(s.node.blocked_text(), conns);
+        }
     }
 }
