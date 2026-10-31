@@ -786,6 +786,96 @@ async fn groups_counts_equal_the_rows_printed_with_and_without_services() {
     server.verify().await;
 }
 
+/// #90: `--app SHOP/Prod` finds the app `shop/prod`: the same two queries
+/// (a side each) with the labels' hrefs, and the flows kept by the PCE's
+/// spelling.
+#[tokio::test(flavor = "multi_thread")]
+async fn app_in_another_case_sends_the_labels_and_keeps_the_flows() {
+    let server = MockServer::start().await;
+    mount_objects(&server).await;
+    mount_window(
+        &server,
+        "recent",
+        RECENT_START,
+        RECENT_END,
+        10_000,
+        4,
+        &recent(),
+        4,
+    )
+    .await;
+    let home = tempfile::tempdir().unwrap();
+    let run = |app: &str| {
+        json_out(
+            cmd(&server, home.path())
+                .args(["traffic", "query", "--group", "app,env", "--app", app])
+                .args(WINDOW)
+                .assert()
+                .success(),
+        )
+    };
+    let exact = run("shop/prod");
+    assert!(!exact["data"].as_array().unwrap().is_empty());
+    let posts = |v: Vec<wiremock::Request>| -> Vec<Value> {
+        v.iter()
+            .filter(|r| r.method.as_str() == "POST")
+            .map(|r| serde_json::from_slice(&r.body).unwrap())
+            .collect()
+    };
+    let first = posts(server.received_requests().await.unwrap());
+    assert_eq!(first.len(), 2);
+    let other = run("SHOP/Prod");
+    assert_eq!(other["data"], exact["data"]);
+    let all = posts(server.received_requests().await.unwrap());
+    assert_eq!(all.len(), 4);
+    for i in 0..2 {
+        assert_eq!(all[i]["sources"], all[i + 2]["sources"]);
+        assert_eq!(all[i]["destinations"], all[i + 2]["destinations"]);
+    }
+    server.verify().await;
+}
+
+/// #90: `--src app=WEB` with two labels `Web` and `web` is exit 2 naming
+/// both, before any traffic request.
+#[tokio::test(flavor = "multi_thread")]
+async fn an_ambiguous_label_in_src_is_exit_2_and_sends_no_traffic_query() {
+    let server = MockServer::start().await;
+    mount_objects(&server).await;
+    let labels = r#"[
+        {"href":"/orgs/5/labels/1","key":"app","value":"Web"},
+        {"href":"/orgs/5/labels/2","key":"app","value":"web"}]"#;
+    Mock::given(method("GET"))
+        .and(path("/api/v2/orgs/5/labels"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_string(labels)
+                .insert_header("Content-Type", "application/json"),
+        )
+        .with_priority(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/api/v2/orgs/5/traffic_flows/async_queries"))
+        .respond_with(ResponseTemplate::new(500))
+        .expect(0)
+        .mount(&server)
+        .await;
+    let home = tempfile::tempdir().unwrap();
+    for side in ["--src", "--dst"] {
+        let a = cmd(&server, home.path())
+            .args(["traffic", "query", side, "app=WEB"])
+            .args(WINDOW)
+            .assert()
+            .code(2);
+        assert!(
+            stderr(&a).contains("app=WEB matches app=Web and app=web; write one exactly"),
+            "{}",
+            stderr(&a)
+        );
+    }
+    server.verify().await;
+}
+
 /// `--app` with `--baseline`: one query per side for each window, 4 POSTs,
 /// pinned; `meta.queries` counts them; the baseline guard names the runs.
 #[tokio::test(flavor = "multi_thread")]

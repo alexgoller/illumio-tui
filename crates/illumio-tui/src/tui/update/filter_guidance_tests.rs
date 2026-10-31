@@ -229,6 +229,47 @@ fn a_failed_query_from_the_editor_reopens_it_editable_with_the_error() {
     assert_eq!(traffic_editor(&m).values[1], "app=sho");
 }
 
+/// #90: the ambiguity of a label in the filter (the text `resolve_actor`
+/// gives) comes back to the open editor, which stays editable.
+#[test]
+fn an_ambiguous_label_reopens_the_editor_with_the_names() {
+    let label = |n: u32, v: &str| -> pce::models::Label {
+        serde_json::from_value(serde_json::json!({
+            "href": format!("/orgs/5/labels/{n}"), "key": "app", "value": v
+        }))
+        .unwrap()
+    };
+    let idx = pce::NameIndex::new(&[label(1, "Web"), label(2, "web")], &[], &[], &[]);
+    let err = pce::traffic::resolve_actor(
+        &pce::traffic::FilterExpr::parse("app=WEB").unwrap(),
+        &idx,
+        &[],
+    )
+    .unwrap_err()
+    .to_string();
+    let mut m = traffic_typed(1, "app=WEB");
+    let cmds = enter(&mut m);
+    let [Cmd::RunQuery { seq, .. }] = &cmds[..] else {
+        panic!("{cmds:?}")
+    };
+    let seq = *seq;
+    update(
+        &mut m,
+        Msg::QueryDone {
+            seq,
+            result: Err(err),
+        },
+    );
+    let e = traffic_editor(&m);
+    assert!(
+        e.error
+            .as_deref()
+            .is_some_and(|x| x.contains("app=WEB matches app=Web and app=web; write one exactly")),
+        "{e:?}"
+    );
+    assert_eq!(e.values[1], "app=WEB");
+}
+
 #[test]
 fn a_failed_query_not_from_the_editor_keeps_the_old_behaviour() {
     let mut m = traffic_typed(1, "app=shop");

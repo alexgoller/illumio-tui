@@ -954,6 +954,17 @@ fn app_by_name_ignores_case_and_refuses_an_ambiguous_label() {
     assert!(m.gen_view.is_some(), "{}", m.status.text);
     m.gen_view = None;
     m.overlay = Overlay::None;
+    quiet(
+        &mut m,
+        Msg::Command(Command::Focus(Some("SHOP/Prod".into()))),
+    );
+    assert_eq!(
+        m.traffic.focus.as_ref().map(|f| f.app_text()).as_deref(),
+        Some("shop/prod"),
+        "{}",
+        m.status.text
+    );
+    m.traffic.focus = None;
     update(
         &mut m,
         Msg::Command(Command::Enforce(Some("SHOP/Prod".into()))),
@@ -985,6 +996,7 @@ fn app_by_name_ignores_case_and_refuses_an_ambiguous_label() {
         Command::App(Some("WEB/prod".into())),
         Command::Gen(Some("WEB/prod".into())),
         Command::Enforce(Some("WEB/prod".into())),
+        Command::Focus(Some("WEB/prod".into())),
     ] {
         m.status = StatusLine::info("");
         quiet(&mut m, Msg::Command(c));
