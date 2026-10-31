@@ -523,9 +523,20 @@ fn same_place(ctx: &Context, rec: &ChangeRecord, path: &Path) -> Result<(), CliE
     Ok(())
 }
 
+/// `--app` spelt as the PCE has its labels (#90), so the records, which
+/// name the app that way, are found; the name index is the cached read the
+/// command makes anyway.
+async fn spelt_app(ctx: &Context, text: &str) -> Result<String, CliError> {
+    let keys = keys_or_default(&ctx.config.scope_keys);
+    let idx = ctx.pce.name_index(ctx.cache_mode).await?;
+    canonical_app(&parse_app(text), &keys, &idx)
+        .map(|a| a.join("/"))
+        .map_err(CliError::Args)
+}
+
 async fn rollback(ctx: &Context, a: &EnforceArgs) -> Result<(), CliError> {
     let guard = write::prepare(ctx, &a.write)?;
-    let app = parse_app(&a.app).join("/");
+    let app = spelt_app(ctx, &a.app).await?;
     let dir = writable_records_dir()?;
     let (path, rec) = match &a.record {
         Some(p) => (p.clone(), read_record(p)?),
@@ -713,7 +724,7 @@ async fn watch(ctx: &Context, a: &EnforceArgs) -> Result<(), CliError> {
                 let p = PathBuf::from(s);
                 let rec = read_record(&p)?;
                 same_place(ctx, &rec, &p)?;
-                if rec.app != parse_app(&a.app).join("/") {
+                if rec.app != spelt_app(ctx, &a.app).await? {
                     return Err(CliError::Args(format!(
                         "{} is a record of {}, not {}",
                         p.display(),
@@ -725,7 +736,7 @@ async fn watch(ctx: &Context, a: &EnforceArgs) -> Result<(), CliError> {
             }
         },
         None => {
-            let app = parse_app(&a.app).join("/");
+            let app = spelt_app(ctx, &a.app).await?;
             let (p, rec) = newest(ctx, &records_dir()?, &app)?;
             (record_at(&rec, &p)?, Some(p))
         }

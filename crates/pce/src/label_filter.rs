@@ -13,7 +13,7 @@
 //! filter runs over workloads already loaded; [`LabelFilter::query_sets`]
 //! is the part the PCE's `labels` query parameter can carry.
 use crate::models::Workload;
-use crate::resolve::NameIndex;
+use crate::resolve::{NameIndex, same_name};
 use std::fmt;
 
 /// The value that stands for "no label for this key".
@@ -205,21 +205,28 @@ impl LabelFilter {
             .iter()
             .map(|t| {
                 let mut out = t.clone();
-                let mut key = None;
+                let mut key: Option<&str> = None;
                 for v in &mut out.values {
                     if let Some(l) = idx.find_label(&t.key, v)? {
-                        key.get_or_insert(l.key);
+                        if key.is_some_and(|k| k != l.key) {
+                            return Err(format!(
+                                "{}={v} names labels of the keys {} and {}; write one exactly",
+                                t.key,
+                                key.unwrap_or_default(),
+                                l.key
+                            ));
+                        }
+                        key = Some(l.key);
                         *v = l.value.to_string();
                     }
                 }
-                let mut same = keys.iter().filter(|k| k.eq_ignore_ascii_case(&t.key));
+                let mut same = keys.iter().filter(|k| same_name(k, &t.key));
                 let only = same.next().filter(|_| same.next().is_none());
-                if let Some(k) = key.or(only.map(String::as_str))
-                    && !keys.contains(&t.key)
-                {
+                if let Some(k) = key.or(only.map(String::as_str)) {
                     out.key = k.to_string();
                 }
-                out.values.dedup();
+                let mut seen = std::collections::HashSet::new();
+                out.values.retain(|v| seen.insert(v.clone()));
                 Ok(out)
             })
             .collect::<Result<Vec<_>, String>>()?;
@@ -232,7 +239,7 @@ impl LabelFilter {
         let mut terms: Vec<LabelTerm> = self
             .terms
             .iter()
-            .filter(|t| !pairs.iter().any(|(k, _)| k.eq_ignore_ascii_case(&t.key)))
+            .filter(|t| !pairs.iter().any(|(k, _)| same_name(k, &t.key)))
             .cloned()
             .collect();
         terms.extend(pairs.iter().map(|(k, v)| LabelTerm {
@@ -679,6 +686,44 @@ mod tests {
         // A key no label has stays as typed.
         let key = LabelFilter::parse("os=x").unwrap().resolved(&idx).unwrap();
         assert_eq!(key.to_string(), "os=x");
+    }
+
+    #[test]
+    fn resolved_drops_repeats_and_names_values_under_different_keys() {
+        let idx = spelling_index();
+        let f = LabelFilter::parse("app=Ordering,x,ordering").unwrap();
+        assert_eq!(f.resolved(&idx).unwrap().to_string(), "app=Ordering,x");
+        let label = |n: u32, k: &str, v: &str| -> crate::models::Label {
+            serde_json::from_value(serde_json::json!({
+                "href": format!("/orgs/5/labels/{n}"), "key": k, "value": v
+            }))
+            .unwrap()
+        };
+        let two = NameIndex::new(&[label(1, "app", "X"), label(2, "App", "Y")], &[], &[], &[]);
+        // `app=X` is the lowercase key's; `app=Y` only the other's.
+        assert_eq!(
+            LabelFilter::parse("app=Y")
+                .unwrap()
+                .resolved(&two)
+                .unwrap()
+                .to_string(),
+            "App=Y"
+        );
+        assert!(
+            LabelFilter::parse("app=X,Y")
+                .unwrap()
+                .resolved(&two)
+                .is_err()
+        );
+        let de = NameIndex::new(&[label(3, "loc", "München")], &[], &[], &[]);
+        assert_eq!(
+            LabelFilter::parse("LOC=münchen")
+                .unwrap()
+                .resolved(&de)
+                .unwrap()
+                .to_string(),
+            "loc=München"
+        );
     }
 
     #[test]

@@ -335,7 +335,7 @@ fn named_by_value(labels: &[Label], value: &str) -> Result<HashSet<String>, CliE
     hrefs.extend(
         labels
             .iter()
-            .filter(|l| l.is_deleted() && l.value.eq_ignore_ascii_case(value))
+            .filter(|l| l.is_deleted() && pce::same_name(&l.value, value))
             .map(|l| l.href.clone()),
     );
     Ok(hrefs)

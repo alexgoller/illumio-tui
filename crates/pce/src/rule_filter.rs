@@ -46,7 +46,7 @@ use crate::label_filter::{LabelTerm, split_outside_quotes, strip_quotes};
 use crate::models::{
     Actor, DenyRule, IngressService, Label, Rule, RuleSet, Workload, proto_number,
 };
-use crate::resolve::{NameIndex, RuleKind};
+use crate::resolve::{NameIndex, RuleKind, same_name};
 use std::fmt;
 
 /// A port a `svc:` term asks for: `443/tcp`, or `443` (tcp or udp).
@@ -549,11 +549,7 @@ fn resolve_term(
 ) {
     match t {
         RuleTerm::Label(l) | RuleTerm::At(_, ActorTerm::Label(l)) => {
-            if !idx
-                .label_keys()
-                .iter()
-                .any(|k| k.eq_ignore_ascii_case(&l.key))
-            {
+            if !idx.label_keys().iter().any(|k| same_name(k, &l.key)) {
                 out.push(format!("unknown key {}", l.key));
             } else {
                 // Any case (#90): only a value no label has, or several do, is named.
@@ -651,8 +647,8 @@ fn workload_hit(a: &Actor, name: &str, workloads: &[Workload]) -> bool {
 /// several in other cases name none).
 fn named(idx: &NameIndex, l: &Label, key: &str, value: &str) -> bool {
     (l.key == key && l.value == value)
-        || (l.key.eq_ignore_ascii_case(key)
-            && l.value.eq_ignore_ascii_case(value)
+        || (same_name(&l.key, key)
+            && same_name(&l.value, value)
             && idx
                 .find_label(key, value)
                 .ok()

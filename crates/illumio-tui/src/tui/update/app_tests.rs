@@ -938,6 +938,61 @@ fn a_name_keyed_app_requests_nothing_for_workloads_or_policy() {
     assert!(matches!(&v.policy, Loadable::Unavailable(_)));
 }
 
+/// #90: `:app`, `:gen` and `:enforce` take the app in any case and work on
+/// the PCE's spelling (the flows are found); two labels that differ only in
+/// case are a status line, nothing sent.
+#[test]
+fn app_by_name_ignores_case_and_refuses_an_ambiguous_label() {
+    let mut m = everything();
+    let cmds = update(&mut m, Msg::Command(Command::App(Some("SHOP/Prod".into()))));
+    assert_eq!(m.overlay, Overlay::App, "{}", m.status.text);
+    assert_eq!(requests(&cmds), 0, "workloads and rulesets are loaded");
+    assert_eq!(view(&m).focus.app_text(), "shop/prod");
+    assert!(!view(&m).inbound.is_empty() || !view(&m).outbound.is_empty());
+    quiet(&mut m, kc(KeyCode::Esc));
+    update(&mut m, Msg::Command(Command::Gen(Some("SHOP/Prod".into()))));
+    assert!(m.gen_view.is_some(), "{}", m.status.text);
+    m.gen_view = None;
+    m.overlay = Overlay::None;
+    update(
+        &mut m,
+        Msg::Command(Command::Enforce(Some("SHOP/Prod".into()))),
+    );
+    assert!(m.overlay == Overlay::Enforce, "{}", m.status.text);
+    m.overlay = Overlay::None;
+    // Two labels of one key differing in case.
+    let label = |n: u32, k: &str, v: &str| -> pce::models::Label {
+        serde_json::from_value(serde_json::json!({
+            "href": format!("/orgs/5/labels/{n}"), "key": k, "value": v
+        }))
+        .unwrap()
+    };
+    let idx = pce::NameIndex::new(
+        &[
+            label(1, "app", "Web"),
+            label(2, "app", "web"),
+            label(3, "env", "prod"),
+        ],
+        &[],
+        &[],
+        &[],
+    );
+    if let crate::tui::model::Connection::Connected { index, .. } = &mut m.connection {
+        *index = Some(std::sync::Arc::new(idx));
+    }
+    let msg = "app=WEB matches app=Web and app=web; write one exactly; nothing sent";
+    for c in [
+        Command::App(Some("WEB/prod".into())),
+        Command::Gen(Some("WEB/prod".into())),
+        Command::Enforce(Some("WEB/prod".into())),
+    ] {
+        m.status = StatusLine::info("");
+        quiet(&mut m, Msg::Command(c));
+        assert_eq!(m.overlay, Overlay::None);
+        assert_eq!(m.status.text, msg);
+    }
+}
+
 #[test]
 fn app_by_name_reaches_apps_without_flows_and_names_the_closest_otherwise() {
     let mut m = everything();

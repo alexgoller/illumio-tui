@@ -24,17 +24,41 @@ pub(super) fn app_open_key(model: &mut Model) -> Vec<Cmd> {
     open_app(model, focus)
 }
 
+/// `name` as an app, its label values spelt as the PCE has them (#90:
+/// `SHOP/prod` finds `Shop/Prod`) once the name index is loaded; several
+/// labels differing only in case are a status line, nothing sent.
+pub(super) fn typed_app(
+    model: &mut Model,
+    keys: &[String],
+    name: &str,
+) -> Option<pce::traffic::GroupKey> {
+    let app = pce::traffic::parse_app(name);
+    let Some(idx) = model.index() else {
+        return Some(app);
+    };
+    match pce::traffic::canonical_app(&app, keys, idx) {
+        Ok(app) => Some(app),
+        Err(e) => {
+            model.status = StatusLine::warn(format!("{e}; nothing sent"));
+            None
+        }
+    }
+}
+
 /// `:app <app>` and the picker: an app of the loaded result, or one whose
 /// labels the name index knows (it may have no flows in the window); else
 /// the closest match in the status line, nothing sent.
 pub(super) fn open_app_by_name(model: &mut Model, name: &str) -> Vec<Cmd> {
     let keys = model.traffic.keys.clone();
     let apps = model.traffic.loaded_apps();
-    let app = pce::traffic::parse_app(name);
+    let Some(app) = typed_app(model, &keys, name) else {
+        return Vec::new();
+    };
+    let text = app.join("/");
     let labelled = model
         .index()
         .map(|idx| pce::traffic::app_labels(&app, &keys, idx));
-    if !apps.iter().any(|a| a == name) && !matches!(labelled, Some(Ok(_))) {
+    if !apps.iter().any(|a| *a == text) && !matches!(labelled, Some(Ok(_))) {
         let near = pce::traffic::closest(name, &apps, 3);
         model.status = StatusLine::warn(match (near.is_empty(), labelled) {
             (false, _) => format!(
@@ -56,12 +80,15 @@ pub(super) fn open_app_by_name(model: &mut Model, name: &str) -> Vec<Cmd> {
 /// or the labels), then the generator for it.
 pub(super) fn gen_by_name(model: &mut Model, name: &str) -> Vec<Cmd> {
     let keys = model.traffic.keys.clone();
-    let app = pce::traffic::parse_app(name);
+    let Some(app) = typed_app(model, &keys, name) else {
+        return Vec::new();
+    };
+    let text = app.join("/");
     let loaded = model.traffic.loaded_apps();
     let labelled = model
         .index()
         .map(|idx| pce::traffic::app_labels(&app, &keys, idx));
-    if !loaded.iter().any(|a| a == name) && !matches!(labelled, Some(Ok(_))) {
+    if !loaded.iter().any(|a| *a == text) && !matches!(labelled, Some(Ok(_))) {
         let near = pce::traffic::closest(name, &loaded, 3);
         model.status = StatusLine::warn(match (near.is_empty(), labelled) {
             (false, _) => format!(

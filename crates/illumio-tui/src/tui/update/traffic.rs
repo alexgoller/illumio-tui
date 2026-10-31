@@ -937,9 +937,13 @@ pub(super) fn focus_by_name(model: &mut Model, name: &str) {
         return;
     }
     let apps = model.traffic.loaded_apps();
-    if apps.iter().any(|a| a == name) {
+    let keys = model.traffic.keys.clone();
+    let Some(app) = super::app_overlay::typed_app(model, &keys, name) else {
+        return;
+    };
+    if apps.iter().any(|a| *a == app.join("/")) {
         model.screen = Screen::Traffic;
-        focus_on(model, pce::traffic::parse_app(name));
+        focus_on(model, app);
         return;
     }
     let near = pce::traffic::closest(name, &apps, 3);

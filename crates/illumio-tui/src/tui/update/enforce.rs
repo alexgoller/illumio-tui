@@ -257,12 +257,15 @@ pub(super) fn trend_loaded(
 /// else the closest match, nothing sent.
 pub(super) fn enforce_by_name(model: &mut Model, name: &str) -> Vec<Cmd> {
     let keys = keys_or_default(&model.limits.scope_keys);
-    let app = pce::traffic::parse_app(name);
+    let Some(app) = super::app_overlay::typed_app(model, &keys, name) else {
+        return Vec::new();
+    };
+    let text = app.join("/");
     let loaded = pce::traffic::apps_in(model.traffic.loaded_flows(), &keys);
     let labelled = model
         .index()
         .map(|idx| pce::traffic::app_labels(&app, &keys, idx));
-    if !loaded.iter().any(|a| a == name) && !matches!(labelled, Some(Ok(_))) {
+    if !loaded.iter().any(|a| *a == text) && !matches!(labelled, Some(Ok(_))) {
         let near = pce::traffic::closest(name, &loaded, 3);
         model.status = StatusLine::warn(match (near.is_empty(), labelled) {
             (false, _) => format!(

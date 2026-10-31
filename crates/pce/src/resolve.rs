@@ -25,6 +25,12 @@ pub struct ResolvedLabel {
     pub value: String,
 }
 
+/// Two names alike without case, by full Unicode lowercasing (`Ü` and `ü`),
+/// as the bare values of #88 are compared.
+pub fn same_name(a: &str, b: &str) -> bool {
+    a == b || a.to_lowercase() == b.to_lowercase()
+}
+
 /// A label found by [`NameIndex::find_label`], in its real spelling.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct LabelRef<'a> {
@@ -199,8 +205,8 @@ impl NameIndex {
         }
         let mut hits: Vec<LabelRef<'_>> = Vec::new();
         for (k, values) in &self.keys {
-            if k.eq_ignore_ascii_case(key) {
-                for v in values.iter().filter(|v| v.eq_ignore_ascii_case(value)) {
+            if same_name(k, key) {
+                for v in values.iter().filter(|v| same_name(v, value)) {
                     hits.extend(at(k, v));
                 }
             }
@@ -817,6 +823,11 @@ mod tests {
         assert_eq!(
             at("app", "wEb"),
             Err("app=wEb matches app=WEB, app=Web and app=web; write one exactly".into())
+        );
+        let de = NameIndex::new(&[label(6, "loc", "München")], &[], &[], &[]);
+        assert_eq!(
+            de.find_label("LOC", "münchen").unwrap().map(|l| l.value),
+            Some("München")
         );
         // The write path stays exact.
         assert_eq!(idx.label_href("app", "ordering"), None);

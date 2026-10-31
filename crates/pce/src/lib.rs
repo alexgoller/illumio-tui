@@ -46,7 +46,7 @@ pub use key_order::KeyOrder;
 pub use label_filter::{LabelFilter, LabelTerm};
 pub use resolve::{
     LabelRef, NameIndex, ResolvedActor, ResolvedLabel, ResolvedService, RuleKind, RuleSetView,
-    RuleView, describe_actor, describe_ingress_service, pane_order,
+    RuleView, describe_actor, describe_ingress_service, pane_order, same_name,
 };
 pub use rule_filter::{ActorTerm, Position, RuleFilter, RuleRef, RuleTerm};
 

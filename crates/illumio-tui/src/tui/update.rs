@@ -830,6 +830,7 @@ fn on_msg(model: &mut Model, msg: Msg) -> Vec<Cmd> {
                         // The rules pane's names and stored impacts follow.
                         model.rebuild_rules();
                         model.refresh_confirm_impact();
+                        model.refresh_label_warnings();
                     }
                 }
                 Err(e) => {
